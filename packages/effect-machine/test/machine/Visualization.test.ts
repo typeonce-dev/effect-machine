@@ -77,15 +77,14 @@ const initial = {
 const initialWorkflow = (): Machine.Machine.CompleteSnapshotContaining<{
   readonly "": typeof States.node
 }, "application.workflow"> => initial
-const targets1 = Machine.targets(States)
 const machineDefinition = Machine.make({
   branches: {
     start: {
-      running: { target: targets1.root.application.workflow.running, update: targets1.root.application.workflow }
+      running: { target: "application.workflow.running", update: "application.workflow" }
     },
-    unsafe: { disabled: { target: targets1.root.disabled } },
-    transition1: { destination: { update: targets1.root.application.workflow } },
-    transition2: { destination: { target: targets1.root.application.connection.offline } }
+    unsafe: { disabled: { target: "disabled" } },
+    transition1: { destination: { update: "application.workflow" } },
+    transition2: { destination: { target: "application.connection.offline" } }
   },
   id: "inspection-example",
   root: States,
@@ -95,7 +94,7 @@ const machineDefinition = Machine.make({
 const makeMachine = (unsafeStart = false) =>
   machineDefinition.handle({
     initial: {
-      target: Machine.targets(States).root.application,
+      target: "application",
       decoded: true,
       data: new Application({})
     },
@@ -108,7 +107,7 @@ const makeMachine = (unsafeStart = false) =>
         states: {
           workflow: {
             initial: {
-              target: Machine.targets(States).root.application.workflow.idle,
+              target: "application.workflow.idle",
               decoded: true,
               data: new Idle({})
             },
@@ -139,12 +138,12 @@ const makeMachine = (unsafeStart = false) =>
                           update: { data: new Workflow({}), decoded: true }
                         })
                     },
-                  Refresh: { update: targets1.root.application.workflow, decoded: true, data: () => (new Workflow({})) }
+                  Refresh: { update: "application.workflow", decoded: true, data: () => (new Workflow({})) }
                 }
               },
               running: {
                 initial: {
-                  target: Machine.targets(States).root.application.workflow.running.editing,
+                  target: "application.workflow.running.editing",
                   decoded: true,
                   data: ({}) => new Editing({})
                 },
@@ -157,7 +156,7 @@ const makeMachine = (unsafeStart = false) =>
           },
           connection: {
             initial: {
-              target: Machine.targets(States).root.application.connection.online,
+              target: "application.connection.online",
               decoded: true,
               data: new Online({})
             },
@@ -165,7 +164,7 @@ const makeMachine = (unsafeStart = false) =>
               online: {
                 on: {
                   Disconnect: {
-                    target: targets1.root.application.connection.offline,
+                    target: "application.connection.offline",
                     decoded: true,
                     data: () => (new Offline({}))
                   }
@@ -197,11 +196,10 @@ const LifecycleStates = Machine.state({
     disabled: Disabled
   }
 })
-const targets2 = Machine.targets(LifecycleStates)
 const lifecycleDefinition = Machine.make({
   branches: {
-    transition1: { destination: { target: targets2.root.workflow } },
-    transition2: { destination: { target: targets2.root.disabled } }
+    transition1: { destination: { target: "workflow" } },
+    transition2: { destination: { target: "disabled" } }
   },
   id: "lifecycle-inspection",
   root: LifecycleStates,
@@ -210,7 +208,7 @@ const lifecycleDefinition = Machine.make({
 const makeLifecycleMachine = (unsafe: "always" | "done" | undefined = undefined) =>
   lifecycleDefinition.handle({
     initial: {
-      target: Machine.targets(LifecycleStates).root.idle,
+      target: "idle",
       decoded: true,
       data: new Idle({})
     },
@@ -232,7 +230,7 @@ const makeLifecycleMachine = (unsafe: "always" | "done" | undefined = undefined)
       },
       workflow: {
         initial: {
-          target: Machine.targets(LifecycleStates).root.workflow.complete
+          target: "workflow.complete"
         },
         onDone: {
           branches: "transition2",
@@ -262,7 +260,7 @@ describe("Machine structural visualization", () => {
     const root = Machine.state({ states: { Idle: { fields: { count: Schema.Number } } } })
     const inspectOnly = Machine.make({ root, events: Machine.eventsFromSchemas() }).handle({
       initial: {
-        target: Machine.targets(root).root.Idle,
+        target: "Idle",
         data: () => {
           throw new Error("initial constructor unexpectedly executed during inspection")
         }
@@ -348,7 +346,7 @@ describe("Machine structural visualization", () => {
       events: Machine.eventsFromSchemas(Refresh)
     }).handle({
       initial: {
-        target: Machine.targets(root3).root.idle,
+        target: "idle",
         decoded: true,
         data: new Idle({})
       },

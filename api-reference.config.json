@@ -168,10 +168,6 @@
           "description": "Target selection, resolution, branching, and commands available to state and invocation transitions.",
           "roots": [
             {
-              "reflection": "Targets",
-              "label": "State references"
-            },
-            {
               "reflection": "Machine.Transition",
               "label": "Inline transitions"
             },

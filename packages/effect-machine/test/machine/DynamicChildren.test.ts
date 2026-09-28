@@ -39,7 +39,6 @@ describe("dynamic child machines", () => {
         },
         states: { PlantActive }
       })
-      const targets1 = Machine.targets(plantStates)
       const plantMachine = Machine.make({
         root: plantStates,
         events: Machine.eventsFromSchemas(Produce, Report),
@@ -47,7 +46,7 @@ describe("dynamic child machines", () => {
         parent: Machine.parent(PlantOwnerEvents)
       }).handle({
         initial: {
-          target: Machine.targets(plantStates).root.PlantActive,
+          target: "PlantActive",
           decoded: true,
           data: ({ root: { input: input } }) => new PlantActive({ id: input.id, produced: input.production })
         },
@@ -56,7 +55,7 @@ describe("dynamic child machines", () => {
           PlantActive: {
             on: {
               Produce: {
-                target: targets1.root.PlantActive,
+                target: "PlantActive",
                 decoded: true,
                 data: ({ event, state }) => (new PlantActive({ ...state, produced: state.produced + event.amount }))
               },
@@ -93,7 +92,6 @@ describe("dynamic child machines", () => {
         },
         states: { Commissioning, Operating }
       })
-      const targets2 = Machine.targets(parentStates)
       const parentMachine = Machine.make({
         effects: {
           source1: ({ children, state }: Machine.Machine.InvokeContext<
@@ -120,7 +118,7 @@ describe("dynamic child machines", () => {
         input: Schema.Array(PlantInput)
       }).handle({
         initial: {
-          target: Machine.targets(parentStates).root.Commissioning,
+          target: "Commissioning",
           decoded: true,
           data: ({ root: { input: input } }) => new Commissioning({ plants: input })
         },
@@ -131,19 +129,19 @@ describe("dynamic child machines", () => {
               src: "source1",
               id: "commission-wave",
               input: (context) => context,
-              onDone: { target: targets2.root.Operating, decoded: true, data: () => (new Operating({ reports: 0 })) },
+              onDone: { target: "Operating", decoded: true, data: () => (new Operating({ reports: 0 })) },
               onFailure: { none: true }
             }
           },
           Operating: {
             on: {
               PlantReported: {
-                target: targets2.root.Operating,
+                target: "Operating",
                 decoded: true,
                 data: ({ state }) => (new Operating({ reports: state.reports + 1 }))
               },
               Grow: {
-                target: targets2.root.Commissioning,
+                target: "Commissioning",
                 decoded: true,
                 data: ({ event }) => (new Commissioning({ plants: event.plants }))
               },
@@ -250,7 +248,7 @@ describe("dynamic child machines", () => {
         events: Machine.eventsFromSchemas()
       }).handle({
         initial: {
-          target: Machine.targets(InitialRoot1).root.ChildIdle,
+          target: "ChildIdle",
           decoded: true,
           data: new ChildIdle({})
         },
@@ -266,7 +264,6 @@ describe("dynamic child machines", () => {
       {
       }
       const root3 = Machine.state({ states: { Starting, DuplicateRejected } })
-      const targets3 = Machine.targets(root3)
       const parentMachine = Machine.make({
         effects: {
           source1: ({ children }: Machine.Machine.InvokeContext<
@@ -292,7 +289,7 @@ describe("dynamic child machines", () => {
         events: Machine.eventsFromSchemas()
       }).handle({
         initial: {
-          target: Machine.targets(root3).root.Starting,
+          target: "Starting",
           decoded: true,
           data: new Starting({})
         },
@@ -303,7 +300,7 @@ describe("dynamic child machines", () => {
               id: "spawn-duplicate",
               input: (context) => context,
               onDone: { none: true },
-              onFailure: { target: targets3.root.DuplicateRejected }
+              onFailure: { target: "DuplicateRejected" }
             }
           },
           DuplicateRejected: {}
@@ -333,7 +330,7 @@ describe("dynamic child machines", () => {
         input: Input
       }).handle({
         initial: {
-          target: Machine.targets(InitialRoot2).root.WorkerIdle,
+          target: "WorkerIdle",
           decoded: true,
           data: ({ root: { input: input } }) => new WorkerIdle({ id: input.id })
         },
@@ -371,7 +368,7 @@ describe("dynamic child machines", () => {
         events: Machine.eventsFromSchemas()
       }).handle({
         initial: {
-          target: Machine.targets(root4).root.Running,
+          target: "Running",
           decoded: true,
           data: new Running({})
         },
@@ -405,13 +402,12 @@ describe("dynamic child machines", () => {
       class Increment extends Schema.TaggedClass<Increment>("DynamicControlIncrement")("Increment", {}) {
       }
       const root5 = Machine.state({ states: { UnitActive } })
-      const targets5 = Machine.targets(root5)
       const unitMachine = Machine.make({
         root: root5,
         events: Machine.eventsFromSchemas(Increment)
       }).handle({
         initial: {
-          target: Machine.targets(root5).root.UnitActive,
+          target: "UnitActive",
           decoded: true,
           data: new UnitActive({ count: 0 })
         },
@@ -419,7 +415,7 @@ describe("dynamic child machines", () => {
           UnitActive: {
             on: {
               Increment: {
-                target: targets5.root.UnitActive,
+                target: "UnitActive",
                 decoded: true,
                 data: ({ state }) => (new UnitActive({ count: state.count + 1 }))
               }
@@ -433,7 +429,6 @@ describe("dynamic child machines", () => {
       class Ready extends Schema.TaggedClass<Ready>("DynamicControlReady")("Ready", {}) {
       }
       const root6 = Machine.state({ states: { Managing, Ready } })
-      const targets6 = Machine.targets(root6)
       const parentMachine = Machine.make({
         effects: {
           source1: ({ children }: Machine.Machine.InvokeContext<
@@ -465,7 +460,7 @@ describe("dynamic child machines", () => {
         events: Machine.eventsFromSchemas()
       }).handle({
         initial: {
-          target: Machine.targets(root6).root.Managing,
+          target: "Managing",
           decoded: true,
           data: new Managing({})
         },
@@ -475,7 +470,7 @@ describe("dynamic child machines", () => {
               src: "source1",
               id: "control-units",
               input: (context) => context,
-              onDone: { target: targets6.root.Ready },
+              onDone: { target: "Ready" },
               onFailure: { none: true }
             }
           },

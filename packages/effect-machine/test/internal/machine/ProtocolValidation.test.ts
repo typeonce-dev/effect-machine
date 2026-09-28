@@ -16,7 +16,7 @@ describe("event validation across execution strategies", () => {
           events
         }).handle({
           initial: {
-            target: Machine.targets(root1).root.Ready,
+            target: "Ready",
             decoded: true,
             data: { _tag: "Ready" }
           },

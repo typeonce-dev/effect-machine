@@ -21,18 +21,17 @@ const States = Machine.state({
 })
 const makeTraceMachine = (onAction: () => void) => {
   const TraceStates = Machine.state({ fields: { input: Schema.toType(TestInput) }, states: { Idle, Ready } })
-  const targets1 = Machine.targets(TraceStates)
   return Machine.make({
     branches: {
-      transition1: { destination: { target: targets1.root.Ready } },
-      transition2: { destination: { target: targets1.root.Ready } }
+      transition1: { destination: { target: "Ready" } },
+      transition2: { destination: { target: "Ready" } }
     },
     root: TraceStates,
     events: Machine.eventsFromSchemas(Start, Add),
     input: TestInput
   }).handle({
     initial: {
-      target: Machine.targets(TraceStates).root.Ready,
+      target: "Ready",
       decoded: true,
       data: ({ root: { input: input } }) => new Ready({ count: input.userId.length - input.userId.length })
     },
@@ -113,7 +112,7 @@ describe("MachineTest", () => {
       input: PositiveInput
     }).handle({
       initial: {
-        target: Machine.targets(States).root.Idle,
+        target: "Idle",
         decoded: true,
         data: new Idle({ userId: "user-1" })
       },
@@ -137,7 +136,7 @@ describe("MachineTest", () => {
       events: Machine.eventsFromSchemas()
     }).handle({
       initial: {
-        target: Machine.targets(States).root.Idle,
+        target: "Idle",
         decoded: true,
         data: new Idle({ userId: "user-1" })
       },
@@ -214,13 +213,12 @@ describe("MachineTest", () => {
           disabled: Disabled
         }
       })
-      const targets2 = Machine.targets(ParallelStates)
       const machine = Machine.make({
         root: ParallelStates,
         events: Machine.eventsFromSchemas(Stop)
       }).handle({
         initial: {
-          target: Machine.targets(ParallelStates).root.app,
+          target: "app",
           decoded: true,
           data: new App({})
         },
@@ -232,26 +230,26 @@ describe("MachineTest", () => {
                 initial: {
                   decoded: true,
                   data: new LeftIdle({}),
-                  target: Machine.targets(ParallelStates).root.app.left.idle
+                  target: "app.left.idle"
                 },
                 states: {
                   idle: {
                     on: {
-                      Stop: { target: targets2.root.disabled, decoded: true, data: () => (new Disabled({})) }
+                      Stop: { target: "disabled", decoded: true, data: () => (new Disabled({})) }
                     }
                   }
                 }
               },
               right: {
                 initial: {
-                  target: Machine.targets(ParallelStates).root.app.right.idle,
+                  target: "app.right.idle",
                   decoded: true,
                   data: new RightIdle({})
                 },
                 states: {
                   idle: {
                     on: {
-                      Stop: { target: targets2.root.disabled, decoded: true, data: () => (new Disabled({})) }
+                      Stop: { target: "disabled", decoded: true, data: () => (new Disabled({})) }
                     }
                   }
                 }
@@ -290,7 +288,7 @@ describe("MachineTest", () => {
         events: Machine.eventsFromSchemas(Start)
       }).handle({
         initial: {
-          target: Machine.targets(root3).root.Idle,
+          target: "Idle",
           decoded: true,
           data: new Idle({ userId: "user-1" })
         },

@@ -13,7 +13,7 @@ describe("MachineTest.verify", () => {
     events: Machine.eventsFromSchemas(Tick)
   }).handle({
     initial: {
-      target: Machine.targets(States).root.idle,
+      target: "idle",
       decoded: true,
       data: new Idle({})
     },

@@ -26,20 +26,19 @@ export const snapshot = {
   value: undefined,
   state: { path: "Ready" as const, value: Ready.make({}) }
 }
-const targets1 = Machine.targets(States)
 export const machine = Machine.make({
   id: "perf-readiness",
   root: States,
   events: Machine.eventsFromSchemas()
 }).handle({
   initial: {
-    target: Machine.targets(States).root.Ready,
+    target: "Ready",
     data: Ready.make({})
   },
   states: {
     Flow: {
       initial: {
-        target: Machine.targets(States).root.Flow.Idle
+        target: "Flow.Idle"
       },
       history: {
         recent: {
@@ -50,7 +49,7 @@ export const machine = Machine.make({
       states: {
         Idle: {},
         Route: {
-          choice: { target: targets1.root.Ready, data: () => (Ready.make({})) }
+          choice: { target: "Ready", data: () => (Ready.make({})) }
         }
       }
     },

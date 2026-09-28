@@ -7,7 +7,7 @@ class InSession extends Schema.TaggedClass<InSession>("ConsumerTypesInSession")(
 }) {}
 const States = Machine.state({
   states: {
-    root: {
+    main: {
       states: {
         Idle: {},
         InSession
@@ -25,9 +25,9 @@ const definition = Machine.make({
   input: StartupInput
 })
 const machine = definition.handle({
-  initial: { target: Machine.targets(States).root.root },
+  initial: { target: "main" },
   states: {
-    root: { initial: { target: Machine.targets(States).root.root.Idle }, states: { Idle: {}, InSession: {} } }
+    main: { initial: { target: "main.Idle" }, states: { Idle: {}, InSession: {} } }
   }
 })
 const voidMachine = Machine.make({
@@ -35,12 +35,12 @@ const voidMachine = Machine.make({
   events: Machine.eventsFromSchemas()
 }).handle({
   initial: {
-    target: Machine.targets(States).root.root
+    target: "main"
   },
   states: {
-    root: {
+    main: {
       initial: {
-        target: Machine.targets(States).root.root.Idle
+        target: "main.Idle"
       },
       states: { Idle: {}, InSession: {} }
     }
@@ -52,26 +52,26 @@ describe("consumer type extractors", () => {
     expect<Machine.Snapshot<typeof machine>>().type.toBe<Machine.Snapshot<typeof States>>()
   })
   it("extracts schema-backed values from defined states and machines", () => {
-    expect<Machine.Value<typeof States, "root.InSession">>().type.toBe<InSession>()
-    expect<Machine.Value<typeof machine, "root.InSession">>().type.toBe<InSession>()
+    expect<Machine.Value<typeof States, "main.InSession">>().type.toBe<InSession>()
+    expect<Machine.Value<typeof machine, "main.InSession">>().type.toBe<InSession>()
     // @ts-expect-error!
-    type MissingPath = Machine.Value<typeof States, "root.Missing">
+    type MissingPath = Machine.Value<typeof States, "main.Missing">
     // @ts-expect-error!
-    type StructuralPath = Machine.Value<typeof States, "root.Idle">
+    type StructuralPath = Machine.Value<typeof States, "main.Idle">
   })
   it("extracts path-rooted snapshots including structural states", () => {
-    expect<Machine.SnapshotAt<typeof States, "root">>().type.toBe<
+    expect<Machine.SnapshotAt<typeof States, "main">>().type.toBe<
       Machine.Machine.SnapshotByIdentifier<{
         readonly "": typeof States.node
-      }, "root">
+      }, "main">
     >()
-    expect<Machine.SnapshotAt<typeof machine, "root.Idle">>().type.toBe<
+    expect<Machine.SnapshotAt<typeof machine, "main.Idle">>().type.toBe<
       Machine.Machine.SnapshotByIdentifier<{
         readonly "": typeof States.node
-      }, "root.Idle">
+      }, "main.Idle">
     >()
     // @ts-expect-error!
-    type MissingPath = Machine.SnapshotAt<typeof machine, "root.Missing">
+    type MissingPath = Machine.SnapshotAt<typeof machine, "main.Missing">
   })
   it("separates decoded startup input from its schema", () => {
     expect<Machine.Machine.Input<typeof machine>>().type.toBe<typeof StartupInput.Type>()

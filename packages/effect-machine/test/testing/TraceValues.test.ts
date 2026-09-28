@@ -11,7 +11,7 @@ const make = (data: unknown) => {
     events: Machine.eventsFromSchemas(Ping)
   }).handle({
     initial: {
-      target: Machine.targets(root1).root.State,
+      target: "State",
       decoded: true,
       data: { _tag: "State", data }
     },

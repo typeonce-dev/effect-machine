@@ -14,18 +14,17 @@ import { Effect } from "effect"
 const Root = Machine.state({
   states: { Locked: {}, Unlocked: {} }
 })
-const targets = Machine.targets(Root)
 const Events = Machine.events({ Coin: {}, Push: {} })
 const Turnstile = Machine.make({
   root: Root,
   events: Events
 }).handle({
   initial: {
-    target: targets.root.Locked
+    target: "Locked"
   },
   states: {
-    Locked: { on: { Coin: { target: targets.root.Unlocked } } },
-    Unlocked: { on: { Push: { target: targets.root.Locked } } }
+    Locked: { on: { Coin: { target: "Unlocked" } } },
+    Unlocked: { on: { Push: { target: "Locked" } } }
   }
 })
 const program = Effect.gen(function*() {

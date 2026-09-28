@@ -8,7 +8,32 @@
 export const makeEffectMachineBenchmarkApi = (Machine) => {
   // The legacy process constructor takes `(initial, transition)`. The static
   // definition constructor is deliberately unary and returns its config.
-  const hasObjectTransitions = typeof Machine.targets === "function"
+  const hasReferenceTargets = typeof Machine.targets === "function"
+  const hasPathTargets = !hasReferenceTargets && typeof Machine.state === "function" && (() => {
+    try {
+      Machine.make({ root: Machine.state({ states: { Probe: {} } }), events: Machine.events({}) })
+        .handle({ initial: { target: "Probe" } })
+      return true
+    } catch {
+      return false
+    }
+  })()
+  const hasObjectTransitions = hasReferenceTargets || hasPathTargets
+  // Destinations are `Machine.targets` references or declared path strings.
+  const destination = Symbol("benchmark destination")
+  const targetTree = (root) => {
+    const build = (node, path, reference) => {
+      const tree = {}
+      Object.defineProperty(tree, destination, { value: reference ?? (path === "" ? "root" : path) })
+      if (typeof node === "object" && node !== null && node.states !== undefined) {
+        for (const [key, child] of Object.entries(node.states)) {
+          tree[key] = build(child, path === "" ? key : `${path}.${key}`, reference?.[key])
+        }
+      }
+      return tree
+    }
+    return build(root.node, "", hasReferenceTargets ? Machine.targets(root).root : undefined)
+  }
   const hasHandlerInitial = hasObjectTransitions && typeof Machine.state === "function" && (() => {
     try {
       Machine.state({ states: { Probe: {} } })
@@ -67,11 +92,11 @@ export const makeEffectMachineBenchmarkApi = (Machine) => {
     snapshot,
     effectLifecycle: hasHandlerInitial ? (work, output) => {
       const root = Machine.state({ states: { Working: {}, Complete: { type: "final", output } } })
-      const targets = Machine.targets(root)
+      const targets = targetTree(root)
       return Machine.make({ root, events: Machine.events({}), effects: { work } }).handle({
-        initial: { target: targets.root.Working },
+        initial: { target: targets.Working[destination] },
         states: {
-          Working: { invoke: { src: "work", onDone: { target: targets.root.Complete } } },
+          Working: { invoke: { src: "work", onDone: { target: targets.Complete[destination] } } },
           Complete: { output: () => undefined }
         }
       })
@@ -97,13 +122,13 @@ export const makeEffectMachineBenchmarkApi = (Machine) => {
         const machine = Machine.make({ ...rest, root, initialConfiguration })
         return { handle: (states) => machine.handle({ states }) }
       }
-      const targets = Machine.targets(root)
+      const targets = targetTree(root)
       const referenceSelectors = (refs) => Object.fromEntries(Object.entries(refs).map(([key, ref]) => {
-        const selected = () => ref
+        const selected = () => ref[destination]
         Object.assign(selected, referenceSelectors(ref))
         return [key, selected]
       }))
-      const selectorsForRoot = referenceSelectors(targets.root)
+      const selectorsForRoot = referenceSelectors(targets)
       const children = {}
       const transition = (value, siblings) => {
         const definition = value?.[transitionDefinition]
@@ -131,7 +156,7 @@ export const makeEffectMachineBenchmarkApi = (Machine) => {
         return [key, result]
       }))
       return { handle: (states) => {
-        const handlers = walk(states, targets.root)
+        const handlers = walk(states, targets)
         if (hasHandlerInitial) {
           const declared = rootDefinitions.get(root)
           if (declared === undefined) throw new Error("Missing benchmark root declaration")
@@ -144,12 +169,12 @@ export const makeEffectMachineBenchmarkApi = (Machine) => {
               const key = path === "" ? initialKey : node.initial
               if (key === undefined) throw new Error("Missing benchmark initial child")
               const childPath = path ? `${path}.${key}` : key
-              result.initial = { target: refs[key], ...(Object.hasOwn(definition.values ?? {}, childPath) ? { data: definition.values[childPath] } : {}) }
+              result.initial = { target: refs[key][destination], ...(Object.hasOwn(definition.values ?? {}, childPath) ? { data: definition.values[childPath] } : {}) }
             }
             result.states = Object.fromEntries(Object.entries(node.states).map(([key, child]) => [key, initialize(child, handler?.states?.[key] ?? {}, path ? `${path}.${key}` : key, refs[key])]))
             return result
           }
-          return Machine.make({ ...rest, root, children }).handle(initialize(declared, { states: handlers }, "", targets.root))
+          return Machine.make({ ...rest, root, children }).handle(initialize(declared, { states: handlers }, "", targets))
         }
         return Machine.make({ ...rest, root, initialConfiguration, children }).handle({ states: handlers })
       } }

@@ -45,20 +45,20 @@ const machine = Machine.make({
   events: Machine.eventsFromSchemas()
 }).handle({
   initial: {
-    target: Machine.targets(States).root.Workflow,
+    target: "Workflow",
     decoded: true,
     data: new Workflow({})
   },
   states: {
     Workflow: {
       initial: {
-        target: Machine.targets(States).root.Workflow.Idle,
+        target: "Workflow.Idle",
         decoded: true,
         data: new Idle({})
       },
       states: {
         Idle: {},
-        Routing: { choice: { target: Machine.targets(States).root.Workflow.Done } },
+        Routing: { choice: { target: "Workflow.Done" } },
         Done: {}
       }
     }

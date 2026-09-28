@@ -35,22 +35,20 @@ export const CounterEvents = Machine.eventsFromSchemas(
   })
 )
 
-const targets = Machine.targets(CounterStates)
-
 export const CounterMachine = Machine.make({
   id: "Counter",
   root: CounterStates,
   events: CounterEvents,
-}).handle({ initial: { target: targets.root.Idle }, states: {
+}).handle({ initial: { target: "Idle" }, states: {
   Idle: {
     on: {
-      Start: { target: targets.root.Running, data: () => ({ count: 0 }) }
+      Start: { target: "Running", data: () => ({ count: 0 }) }
     }
   },
   Running: {
     on: {
-      Increment: { update: targets.root.Running, data: ({ state }) => ({ count: state.count + 1 }) },
-      Stop: { target: targets.root.Idle }
+      Increment: { update: "Running", data: ({ state }) => ({ count: state.count + 1 }) },
+      Stop: { target: "Idle" }
     }
   }
 } })
@@ -72,7 +70,7 @@ Use `data` for schema make input. Constructor defaults and validation run while
 planning. Use `{ decoded: true, data }` for an existing schema Type; validation
 still applies. Named selectors take the same object format, with nested children
 under `states`. Structural states omit data. See [Root API](./root-api.md) for
-startup input, root targets, subtree construction, and history fallbacks.
+startup input, root initialization, subtree construction, and history fallbacks.
 
 The examples below show one modeling decision at a time. They omit unchanged
 state and event declarations already shown above.
@@ -170,17 +168,16 @@ const DocumentEvents = Machine.eventsFromSchemas(
   })
 )
 
-const documentTargets = Machine.targets(DocumentStates)
 const DocumentMachine = Machine.make({
   root: DocumentStates,
   events: DocumentEvents
-}).handle({ initial: { target: documentTargets.root.Closed }, states: {
+}).handle({ initial: { target: "Closed" }, states: {
   Closed: {},
   Open: {
-    initial: { target: documentTargets.root.Open.Editing },
+    initial: { target: "Open.Editing" },
     on: {
       // All Open children close the document in the same way.
-      Close: { target: documentTargets.root.Closed }
+      Close: { target: "Closed" }
     },
     states: {
       Editing: {},
@@ -209,20 +206,19 @@ export const CheckoutEvents = Machine.eventsFromSchemas(
   })
 )
 
-const checkoutTargets = Machine.targets(CheckoutStates)
 const CheckoutMachine = Machine.make({
   root: CheckoutStates,
   events: CheckoutEvents
 }).handle({ states: {
   Editing: {
     on: {
-      Submit: { target: checkoutTargets.root.Submitting }
+      Submit: { target: "Submitting" }
     }
   },
   Submitting: {
     on: {
       // Cancel has meaning while work is in progress.
-      Cancel: { target: checkoutTargets.root.Editing }
+      Cancel: { target: "Editing" }
     }
   },
   Complete: {}
@@ -262,12 +258,11 @@ const ScreenStates = Machine.state({ states: {
     }
   }
 } })
-const screenTargets = Machine.targets(ScreenStates)
 const ScreenMachine = Machine.make({ root: ScreenStates, events: Machine.events({}) }).handle({
-  initial: { target: screenTargets.root.Screen },
+  initial: { target: "Screen" },
   states: { Screen: { states: {
-    connection: { initial: { target: screenTargets.root.Screen.connection.Online } },
-    panel: { initial: { target: screenTargets.root.Screen.panel.Closed } }
+    connection: { initial: { target: "Screen.connection.Online" } },
+    panel: { initial: { target: "Screen.panel.Closed" } }
   } } }
 })
 
@@ -300,19 +295,18 @@ const LoadStates = Machine.state({ states: {
   Failed: LoadState.cases.Failed
 } })
 
-const loadTargets = Machine.targets(LoadStates)
 const LoadMachine = Machine.make({
   root: LoadStates,
   effects: { loadDocument },
   events: Machine.eventsFromSchemas(),
-}).handle({ initial: { target: loadTargets.root.Idle }, states: {
+}).handle({ initial: { target: "Idle" }, states: {
   Idle: {},
   Loading: {
     invoke: {
       src: "loadDocument",
       input: ({ state }) => state.documentId,
-      onDone: { target: loadTargets.root.Ready, data: ({ output }) => ({ content: output }) },
-      onFailure: { target: loadTargets.root.Failed, data: ({ error }) => ({ message: String(error) }) }
+      onDone: { target: "Ready", data: ({ output }) => ({ content: output }) },
+      onFailure: { target: "Failed", data: ({ error }) => ({ message: String(error) }) }
     }
   },
   Ready: {},
@@ -338,10 +332,10 @@ Loading: {
     {
       src: "loadDocument",
       input: ({ state }) => state.documentId,
-      onDone: { target: loadTargets.root.Ready, data: ({ output }) => ({ content: output }) },
-      onFailure: { target: loadTargets.root.Failed, data: ({ error }) => ({ message: String(error) }) }
+      onDone: { target: "Ready", data: ({ output }) => ({ content: output }) },
+      onFailure: { target: "Failed", data: ({ error }) => ({ message: String(error) }) }
     },
-    { src: "loadTimeout", onDone: { target: loadTargets.root.Idle } }
+    { src: "loadTimeout", onDone: { target: "Idle" } }
   ]
 }
 ```
@@ -381,17 +375,16 @@ const ReviewEvents = Machine.eventsFromSchemas(
   })
 )
 
-const reviewTargets = Machine.targets(ReviewStates)
 const ReviewMachine = Machine.make({
   root: ReviewStates,
   events: ReviewEvents,
   branches: {
     evaluate: {
-      accepted: { target: reviewTargets.root.Accepted },
-      rejected: { target: reviewTargets.root.Rejected }
+      accepted: { target: "Accepted" },
+      rejected: { target: "Rejected" }
     }
   }
-}).handle({ initial: { target: reviewTargets.root.Pending }, states: {
+}).handle({ initial: { target: "Pending" }, states: {
   Pending: {
     on: {
       Evaluate: {
@@ -417,7 +410,7 @@ descendants and running work:
 
 ```ts
 Changed: {
-  update: targets.root.Document,
+  update: "Document",
   data: ({ ancestors }) => ({
     ...ancestors.Document,
     revision: ancestors.Document.revision + 1

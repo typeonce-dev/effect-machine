@@ -8,7 +8,7 @@ const machine = Machine.make({
   events: Machine.eventsFromSchemas(),
   internalEvents
 }).handle({
-  initial: { target: Machine.targets(Root).root.Idle },
+  initial: { target: "Idle" },
   states: { Idle: { on: { Loaded: { none: true } } } }
 })
 

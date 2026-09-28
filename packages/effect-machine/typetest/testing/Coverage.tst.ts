@@ -12,20 +12,19 @@ describe("MachineTest coverage and observed graph", () => {
   class Start extends Schema.TaggedClass<Start>("Start")("Start", {}) {
   }
   const States = Machine.state({ states: { idle: Idle, done: Done } })
-  const targets1 = Machine.targets(States)
   const machine = Machine.make({
     root: States,
     events: Machine.eventsFromSchemas(Start)
   }).handle({
     initial: {
-      target: Machine.targets(States).root.idle,
+      target: "idle",
       decoded: true,
       data: new Idle({})
     },
     states: {
       idle: {
         on: {
-          Start: { target: targets1.root.done, decoded: true, data: () => (new Done({})) }
+          Start: { target: "done", decoded: true, data: () => (new Done({})) }
         }
       },
       done: {}

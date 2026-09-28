@@ -14,7 +14,7 @@ describe("protocol ownership", () => {
         events
       }).handle({
         initial: {
-          target: Machine.targets(root1).root.State,
+          target: "State",
           decoded: true,
           data: { _tag: "State" }
         },
@@ -54,7 +54,7 @@ describe("protocol ownership", () => {
       })
         .handle({
           initial: {
-            target: Machine.targets(root2).root.State,
+            target: "State",
             decoded: true,
             data: { _tag: "State" }
           },
@@ -89,7 +89,7 @@ describe("protocol ownership", () => {
           events: Machine.eventsFromSchemas()
         }).handle({
           initial: {
-            target: Machine.targets(InitialRoot1).root.State,
+            target: "State",
             decoded: true,
             data: { _tag: "State", value: 1 }
           },

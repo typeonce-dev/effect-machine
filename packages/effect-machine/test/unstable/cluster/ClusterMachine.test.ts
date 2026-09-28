@@ -42,7 +42,7 @@ const UnsupportedChildMachine = Machine.make({
   events: Machine.eventsFromSchemas()
 }).handle({
   initial: {
-    target: Machine.targets(InitialRoot1).root.Count,
+    target: "Count",
     decoded: true,
     data: new Count({ value: 0 })
   },
@@ -58,13 +58,12 @@ const makeCounter = (state: {
   inFlight: number
   maxInFlight: number
 }) => {
-  const targets1 = Machine.targets(CounterStates)
   return Machine.make({
     branches: {
-      transition1: { destination: { target: targets1.root.Count } },
-      transition2: { destination: { target: targets1.root.Count } },
-      transition4: { destination: { target: targets1.root.Count } },
-      transition5: { destination: { target: targets1.root.Count } }
+      transition1: { destination: { target: "Count" } },
+      transition2: { destination: { target: "Count" } },
+      transition4: { destination: { target: "Count" } },
+      transition5: { destination: { target: "Count" } }
     },
     id: "Counter",
     root: CounterStates,
@@ -72,7 +71,7 @@ const makeCounter = (state: {
     emittedEvents: Machine.emittedEventsFromSchemas(Changed)
   }).handle({
     initial: {
-      target: Machine.targets(CounterStates).root.Count,
+      target: "Count",
       decoded: true,
       data: new Count({ value: 0 })
     },
@@ -102,7 +101,7 @@ const makeCounter = (state: {
             }
           },
           Finish: {
-            target: targets1.root.Done,
+            target: "Done",
             decoded: true,
             data: ({ state: current }) => (new Done({ value: current.value }))
           },
@@ -371,13 +370,12 @@ describe("ClusterMachine", () => {
         self?: unknown
       } = {}
       resource.self = resource
-      const targets2 = Machine.targets(opaqueStates)
       const opaqueMachine = Machine.make({
         root: opaqueStates,
         events: Machine.eventsFromSchemas(Fail)
       }).handle({
         initial: {
-          target: Machine.targets(opaqueStates).root.OpaqueState,
+          target: "OpaqueState",
           decoded: true,
           data: { _tag: "OpaqueState", resource }
         },
@@ -385,7 +383,7 @@ describe("ClusterMachine", () => {
           OpaqueState: {
             on: {
               Fail: {
-                target: targets2.root.OpaqueState,
+                target: "OpaqueState",
                 decoded: true,
                 data: ({ state: current }) =>
                   current
@@ -633,7 +631,7 @@ describe("ClusterMachine", () => {
         events: Machine.eventsFromSchemas(Increment)
       }).handle({
         initial: {
-          target: Machine.targets(states).root.Count,
+          target: "Count",
           decoded: true,
           data: new Count({ value: 0 })
         },

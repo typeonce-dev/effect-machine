@@ -72,12 +72,12 @@ Ignore: { none: true }
 ```
 
 The fixer preserves callbacks with comments or meaningful work. Ordinary
-transitions with default construction use `{ target: targets.root.Ready }`.
+transitions with default construction use `{ target: "Ready" }`.
 
 ### `effect-machine/no-async-planning-callback`
 
 Rejects asynchronous work in transition construction, guards, resolvers,
-lifecycle handlers, root and initial data constructors, and invocation input mappers. Register lazy
+`initialize` input mappers, lifecycle handlers, root and initial data constructors, and invocation input mappers. Register lazy
 Effects and Streams in `make`, then let a state invoke them:
 
 ```ts
@@ -86,8 +86,8 @@ Submitting: {
   invoke: {
     src: "submitOrder",
     input: ({ state }) => state.order,
-    onDone: { target: targets.root.Complete, data: ({ output }) => ({ order: output }) },
-    onFailure: { target: targets.root.Failed, data: ({ error }) => ({ message: String(error) }) }
+    onDone: { target: "Complete", data: ({ output }) => ({ order: output }) },
+    onFailure: { target: "Failed", data: ({ error }) => ({ message: String(error) }) }
   }
 }
 ```
@@ -143,7 +143,7 @@ Receive facts through events or machine input, or obtain them in invoked work:
 // In make:
 branches: {
   expiry: {
-    expired: { target: targets.root.Expired },
+    expired: { target: "Expired" },
     current: { none: true }
   }
 }

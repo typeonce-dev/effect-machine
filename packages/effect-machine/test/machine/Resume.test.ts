@@ -82,7 +82,7 @@ describe("Machine.resume", () => {
         events: Machine.eventsFromSchemas()
       }).handle({
         initial: {
-          target: Machine.targets(states).root.Inactive,
+          target: "Inactive",
           decoded: true,
           data: new Inactive({})
         },
@@ -92,7 +92,7 @@ describe("Machine.resume", () => {
             states: {
               left: {
                 initial: {
-                  target: Machine.targets(states).root.Root.left.On
+                  target: "Root.left.On"
                 },
                 invoke: { src: "source2", id: "left", address: Machine.childAddress("left") },
                 states: {
@@ -104,7 +104,7 @@ describe("Machine.resume", () => {
               },
               right: {
                 initial: {
-                  target: Machine.targets(states).root.Root.right.On
+                  target: "Root.right.On"
                 },
                 invoke: { src: "source4", id: "right", address: Machine.childAddress("right") },
                 states: {
@@ -197,14 +197,13 @@ describe("Machine.resume", () => {
           }
         }
       }
-      const targets2 = Machine.targets(states)
       const machine = Machine.make({
         root: states,
         events: Machine.eventsFromSchemas(Advance)
       })
         .handle({
           initial: {
-            target: Machine.targets(states).root.Root,
+            target: "Root",
             decoded: true,
             data: new Root({})
           },
@@ -214,14 +213,14 @@ describe("Machine.resume", () => {
               states: {
                 left: {
                   initial: {
-                    target: Machine.targets(states).root.Root.left.A,
+                    target: "Root.left.A",
                     decoded: true,
                     data: new LeftA({})
                   },
                   states: {
                     A: {
                       on: {
-                        Advance: { target: targets2.root.Root.left.B, decoded: true, data: () => (new LeftB({})) }
+                        Advance: { target: "Root.left.B", decoded: true, data: () => (new LeftB({})) }
                       }
                     },
                     B: {}
@@ -229,14 +228,14 @@ describe("Machine.resume", () => {
                 },
                 right: {
                   initial: {
-                    target: Machine.targets(states).root.Root.right.A,
+                    target: "Root.right.A",
                     decoded: true,
                     data: new RightA({})
                   },
                   states: {
                     A: {
                       on: {
-                        Advance: { target: targets2.root.Root.right.B, decoded: true, data: () => (new RightB({})) }
+                        Advance: { target: "Root.right.B", decoded: true, data: () => (new RightB({})) }
                       }
                     },
                     B: {}
@@ -277,20 +276,19 @@ describe("Machine.resume", () => {
           Done: { schema: Done, type: "final", output: Schema.Number }
         }
       })
-      const targets3 = Machine.targets(states)
       const machine = Machine.make({
         root: states,
         events: Machine.eventsFromSchemas(Finish)
       }).handle({
         initial: {
-          target: Machine.targets(states).root.Count,
+          target: "Count",
           decoded: true,
           data: new Count({ value: 0 })
         },
         states: {
           Count: {
             on: {
-              Finish: { target: targets3.root.Done, decoded: true, data: () => (new Done({ value: 9 })) }
+              Finish: { target: "Done", decoded: true, data: () => (new Done({ value: 9 })) }
             }
           },
           Done: { output: ({ state }) => state.value }
@@ -336,25 +334,24 @@ describe("Machine.resume", () => {
           { path: "Flow" as const, output: undefined }
         ]
       }
-      const targets4 = Machine.targets(states)
       const machine = Machine.make({
         root: states,
         events: Machine.eventsFromSchemas(Ping)
       })
         .handle({
           initial: {
-            target: Machine.targets(states).root.Flow,
+            target: "Flow",
             decoded: true,
             data: new Flow({})
           },
           states: {
             Flow: {
               initial: {
-                target: Machine.targets(states).root.Flow.Finished,
+                target: "Flow.Finished",
                 decoded: true,
                 data: new Finished({})
               },
-              onDone: { target: targets4.root.Next, decoded: true, data: () => (new Next({})) },
+              onDone: { target: "Next", decoded: true, data: () => (new Next({})) },
               states: {
                 Finished: {}
               }
@@ -377,19 +374,18 @@ describe("Machine.resume", () => {
       class B extends Schema.TaggedClass<B>("B")("B", {}) {
       }
       const states = Machine.state({ states: { A, B } })
-      const targets5 = Machine.targets(states)
       const machine = Machine.make({
         root: states,
         events: Machine.eventsFromSchemas(Ping)
       }).handle({
         initial: {
-          target: Machine.targets(states).root.A,
+          target: "A",
           decoded: true,
           data: new A({})
         },
         states: {
           A: {
-            always: { target: targets5.root.B, decoded: true, data: () => (new B({})) }
+            always: { target: "B", decoded: true, data: () => (new B({})) }
           },
           B: {}
         }
@@ -414,7 +410,6 @@ describe("Machine.resume", () => {
       class TimedOut extends Schema.TaggedClass<TimedOut>("TimedOut")("TimedOut", {}) {
       }
       const states = Machine.state({ states: { Waiting, Cancelled, TimedOut } })
-      const targets6 = Machine.targets(states)
       const machine = Machine.make({
         timers: { source1: "1 second" },
         root: states,
@@ -422,7 +417,7 @@ describe("Machine.resume", () => {
         internalEvents: Machine.internalEventsFromSchemas(Timeout)
       }).handle({
         initial: {
-          target: Machine.targets(states).root.Cancelled,
+          target: "Cancelled",
           decoded: true,
           data: new Cancelled({})
         },
@@ -431,10 +426,10 @@ describe("Machine.resume", () => {
             invoke: {
               src: "source1",
               id: "timeout",
-              onDone: { target: targets6.root.TimedOut, decoded: true, data: () => (new TimedOut({})) }
+              onDone: { target: "TimedOut", decoded: true, data: () => (new TimedOut({})) }
             },
             on: {
-              Cancel: { target: targets6.root.Cancelled, decoded: true, data: () => (new Cancelled({})) }
+              Cancel: { target: "Cancelled", decoded: true, data: () => (new Cancelled({})) }
             }
           },
           Cancelled: {},
@@ -473,7 +468,6 @@ describe("Machine.resume", () => {
       }
       const runs = yield* Ref.make(0)
       const states = Machine.state({ states: { Loading, Loaded } })
-      const targets7 = Machine.targets(states)
       const machine = Machine.make({
         effects: { source1: Effect.suspend(() => Ref.updateAndGet(runs, (n) => n + 1).pipe(Effect.as("fresh"))) },
         root: states,
@@ -481,7 +475,7 @@ describe("Machine.resume", () => {
         internalEvents: Machine.internalEventsFromSchemas(LoadedEvent)
       }).handle({
         initial: {
-          target: Machine.targets(states).root.Loaded,
+          target: "Loaded",
           decoded: true,
           data: new Loaded({ value: "initial" })
         },
@@ -491,7 +485,7 @@ describe("Machine.resume", () => {
               src: "source1",
               id: "load",
               onDone: {
-                target: targets7.root.Loaded,
+                target: "Loaded",
                 decoded: true,
                 data: ({ output }) => (new Loaded({ value: output }))
               }
@@ -529,7 +523,6 @@ describe("Machine.resume", () => {
       }
       const runs = yield* Ref.make(0)
       const states = Machine.state({ states: { Loading, Failed } })
-      const targets8 = Machine.targets(states)
       const machine = Machine.make({
         effects: {
           source1: Effect.suspend(() =>
@@ -541,7 +534,7 @@ describe("Machine.resume", () => {
         internalEvents: Machine.internalEventsFromSchemas(FailedEvent)
       }).handle({
         initial: {
-          target: Machine.targets(states).root.Failed,
+          target: "Failed",
           decoded: true,
           data: new Failed({ message: "initial" })
         },
@@ -551,7 +544,7 @@ describe("Machine.resume", () => {
               src: "source1",
               id: "load",
               onFailure: {
-                target: targets8.root.Failed,
+                target: "Failed",
                 decoded: true,
                 data: ({ error }) => (new Failed({ message: error.message }))
               }
@@ -593,13 +586,12 @@ describe("Machine.resume", () => {
           ChildDone: { schema: ChildDone, type: "final", output: Schema.Number }
         }
       })
-      const targets9 = Machine.targets(childStates)
       const child = Machine.make({
         root: childStates,
         events: Machine.eventsFromSchemas(ChildFinish)
       }).handle({
         initial: {
-          target: Machine.targets(childStates).root.ChildIdle,
+          target: "ChildIdle",
           decoded: true,
           data: new ChildIdle({ value: 1 })
         },
@@ -607,7 +599,7 @@ describe("Machine.resume", () => {
           ChildIdle: {
             on: {
               ChildFinish: {
-                target: targets9.root.ChildDone,
+                target: "ChildDone",
                 decoded: true,
                 data: ({ state }) => (new ChildDone({ value: state.value + 1 }))
               }
@@ -618,14 +610,13 @@ describe("Machine.resume", () => {
       })
       const Child = Machine.child("child", child)
       const states = Machine.state({ states: { Parent, ChildOutput } })
-      const targets10 = Machine.targets(states)
       const machine = Machine.make({
         children: { source1: Child },
         root: states,
         events: Machine.eventsFromSchemas(ChildOutput)
       }).handle({
         initial: {
-          target: Machine.targets(states).root.ChildOutput,
+          target: "ChildOutput",
           decoded: true,
           data: new ChildOutput({ value: 0 })
         },
@@ -634,7 +625,7 @@ describe("Machine.resume", () => {
             invoke: {
               src: "source1",
               onDone: {
-                target: targets10.root.ChildOutput,
+                target: "ChildOutput",
                 decoded: true,
                 data: ({ output }) => (new ChildOutput({ value: output }))
               }
@@ -712,7 +703,7 @@ describe("Machine.resume", () => {
         events: Machine.eventsFromSchemas()
       }).handle({
         initial: {
-          target: Machine.targets(states).root.Root,
+          target: "Root",
           decoded: true,
           data: new Root({})
         },
@@ -722,7 +713,7 @@ describe("Machine.resume", () => {
             states: {
               left: {
                 initial: {
-                  target: Machine.targets(states).root.Root.left.Leaf,
+                  target: "Root.left.Leaf",
                   decoded: true,
                   data: new Leaf({ value: 1 })
                 },
@@ -732,7 +723,7 @@ describe("Machine.resume", () => {
               },
               right: {
                 initial: {
-                  target: Machine.targets(states).root.Root.right.Leaf,
+                  target: "Root.right.Leaf",
                   decoded: true,
                   data: new Leaf({ value: 2 })
                 },
@@ -781,13 +772,12 @@ describe("Machine.resume", () => {
   it.effect("obeys bounded encode/decode continuation equivalence", () =>
     Effect.gen(function*() {
       const states = Machine.state({ states: { Count } })
-      const targets11 = Machine.targets(states)
       const machine = Machine.make({
         root: states,
         events: Machine.eventsFromSchemas(Add)
       }).handle({
         initial: {
-          target: Machine.targets(states).root.Count,
+          target: "Count",
           decoded: true,
           data: new Count({ value: 0 })
         },
@@ -795,7 +785,7 @@ describe("Machine.resume", () => {
           Count: {
             on: {
               Add: {
-                target: targets11.root.Count,
+                target: "Count",
                 decoded: true,
                 data: ({ event, state }) => (new Count({ value: state.value + event.value }))
               }

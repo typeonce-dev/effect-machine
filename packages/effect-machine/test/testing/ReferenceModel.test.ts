@@ -39,7 +39,7 @@ describe("MachineTest finite-model reference interpreter", () => {
       const model: MachineTest.FiniteModel = {
         roots: [{
           _tag: "Compound",
-          key: "root",
+          key: "main",
           value: 0,
           initial: "idle",
           states: [
@@ -54,24 +54,24 @@ describe("MachineTest finite-model reference interpreter", () => {
                 {
                   _tag: "Choice",
                   key: "route",
-                  targets: ["root.destination.ready"],
-                  selected: "root.destination.ready"
+                  targets: ["main.destination.ready"],
+                  selected: "main.destination.ready"
                 }
               ]
             }
           ]
         }],
-        initial: "root",
+        initial: "main",
         events: ["Start"],
         transitions: [{
-          source: "root.idle",
+          source: "main.idle",
           trigger: { type: "event", event: "Start" },
-          target: "root.destination.route",
+          target: "main.destination.route",
           reenter: false
         }]
       }
       const reference = MachineTest.interpretModel(model, ["Start"])
-      assert.deepStrictEqual(reference.final.activePaths, ["root", "root.destination", "root.destination.ready"])
+      assert.deepStrictEqual(reference.final.activePaths, ["main", "main.destination", "main.destination.ready"])
       const machine = MachineTest.compileModel(model)
       const trace = yield* MachineTest.run(machine, { events: [event("Start")] })
       yield* MachineTest.verifyModel(model, trace)
@@ -146,7 +146,7 @@ describe("MachineTest finite-model reference interpreter", () => {
       const model: MachineTest.FiniteModel = {
         roots: [{
           _tag: "Compound",
-          key: "root",
+          key: "main",
           value: 0,
           initial: "job",
           states: [{
@@ -157,13 +157,13 @@ describe("MachineTest finite-model reference interpreter", () => {
             states: [{ _tag: "Final", key: "done", value: 2, output: "job:done" }]
           }]
         }],
-        initial: "root",
+        initial: "main",
         events: ["Reset"],
         transitions: [
           // This targetless completion consumes the completion generation
           // without changing the retained completion metadata.
-          { source: "root.job", trigger: { type: "done" } },
-          { source: "root.job", trigger: { type: "event", event: "Reset" }, target: "root.job", reenter: true }
+          { source: "main.job", trigger: { type: "done" } },
+          { source: "main.job", trigger: { type: "event", event: "Reset" }, target: "main.job", reenter: true }
         ]
       }
       const reference = MachineTest.interpretModel(model, ["Reset"])
@@ -908,7 +908,7 @@ describe("MachineTest finite-model reference interpreter", () => {
       const Exit = Schema.TaggedStruct("Exit", {})
       const states = Machine.state({
         states: {
-          root: {
+          main: {
             schema: Root,
             type: "parallel",
             states: {
@@ -925,18 +925,17 @@ describe("MachineTest finite-model reference interpreter", () => {
           outside: Outside
         }
       })
-      const targets1 = Machine.targets(states)
       const machine = Machine.make({
         root: states,
         events: Machine.eventsFromSchemas(Local, Exit)
       }).handle({
         initial: {
-          target: Machine.targets(states).root.root,
+          target: "main",
           decoded: true,
           data: { _tag: "Root", version: 0 }
         },
         states: {
-          root: {
+          main: {
             initial: {
               left: { decoded: true, data: { _tag: "Left", version: 0 } },
               right: { decoded: true, data: { _tag: "Right", version: 0 } }
@@ -946,18 +945,18 @@ describe("MachineTest finite-model reference interpreter", () => {
                 initial: {
                   decoded: true,
                   data: { _tag: "LeftIdle", version: 0 },
-                  target: Machine.targets(states).root.root.left.idle
+                  target: "main.left.idle"
                 },
                 states: {
                   idle: {
                     on: {
                       Local: {
-                        target: targets1.root.root.left.done,
+                        target: "main.left.done",
                         decoded: true,
                         data: () => ({ _tag: "LeftDone", version: 1 })
                       },
                       Exit: {
-                        target: targets1.root.outside,
+                        target: "outside",
                         decoded: true,
                         data: () => ({ _tag: "Outside", version: 1 })
                       }
@@ -968,7 +967,7 @@ describe("MachineTest finite-model reference interpreter", () => {
               },
               right: {
                 initial: {
-                  target: Machine.targets(states).root.root.right.idle,
+                  target: "main.right.idle",
                   decoded: true,
                   data: { _tag: "RightIdle", version: 0 }
                 },
@@ -976,12 +975,12 @@ describe("MachineTest finite-model reference interpreter", () => {
                   idle: {
                     on: {
                       Local: {
-                        target: targets1.root.root.right.idle,
+                        target: "main.right.idle",
                         decoded: true,
                         data: () => ({ _tag: "RightIdle", version: 1 })
                       },
                       Exit: {
-                        target: targets1.root.root.right.idle,
+                        target: "main.right.idle",
                         decoded: true,
                         data: () => ({ _tag: "RightIdle", version: 2 })
                       }
@@ -996,13 +995,13 @@ describe("MachineTest finite-model reference interpreter", () => {
       })
       const initial = yield* Machine.planInitial(machine)
       const local = yield* Machine.plan(machine, initial.state, { _tag: "Local" })
-      assert.strictEqual((local.next as any).state.states.left.state.path, "root.left.done")
+      assert.strictEqual((local.next as any).state.states.left.state.path, "main.left.done")
       assert.strictEqual((local.next as any).state.states.right.state.value.version, 1)
       const exited = yield* Machine.plan(machine, initial.state, { _tag: "Exit" })
       assert.strictEqual(exited.next.state.path, "outside")
       assert.deepStrictEqual(exited.microsteps[0]!.transitions.map(({ source }) => source), [
-        "root.left.idle",
-        "root.right.idle"
+        "main.left.idle",
+        "main.right.idle"
       ])
     }))
   it.effect("initializes the default descendants of a same-root compound target", () =>
@@ -1216,7 +1215,7 @@ describe("MachineTest finite-model reference interpreter", () => {
       const model: MachineTest.FiniteModel = {
         roots: [{
           _tag: "Compound",
-          key: "root",
+          key: "main",
           value: 0,
           initial: "branch",
           states: [
@@ -1230,11 +1229,11 @@ describe("MachineTest finite-model reference interpreter", () => {
             { _tag: "Atomic", key: "other", value: 3 }
           ]
         }],
-        initial: "root",
+        initial: "main",
         events: ["Go"],
         transitions: [
-          { source: "root.branch", trigger: { type: "event", event: "Go" }, target: "root.other", reenter: false },
-          { source: "root.branch.leaf", trigger: { type: "event", event: "Go" }, target: "root.other", reenter: false }
+          { source: "main.branch", trigger: { type: "event", event: "Go" }, target: "main.other", reenter: false },
+          { source: "main.branch.leaf", trigger: { type: "event", event: "Go" }, target: "main.other", reenter: false }
         ]
       }
       const machine = MachineTest.compileModel(model)
@@ -1250,7 +1249,7 @@ describe("MachineTest finite-model reference interpreter", () => {
             ...step.plan,
             microsteps: [{
               ...microstep,
-              transitions: [{ ...retained, source: "root.branch" }]
+              transitions: [{ ...retained, source: "main.branch" }]
             }]
           }
         }]
@@ -1266,7 +1265,7 @@ describe("MachineTest finite-model reference interpreter", () => {
       const model: MachineTest.FiniteModel = {
         roots: [{
           _tag: "Compound",
-          key: "root",
+          key: "main",
           value: 0,
           initial: "left",
           states: [
@@ -1274,7 +1273,7 @@ describe("MachineTest finite-model reference interpreter", () => {
             { _tag: "Atomic", key: "right", value: 2 }
           ]
         }],
-        initial: "root",
+        initial: "main",
         events: ["Unused"],
         transitions: []
       }
@@ -1284,15 +1283,15 @@ describe("MachineTest finite-model reference interpreter", () => {
         path: "" as const,
         value: undefined,
         state: {
-          path: "root" as const,
+          path: "main" as const,
           value: { _tag: "State_root", value: 0 },
           state: {
-            path: "root.right" as const,
+            path: "main.right" as const,
             value: { _tag: "State_root_right", value: 2 }
           }
         }
       }
-      const rightPaths = ["", "root", "root.right"]
+      const rightPaths = ["", "main", "main.right"]
       const corrupted = {
         ...trace,
         initial: {

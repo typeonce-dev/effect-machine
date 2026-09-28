@@ -15,15 +15,14 @@ class Burst extends Schema.TaggedClass<Burst>("ProbeBurst")("Burst", {}) {}
 class Reenter extends Schema.TaggedClass<Reenter>("ProbeReenter")("Reenter", {}) {}
 class RaisedIncrement extends Schema.TaggedClass<RaisedIncrement>("ProbeRaisedIncrement")("RaisedIncrement", {}) {}
 const states = Machine.state({ states: { Counter } })
-const targets1 = Machine.targets(states)
 const machine = Machine.make({
-  branches: { transition3: { destination: { target: targets1.root.Counter } } },
+  branches: { transition3: { destination: { target: "Counter" } } },
   root: states,
   events: Machine.eventsFromSchemas(Increment, Noop, Ignored, Decline, Burst, Reenter),
   internalEvents: Machine.internalEventsFromSchemas(RaisedIncrement)
 }).handle({
   initial: {
-    target: Machine.targets(states).root.Counter,
+    target: "Counter",
     decoded: true,
     data: new Counter({ count: 0 })
   },
@@ -31,14 +30,14 @@ const machine = Machine.make({
     Counter: {
       on: {
         Increment: {
-          target: targets1.root.Counter,
+          target: "Counter",
           decoded: true,
           data: ({ event, state }) => (new Counter({ count: state.count + event.amount }))
         },
         Noop: { none: true },
         Decline: { none: true, resolve: ({ decline }) => decline(), declinable: true },
         Reenter: {
-          target: targets1.root.Counter,
+          target: "Counter",
           reenter: true,
           decoded: true,
           data: ({ state }) => (new Counter({ count: state.count }))
@@ -51,7 +50,7 @@ const machine = Machine.make({
           }
         },
         RaisedIncrement: {
-          target: targets1.root.Counter,
+          target: "Counter",
           decoded: true,
           data: ({ state }) => (new Counter({ count: state.count + 10 }))
         }
@@ -148,7 +147,6 @@ describe("MachineTest probe", () => {
       }
       const invokeStates = Machine.state({ states: { Idle, Loading } })
       let starts = 0
-      const targets2 = Machine.targets(invokeStates)
       const invokeMachine = Machine.make({
         effects: {
           source1: Effect.suspend(() => {
@@ -160,14 +158,14 @@ describe("MachineTest probe", () => {
         events: Machine.eventsFromSchemas(Load)
       }).handle({
         initial: {
-          target: Machine.targets(invokeStates).root.Idle,
+          target: "Idle",
           decoded: true,
           data: new Idle({})
         },
         states: {
           Idle: {
             on: {
-              Load: { target: targets2.root.Loading, decoded: true, data: () => (new Loading({})) }
+              Load: { target: "Loading", decoded: true, data: () => (new Loading({})) }
             }
           },
           Loading: {

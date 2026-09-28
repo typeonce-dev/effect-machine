@@ -59,14 +59,13 @@ describe("pure planning and managed runtime differential", () => {
           Done: { schema: Done, type: "final", output: Schema.Number }
         }
       })
-      const targets1 = Machine.targets(states)
       const machine = Machine.make({
         root: states,
         events: Machine.eventsFromSchemas(Cascade, Ignore, Finish),
         internalEvents: Machine.internalEventsFromSchemas(Increment)
       }).handle({
         initial: {
-          target: Machine.targets(states).root.Count,
+          target: "Count",
           decoded: true,
           data: new Count({ value: 0 })
         },
@@ -81,12 +80,12 @@ describe("pure planning and managed runtime differential", () => {
                 }
               },
               Increment: {
-                target: targets1.root.Count,
+                target: "Count",
                 decoded: true,
                 data: ({ state }) => (new Count({ value: state.value + 1 }))
               },
               Finish: {
-                target: targets1.root.Done,
+                target: "Done",
                 decoded: true,
                 data: ({ state }) => (new Done({ value: state.value }))
               }
@@ -168,18 +167,17 @@ describe("pure planning and managed runtime differential", () => {
         readonly left: number
         readonly right: number
       }> = []
-      const targets2 = Machine.targets(states)
       const machine = Machine.make({
         branches: {
-          transition1: { destination: { target: targets2.root.Done } },
-          transition2: { destination: { target: targets2.root.Running.Left } }
+          transition1: { destination: { target: "Done" } },
+          transition2: { destination: { target: "Running.Left" } }
         },
         root: states,
         events: Machine.eventsFromSchemas(Advance, Inspect, Finish),
         internalEvents: Machine.internalEventsFromSchemas(Bump)
       }).handle({
         initial: {
-          target: Machine.targets(states).root.Running,
+          target: "Running",
           decoded: true,
           data: new Running({})
         },
@@ -220,12 +218,12 @@ describe("pure planning and managed runtime differential", () => {
               Right: {
                 on: {
                   Advance: {
-                    target: targets2.root.Running.Right,
+                    target: "Running.Right",
                     decoded: true,
                     data: ({ state }) => (new Right({ value: state.value + 10 }))
                   },
                   Bump: {
-                    target: targets2.root.Running.Right,
+                    target: "Running.Right",
                     decoded: true,
                     data: ({ state }) => (new Right({ value: state.value + 100 }))
                   },
@@ -498,11 +496,10 @@ describe("pure planning and managed runtime differential", () => {
           Finished: { schema: Finished, type: "final", output: Schema.String }
         }
       })
-      const targets3 = Machine.targets(states)
       const machine = Machine.make({
         branches: {
-          transition1: { destination: { target: targets3.root.Working } },
-          transition2: { destination: { target: targets3.root.Finished } }
+          transition1: { destination: { target: "Working" } },
+          transition2: { destination: { target: "Finished" } }
         },
         root: states,
         events: Machine.eventsFromSchemas(Begin),
@@ -510,7 +507,7 @@ describe("pure planning and managed runtime differential", () => {
         emittedEvents: Machine.emittedEventsFromSchemas(Notice)
       }).handle({
         initial: {
-          target: Machine.targets(states).root.Idle,
+          target: "Idle",
           decoded: true,
           data: new Idle({})
         },
@@ -627,20 +624,19 @@ describe("pure planning and managed runtime differential", () => {
       class Go extends Schema.TaggedClass<Go>("DifferentialGo")("Go", {}) {
       }
       const states = Machine.state({ states: { Idle, Active } })
-      const targets4 = Machine.targets(states)
       const machine = Machine.make({
         root: states,
         events: Machine.eventsFromSchemas(Ignore, Go)
       }).handle({
         initial: {
-          target: Machine.targets(states).root.Idle,
+          target: "Idle",
           decoded: true,
           data: new Idle({})
         },
         states: {
           Idle: {
             on: {
-              Go: { target: targets4.root.Active, decoded: true, data: () => (new Active({})) }
+              Go: { target: "Active", decoded: true, data: () => (new Active({})) }
             }
           },
           Active: {}

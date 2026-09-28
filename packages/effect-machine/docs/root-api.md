@@ -17,7 +17,6 @@ const Root = Machine.state({
     Ready: {}
   }
 })
-const targets = Machine.targets(Root)
 const Events = Machine.events({
   Loaded: {},
   Reload: { locale: Schema.String, documentId: Schema.String }
@@ -29,18 +28,17 @@ const Document = Machine.make({
 }).handle({
   root: ({ input }) => ({ locale: input.locale }),
   initial: {
-    target: targets.root.Loading,
+    target: "Loading",
     data: ({ input }) => ({ documentId: input.documentId })
   },
   on: {
     Reload: {
-      target: targets.root,
-      input: ({ event }) => ({ locale: event.locale, documentId: event.documentId }),
+      initialize: ({ event }) => ({ locale: event.locale, documentId: event.documentId }),
       reenter: true
     }
   },
   states: {
-    Loading: { on: { Loaded: { target: targets.root.Ready } } }
+    Loading: { on: { Loaded: { target: "Ready" } } }
   }
 })
 ```
@@ -68,21 +66,26 @@ optional region data. Compound handlers declare one direct initial child with
 `initial: { target, data }`; each compound has its own initial declaration.
 There is no `initialConfiguration` or initializer in `make`.
 
-## Root targets and updates
+## Root initialization and updates
 
-`{ target: targets.root, input: ... }` reconstructs root data and follows its
-initial declarations using fresh input. Input is required exactly when it is
-required by `Machine.start`. Machines without input omit it. Root targets reject
-`data`, `decoded`, and explicit child construction.
+The root is spelled `"root"` in declarations, so a top-level state cannot use
+that name. It is not a transition destination.
 
-Targeting root retains its lifecycle unless it is reentered. Put a machine-wide
+`{ initialize: ... }` reconstructs root data and follows its initial
+declarations using fresh machine input: a value or a callback of the transition
+context. A machine without input declares `{ initialize: true }`. `initialize`
+rejects `target`, `update`, `history`, `none`, `data`, and `decoded`. A named
+branch declares `{ initialize: true }`, and its resolver passes the input with
+`select.branch({ input })`.
+
+Initializing root retains its lifecycle unless it is reentered. Put a machine-wide
 reset handler at root and use `reenter: true` to exit and enter root as well as
 its descendants. Reentry restarts work owned by the exited states. Without
 reentry, retained root work continues; it does not automatically acquire new
 construction values. Ordinary transition conflict and lifecycle rules still apply.
 This does not create a new machine reference or discard history records.
 
-`{ update: targets.root, data: ... }` instead replaces root's complete value,
+`{ update: "root", data: ... }` instead replaces root's complete value,
 retaining its active children and running work. It takes no input and does not
 run initial constructors. Other source/ancestor updates follow the same rules.
 
@@ -92,14 +95,14 @@ Ordinary transitions stay inline:
 
 ```ts
 Load: {
-  target: targets.root.Loading,
+  target: "Loading",
   data: ({ event }) => ({ documentId: event.documentId })
 }
 ```
 
 Targeting a compound or parallel state follows its initial declarations. Event
 transitions use `target`, never `initial`. `initial` names only handler startup
-edges. `history` restores a declared history reference; `none: true` accepts an
+edges. `history` restores a declared history state; `none: true` accepts an
 event without changing its target configuration.
 
 Declare branch topology in `make` when a resolver chooses an outcome, builds an
@@ -108,7 +111,7 @@ explicit subtree, or enqueues commands:
 ```ts
 branches: {
   open: {
-    checkout: { target: targets.root.Checkout },
+    checkout: { target: "Checkout" },
     unchanged: { none: true }
   }
 }
@@ -145,12 +148,12 @@ add static analysis of resolver bodies.
 
 ## Retained-owner updates
 
-An inline combined transition keeps `target` and `update` references separate:
+An inline combined transition keeps `target` and `update` paths separate:
 
 ```ts
 Save: {
-  target: targets.root.Checkout.Saving,
-  update: targets.root.Checkout,
+  target: "Checkout.Saving",
+  update: "Checkout",
   data: ({ event }) => ({
     target: { requestId: event.requestId },
     update: { cartId: event.cartId }
@@ -203,7 +206,12 @@ entry/exit, and required outcome channels retain their existing contracts.
 
 - Root initial constructors can read `input`; remove root fields used only to
   forward that input to the initial child.
-- Replace event `{ initial: reference, data }` with `{ target: reference, data }`.
+- Remove `Machine.targets(Root)`. Replace `targets.root.A.B` with `"A.B"`,
+  `update: targets.root` with `update: "root"`, and
+  `{ target: targets.root, input }` with `{ initialize: input }` (or
+  `{ initialize: true }` without machine input). Rename a top-level state named
+  `root`.
+- Replace event `{ initial: path, data }` with `{ target: path, data }`.
 - Replace `select.branch.from(value)` with `select.branch({ data: value })`.
 - Replace `.decoded(value)` with `({ decoded: true, data: value })`.
 - Replace child callbacks with `states: { Child: { data, states } }`.

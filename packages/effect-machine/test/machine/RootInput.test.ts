@@ -8,22 +8,21 @@ it.effect("passes fresh input only through root initialization without retaining
       fields: { locale: Schema.String },
       states: { Loading: { fields: { request: Schema.String } }, Idle: {} }
     })
-    const targets = Machine.targets(root)
     const machine = Machine.make({
       root,
       input: Schema.Struct({ locale: Schema.String, request: Schema.String }),
       events: Machine.events({ Finish: {}, Reload: { request: Schema.String } }),
-      branches: { reload: { root: { target: targets.root } } }
+      branches: { reload: { root: { initialize: true } } }
     }).handle({
       root: ({ input }) => ({ locale: input.locale }),
-      initial: { target: targets.root.Loading, data: ({ input }) => ({ request: input.request }) },
+      initial: { target: "Loading", data: ({ input }) => ({ request: input.request }) },
       on: {
         Reload: {
           branches: "reload",
           resolve: ({ event, select }) => select.root({ input: { locale: "it", request: event.request } })
         }
       },
-      states: { Loading: { on: { Finish: { target: targets.root.Idle } } } }
+      states: { Loading: { on: { Finish: { target: "Idle" } } } }
     })
     const initial = yield* Machine.planInitial(machine, { locale: "en", request: "first" })
     assert.deepStrictEqual(initial.state.value, { _tag: "", locale: "en" })
@@ -40,19 +39,18 @@ it.effect("restarts root lifecycle only with reenter and validates fresh input b
       fields: { count: Schema.Number },
       states: { Loading: { fields: { id: Schema.String } }, Idle: {} }
     })
-    const targets = Machine.targets(root)
     const machine = Machine.make({
       root,
       input: Schema.Struct({ id: Schema.NonEmptyString, count: Schema.Number }),
       events: Machine.events({ Finish: {}, Reset: { id: Schema.String }, Restart: { id: Schema.String } })
     }).handle({
       root: ({ input }) => ({ count: input.count }),
-      initial: { target: targets.root.Loading, data: ({ input }) => ({ id: input.id }) },
+      initial: { target: "Loading", data: ({ input }) => ({ id: input.id }) },
       on: {
-        Reset: { target: targets.root, input: ({ event }) => ({ id: event.id, count: 2 }) },
-        Restart: { target: targets.root, input: ({ event }) => ({ id: event.id, count: 3 }), reenter: true }
+        Reset: { initialize: ({ event }) => ({ id: event.id, count: 2 }) },
+        Restart: { initialize: ({ event }) => ({ id: event.id, count: 3 }), reenter: true }
       },
-      states: { Loading: { on: { Finish: { target: targets.root.Idle } } } }
+      states: { Loading: { on: { Finish: { target: "Idle" } } } }
     })
     const initial = yield* Machine.planInitial(machine, { id: "one", count: 1 })
     const idle = yield* Machine.plan(machine, initial.state, { _tag: "Finish" })

@@ -125,23 +125,22 @@ const makeCheckoutMachine = (
   onDefault?: () => void,
   exactDefault?: () => ReturnType<typeof checkoutShipping>
 ) => {
-  const targets1 = Machine.targets(CheckoutStates)
   return Machine.make({
     branches: {
-      transition3: { destination: { history: targets1.root.checkout.exact } },
-      transition4: { destination: { target: targets1.root.checkout.payment } },
-      transition5: { destination: { history: targets1.root.checkout.recent } },
-      transition6: { destination: { history: targets1.root.checkout.exact } }
+      transition3: { destination: { history: "checkout.exact" } },
+      transition4: { destination: { target: "checkout.payment" } },
+      transition5: { destination: { history: "checkout.recent" } },
+      transition6: { destination: { history: "checkout.exact" } }
     },
     root: CheckoutStates,
     events: Machine.eventsFromSchemas(Leave, ResumeShallow, ResumeDeep, GoShipping, EnterVerifying, ReenterHistory)
   }).handle({
     initial: initial.state.path === "checkout"
-      ? { target: targets1.root.checkout, data: { orderId: "initial" } }
-      : { target: targets1.root.support, decoded: true, data: initial.state.value },
+      ? { target: "checkout", data: { orderId: "initial" } }
+      : { target: "support", decoded: true, data: initial.state.value },
     states: {
       checkout: {
-        initial: { target: targets1.root.checkout.shipping, data: { address: "initial" } },
+        initial: { target: "checkout.shipping", data: { address: "initial" } },
         entry: () => {
           lifecycle?.push("entry:checkout")
         },
@@ -163,9 +162,9 @@ const makeCheckoutMachine = (
           }
         },
         on: {
-          Leave: { target: targets1.root.support, decoded: true, data: () => (new Support({ ticket: "ticket-1" })) },
+          Leave: { target: "support", decoded: true, data: () => (new Support({ ticket: "ticket-1" })) },
           GoShipping: {
-            target: targets1.root.checkout.shipping,
+            target: "checkout.shipping",
             decoded: true,
             data: ({ event }) => (new Shipping({ address: event.address }))
           },
@@ -197,7 +196,7 @@ const makeCheckoutMachine = (
               lifecycle?.push("exit:payment")
             },
             initial: {
-              target: targets1.root.checkout.payment.cardEntry,
+              target: "checkout.payment.cardEntry",
               decoded: true,
               data: ({ state }) => {
                 onInitialize?.()
@@ -324,17 +323,16 @@ const activeWorkspace: Machine.Snapshot<typeof WorkspaceStates> = {
   }
 }
 const makeWorkspaceMachine = (initialized: Array<string>) => {
-  const targets2 = Machine.targets(WorkspaceStates)
   return Machine.make({
     branches: {
-      transition2: { destination: { history: targets2.root.workspace.recent } },
-      transition3: { destination: { history: targets2.root.workspace.exact } }
+      transition2: { destination: { history: "workspace.recent" } },
+      transition3: { destination: { history: "workspace.exact" } }
     },
     root: WorkspaceStates,
     events: Machine.eventsFromSchemas(LeaveWorkspace, ResumeWorkspaceShallow, ResumeWorkspaceDeep)
   }).handle({
     initial: {
-      target: Machine.targets(WorkspaceStates).root.workspace,
+      target: "workspace",
       decoded: true,
       data: new Workspace({ id: "initial" })
     },
@@ -390,12 +388,12 @@ const makeWorkspaceMachine = (initialized: Array<string>) => {
           }
         },
         on: {
-          LeaveWorkspace: { target: targets2.root.away, decoded: true, data: () => (new Away({})) }
+          LeaveWorkspace: { target: "away", decoded: true, data: () => (new Away({})) }
         },
         states: {
           editor: {
             initial: {
-              target: targets2.root.workspace.editor.writing,
+              target: "workspace.editor.writing",
               decoded: true,
               data: ({ state }) => {
                 initialized.push("editor")
@@ -405,7 +403,7 @@ const makeWorkspaceMachine = (initialized: Array<string>) => {
           },
           sidebar: {
             initial: {
-              target: targets2.root.workspace.sidebar.files,
+              target: "workspace.sidebar.files",
               decoded: true,
               data: ({ state }) => {
                 initialized.push("sidebar")
@@ -471,18 +469,17 @@ const nestedParallelSnapshot: Machine.Snapshot<typeof NestedHistoryStates> = {
     }
   }
 }
-const targets3 = Machine.targets(NestedHistoryStates)
 const nestedHistoryMachine = Machine.make({
   branches: {
-    transition1: { destination: { history: targets3.root.workspace.editor.exact } },
-    transition2: { destination: { history: targets3.root.workspace.editor.exact } },
-    transition3: { destination: { history: targets3.root.workspace.editor.exact } }
+    transition1: { destination: { history: "workspace.editor.exact" } },
+    transition2: { destination: { history: "workspace.editor.exact" } },
+    transition3: { destination: { history: "workspace.editor.exact" } }
   },
   root: NestedHistoryStates,
   events: Machine.eventsFromSchemas(RestoreEditor, DefaultEditor)
 }).handle({
   initial: {
-    target: Machine.targets(NestedHistoryStates).root.workspace,
+    target: "workspace",
     decoded: true,
     data: new Workspace({ id: "workspace-1" })
   },
@@ -497,7 +494,7 @@ const nestedHistoryMachine = Machine.make({
           initial: {
             decoded: true,
             data: new Writing({ draft: "" }),
-            target: Machine.targets(NestedHistoryStates).root.workspace.editor.writing
+            target: "workspace.editor.writing"
           },
           history: {
             exact: {

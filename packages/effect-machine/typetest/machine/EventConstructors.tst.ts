@@ -81,7 +81,7 @@ describe("Machine event constructor collections", () => {
       events: openEvents
     }).handle({
       initial: {
-        target: Machine.targets(states).root.Idle
+        target: "Idle"
       },
       states: { Idle: {} }
     })
@@ -92,7 +92,7 @@ describe("Machine event constructor collections", () => {
     expect(Machine.plan(
       machine.handle({
         initial: {
-          target: Machine.targets(states).root.Idle
+          target: "Idle"
         },
         states: { Idle: {} }
       }),
@@ -108,7 +108,7 @@ describe("Machine event constructor collections", () => {
   it("accepts internal constructions raised from invocation handlers", () => {
     expect(machine.handle({
       initial: {
-        target: Machine.targets(states).root.Idle
+        target: "Idle"
       },
       states: {
         Idle: {

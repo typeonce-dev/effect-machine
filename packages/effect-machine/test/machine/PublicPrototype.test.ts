@@ -10,7 +10,7 @@ it("uses the public pipeable and inspectable prototypes", () => {
     events: Machine.eventsFromSchemas(Start)
   }).handle({
     initial: {
-      target: Machine.targets(states).root.Idle,
+      target: "Idle",
       decoded: true,
       data: new Idle()
     },

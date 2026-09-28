@@ -57,11 +57,10 @@ const ChildStates = Machine.state({
     Cancelled: { schema: ChildCancelled, type: "final", output: Schema.String }
   }
 })
-const targets1 = Machine.targets(ChildStates)
 export const requiredParentChildMachine = Machine.make({
   branches: {
-    transition1: { destination: { target: targets1.root.Working } },
-    transition3: { destination: { target: targets1.root.Working } }
+    transition1: { destination: { target: "Working" } },
+    transition3: { destination: { target: "Working" } }
   },
   effects: {
     source1: ({ parent, state }: {
@@ -77,7 +76,7 @@ export const requiredParentChildMachine = Machine.make({
   parent: Machine.parent(ParentEvents)
 }).handle({
   initial: {
-    target: Machine.targets(ChildStates).root.Idle,
+    target: "Idle",
     decoded: true,
     data: new ChildIdle({})
   },
@@ -101,7 +100,7 @@ export const requiredParentChildMachine = Machine.make({
         input: (context) => context,
         onDone: { none: true },
         onFailure: {
-          target: targets1.root.Cancelled,
+          target: "Cancelled",
           decoded: true,
           data: ({ error }) => (new ChildCancelled({ reason: String(error) }))
         }
@@ -115,12 +114,12 @@ export const requiredParentChildMachine = Machine.make({
           }
         },
         CommitChildWork: {
-          target: targets1.root.Done,
+          target: "Done",
           decoded: true,
           data: ({ state }) => (new ChildDone({ result: `${state.job}:complete` }))
         },
         CancelChildWork: {
-          target: targets1.root.Cancelled,
+          target: "Cancelled",
           decoded: true,
           data: ({ event }) => (new ChildCancelled({ reason: event.reason }))
         }
@@ -161,11 +160,10 @@ const ParentStates = Machine.state({
     Failed: ParentFailed
   }
 })
-const targets2 = Machine.targets(ParentStates)
 export const parentProtocolMachine = Machine.make({
   branches: {
-    transition1: { destination: { target: targets2.root.Supervising } },
-    transition3: { destination: { target: targets2.root.Complete } }
+    transition1: { destination: { target: "Supervising" } },
+    transition3: { destination: { target: "Complete" } }
   },
   children: { source1: ProtocolChild },
   id: "parent-child-protocol",
@@ -173,7 +171,7 @@ export const parentProtocolMachine = Machine.make({
   events: Machine.eventsFromSchemas(LaunchChild, ResetParent, ParentEvents)
 }).handle({
   initial: {
-    target: Machine.targets(ParentStates).root.Idle,
+    target: "Idle",
     decoded: true,
     data: new ParentIdle({})
   },
@@ -181,7 +179,7 @@ export const parentProtocolMachine = Machine.make({
     Idle: {
       on: {
         LaunchChild: {
-          target: targets2.root.Supervising,
+          target: "Supervising",
           decoded: true,
           data: () => (new Supervising({ latestProgress: 0 }))
         }
@@ -191,33 +189,33 @@ export const parentProtocolMachine = Machine.make({
       invoke: {
         src: "source1",
         onDone: {
-          target: targets2.root.Complete,
+          target: "Complete",
           decoded: true,
           data: ({ output }) => (new ParentComplete({ result: output }))
         },
         onFailure: {
-          target: targets2.root.Failed,
+          target: "Failed",
           decoded: true,
           data: ({ error }) => (new ParentFailed({ message: String(error) }))
         }
       },
       on: {
         ChildProgress: {
-          target: targets2.root.Supervising,
+          target: "Supervising",
           decoded: true,
           data: ({ event }) => (new Supervising({ latestProgress: event.percent }))
         },
         ChildFinished: {
-          target: targets2.root.Complete,
+          target: "Complete",
           decoded: true,
           data: ({ event }) => (new ParentComplete({ result: event.result }))
         },
         ChildProblem: {
-          target: targets2.root.Failed,
+          target: "Failed",
           decoded: true,
           data: ({ event }) => (new ParentFailed({ message: event.message }))
         },
-        ResetParent: { target: targets2.root.Idle, decoded: true, data: () => (new ParentIdle({})) }
+        ResetParent: { target: "Idle", decoded: true, data: () => (new ParentIdle({})) }
       }
     },
     Complete: {
@@ -225,7 +223,7 @@ export const parentProtocolMachine = Machine.make({
     },
     Failed: {
       on: {
-        ResetParent: { target: targets2.root.Idle, decoded: true, data: () => (new ParentIdle({})) }
+        ResetParent: { target: "Idle", decoded: true, data: () => (new ParentIdle({})) }
       }
     }
   }
@@ -241,16 +239,15 @@ class PublishOutside extends Schema.TaggedClass<PublishOutside>("OptionalParentP
 }) {
 }
 const OptionalParentStates = Machine.state({ states: { Detached, Published } })
-const targets3 = Machine.targets(OptionalParentStates)
 export const optionalParentMachine = Machine.make({
-  branches: { transition1: { destination: { target: targets3.root.Published } } },
+  branches: { transition1: { destination: { target: "Published" } } },
   id: "optional-parent-protocol",
   root: OptionalParentStates,
   events: Machine.eventsFromSchemas(PublishOutside),
   parent: Machine.optionalParent(ParentEvents)
 }).handle({
   initial: {
-    target: Machine.targets(OptionalParentStates).root.Detached,
+    target: "Detached",
     decoded: true,
     data: new Detached({})
   },

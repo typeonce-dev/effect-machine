@@ -11,7 +11,7 @@ const machine = Machine.make({
 })
 const invoked = machine.handle({
   initial: {
-    target: Machine.targets(States).root.Loading,
+    target: "Loading",
     data: Loading.make({ userId: "user-1" })
   },
   states: {

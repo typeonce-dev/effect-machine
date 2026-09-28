@@ -91,7 +91,7 @@ const makeMachine = () =>
     events: Machine.eventsFromSchemas(Tick)
   }).handle({
     initial: {
-      target: Machine.targets(States).root.Idle,
+      target: "Idle",
       decoded: true,
       data: new Idle({})
     },
@@ -104,7 +104,7 @@ const makeEmittingMachine = () =>
     emittedEvents: Emissions
   }).handle({
     initial: {
-      target: Machine.targets(States).root.Idle,
+      target: "Idle",
       decoded: true,
       data: new Idle({})
     },
@@ -120,7 +120,7 @@ describe("AtomMachine", () => {
       events: Machine.eventsFromSchemas()
     }).handle({
       initial: {
-        target: Machine.targets(States).root.Idle,
+        target: "Idle",
         decoded: true,
         data: new Idle({})
       },
@@ -171,7 +171,7 @@ describe("AtomMachine", () => {
       emittedEvents: Emissions
     }).handle({
       initial: {
-        target: Machine.targets(States).root.Idle,
+        target: "Idle",
         decoded: true,
         data: new Idle({})
       },
@@ -424,7 +424,7 @@ describe("AtomMachine", () => {
       input: Schema.String
     }).handle({
       initial: {
-        target: Machine.targets(States).root.Idle,
+        target: "Idle",
         decoded: true,
         data: new Idle({})
       },
@@ -475,7 +475,7 @@ describe("AtomMachine", () => {
       input: Schema.String
     }).handle({
       initial: {
-        target: Machine.targets(States).root.Idle,
+        target: "Idle",
         decoded: true,
         data: new Idle({})
       },
@@ -505,7 +505,7 @@ describe("AtomMachine", () => {
         events: Machine.eventsFromSchemas()
       }).handle({
         initial: {
-          target: Machine.targets(States).root.Idle,
+          target: "Idle",
           decoded: true,
           data: new Idle({})
         },
@@ -551,7 +551,7 @@ describe("AtomMachine", () => {
       input: Schema.String
     }).handle({
       initial: {
-        target: Machine.targets(States).root.Idle,
+        target: "Idle",
         decoded: true,
         data: new Idle({})
       },
@@ -581,22 +581,21 @@ describe("AtomMachine", () => {
     expect<unknown extends Failure ? true : false>().type.toBe<false>()
   })
   it("only exposes public input events through atom send boundaries", () => {
-    const targets4 = Machine.targets(States)
     const machine = Machine.make({
       root: States,
       events: Machine.eventsFromSchemas(Tick),
       internalEvents: Machine.internalEventsFromSchemas(InternalTick)
     }).handle({
       initial: {
-        target: Machine.targets(States).root.Idle,
+        target: "Idle",
         decoded: true,
         data: new Idle({})
       },
       states: {
         Idle: {
           on: {
-            Tick: { target: targets4.root.Idle, decoded: true, data: () => (new Idle({})) },
-            InternalTick: { target: targets4.root.Idle, decoded: true, data: () => (new Idle({})) }
+            Tick: { target: "Idle", decoded: true, data: () => (new Idle({})) },
+            InternalTick: { target: "Idle", decoded: true, data: () => (new Idle({})) }
           }
         }
       }
@@ -630,7 +629,7 @@ describe("AtomMachine", () => {
     expect(bound.factory).type.not.toBeCallableWith(incomplete)
     const complete = incomplete.handle({
       initial: {
-        target: Machine.targets(OutputStates).root.Idle,
+        target: "Idle",
         decoded: true,
         data: new Idle({})
       },

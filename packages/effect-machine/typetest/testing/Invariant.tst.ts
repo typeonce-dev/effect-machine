@@ -16,7 +16,7 @@ describe("MachineTest invariants", () => {
     internalEvents: Machine.internalEventsFromSchemas(Internal)
   }).handle({
     initial: {
-      target: Machine.targets(States).root.idle,
+      target: "idle",
       decoded: true,
       data: new Idle({ count: 0 })
     },

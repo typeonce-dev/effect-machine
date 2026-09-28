@@ -42,13 +42,12 @@ in lockstep with this package.
 
 ## Quick start
 
-Declare the root once, derive its references, then add behavior with event maps:
+Declare the root once, then add behavior with event maps:
 
 ```ts
 import { Machine } from "@typeonce/effect-machine"
 import { Effect, Schema } from "effect"
 const Root = Machine.state({ fields: { count: Schema.Number } })
-const targets = Machine.targets(Root)
 const Events = Machine.events({ Increment: { by: Schema.Number } })
 const Counter = Machine.make({
   root: Root,
@@ -57,7 +56,7 @@ const Counter = Machine.make({
   root: () => ({ count: 0 }),
   on: {
     Increment: {
-      update: targets.root,
+      update: "root",
       data: ({ root, event }) => ({ count: root.count + event.by })
     }
   }
@@ -68,7 +67,7 @@ const program = Effect.scoped(Effect.gen(function*() {
 }))
 ```
 
-Root data is shared state. `update: targets.root` replaces that value while
+Root data is shared state. `update: "root"` replaces that value while
 retaining the active child configuration and its running work. Ordinary
 transitions target a descendant; the root itself is not a destination.
 
@@ -97,10 +96,9 @@ const Root = Machine.state({
     Ready: {}
   }
 })
-const targets = Machine.targets(Root)
 const machine = Machine.make({ root: Root, input: Schema.Number, events: Machine.events({}) }).handle({
   root: ({ input }) => ({ seed: input }),
-  initial: { target: targets.root.Loading, data: ({ root }) => ({ count: root.seed }) }
+  initial: { target: "Loading", data: ({ root }) => ({ count: root.seed }) }
 })
 ```
 
@@ -120,10 +118,9 @@ const Root = Machine.state({
     Network: { fields: { online: Schema.Boolean } }
   }
 })
-const targets = Machine.targets(Root)
 const machine = Machine.make({ root: Root, events: Machine.events({}) }).handle({
   initial: { Editor: { draft: "" }, Network: { online: false } },
-  states: { Editor: { initial: { target: targets.root.Editor.Editing } } }
+  states: { Editor: { initial: { target: "Editor.Editing" } } }
 })
 ```
 
@@ -148,25 +145,24 @@ const Root = Machine.state({
     Failed: { fields: { message: Schema.String } }
   }
 })
-const targets = Machine.targets(Root)
 const Events = Machine.events({ Search: { query: Schema.String }, Reset: {} })
 const Search = Machine.make({
   root: Root,
   events: Events
 }).handle({
   initial: {
-    target: targets.root.Idle
+    target: "Idle"
   },
   states: {
     Idle: {
       on: {
         Search: {
-          target: targets.root.Loading,
+          target: "Loading",
           data: ({ event }) => ({ query: event.query })
         }
       }
     },
-    Loading: { on: { Reset: { target: targets.root.Idle } } },
+    Loading: { on: { Reset: { target: "Idle" } } },
     Ready: {},
     Failed: {}
   }
@@ -196,12 +192,12 @@ const machine = Machine.make({
   events: Events,
   branches: {
     search: {
-      loading: { target: targets.root.Loading, title: "Query supplied" },
-      idle: { target: targets.root.Idle, title: "Empty query" }
+      loading: { target: "Loading", title: "Query supplied" },
+      idle: { target: "Idle", title: "Empty query" }
     }
   }
 }).handle({
-  initial: { target: targets.root.Idle },
+  initial: { target: "Idle" },
   states: {
     Idle: {
       on: {
@@ -234,24 +230,31 @@ restart its lifecycle.
 
 ### Select destinations and retain owners
 
-All references come from the same root descriptor supplied to `make`:
+Destinations are dotted paths through the root descriptor supplied to `make`,
+spelled the same way as snapshot paths. The root node is `"root"`, so a
+top-level state cannot use that name. Paths are checked at compile time and
+suggested by the editor:
 
-| Declaration                                           | Meaning                                                                   |
-| ----------------------------------------------------- | ------------------------------------------------------------------------- |
-| `{ target: targets.root.Checkout.Review, data: ... }` | Enter a declared destination with its value.                              |
-| `{ target: targets.root.Checkout, data: ... }`        | Enter the declared initial configuration of a compound or parallel state. |
-| `{ history: targets.root.Checkout.recent }`           | Restore a declared history state.                                         |
-| `{ update: targets.root.Checkout, data: ... }`        | Replace a retained active owner's value.                                  |
-| `{ target: targets.root, input: ... }`                | Reconstruct root and its initial children using fresh machine input.      |
-| `{ update: targets.root, data: ... }`                 | Replace root data and retain active descendants.                          |
-| `{ none: true }`                                      | Accept an event without changing the configuration.                       |
+| Declaration                                | Meaning                                                                   |
+| ------------------------------------------ | ------------------------------------------------------------------------- |
+| `{ target: "Checkout.Review", data: ... }` | Enter a declared destination with its value.                              |
+| `{ target: "Checkout", data: ... }`        | Enter the declared initial configuration of a compound or parallel state. |
+| `{ history: "Checkout.recent" }`           | Restore a declared history state.                                         |
+| `{ update: "Checkout", data: ... }`        | Replace a retained active owner's value.                                  |
+| `{ update: "root", data: ... }`            | Replace root data and retain active descendants.                          |
+| `{ initialize: ... }`                      | Reconstruct root and its initial children from fresh machine input.       |
+| `{ none: true }`                           | Accept an event without changing the configuration.                       |
+
+Declarations written inline are checked in place. A declaration stored in a
+variable before it reaches `make` or `.handle` needs `as const` so its paths
+remain literal.
 
 An atomic transition can enter a destination and update one retained owner:
 
 ```ts
 Save: {
-  target: targets.root.Checkout.Saving,
-  update: targets.root.Checkout,
+  target: "Checkout.Saving",
+  update: "Checkout",
   data: ({ event, ancestors }) => ({
     target: { request: event.request },
     update: { ...ancestors.Checkout, revision: event.revision }
@@ -260,14 +263,18 @@ Save: {
 ```
 
 The complete replacement values are validated before either change is applied.
-Advanced construction declares both references in a branch and uses
+Advanced construction declares both paths in a branch and uses
 `select.saved({ data: destinationValues, update: { data: ownerValues } })`.
 A retained owner must be active for that source and remain active through the
 transition. A sibling region's value cannot be updated through this operation.
 
 The runtime transition API does not replace arbitrary complete root
-configurations. Root targets accept fresh input and follow the initial declarations in `.handle`; history
-defaults retain complete subtree construction for restoration.
+configurations. The root is not a destination. `initialize` restarts it: it
+accepts fresh machine input, or `true` for a machine without input, and follows
+the root constructor and initial declarations in `.handle`. Add `reenter: true`
+to also exit and re-enter the root lifecycle. A branch declares
+`{ initialize: true }` and its resolver supplies `select.branch({ input })`.
+History defaults retain complete subtree construction for restoration.
 
 ### Protocols and ownership
 
@@ -318,7 +325,7 @@ const Search = Machine.make({
   children: { validation: ValidationChild }
 }).handle({
   initial: {
-    target: Machine.targets(Root).root.Idle
+    target: "Idle"
   },
   states: {
     Idle: {},
@@ -326,8 +333,8 @@ const Search = Machine.make({
       invoke: {
         src: "load",
         input: ({ state }) => state.query,
-        onDone: { target: targets.root.Ready, data: ({ output }) => ({ items: output }) },
-        onFailure: { target: targets.root.Failed, data: ({ error }) => ({ message: error.message }) }
+        onDone: { target: "Ready", data: ({ output }) => ({ items: output }) },
+        onFailure: { target: "Failed", data: ({ error }) => ({ message: error.message }) }
       }
     },
     Ready: {},
@@ -368,7 +375,7 @@ const invocations = [
     onDone: { none: true },
     onFailure: { none: true }
   },
-  { src: "timeout", onDone: { target: targets.root.Expired } },
+  { src: "timeout", onDone: { target: "Expired" } },
   { src: "worker", id: "worker", address: WorkerAddress, onSnapshot: { none: true } },
   { src: "validation", input: ({ state }) => ({ query: state.query }), onDone: { none: true } }
 ]

@@ -6,9 +6,8 @@ type Equal<Left, Right> = (<Type>() => Type extends Left ? 1 : 2) extends (<Type
   : false
 type Expect<Value extends true> = Value
 type IsAny<Value> = 0 extends 1 & Value ? true : false
-const targets = Machine.targets(States)
 const machine = Machine.make({
-  branches: { finish: { done: { target: targets.root.Done } } },
+  branches: { finish: { done: { target: "Done" } } },
   root: States,
   events: Machine.eventsFromSchemas(Start),
   internalEvents: Machine.internalEventsFromSchemas(Loaded),
@@ -17,7 +16,7 @@ const machine = Machine.make({
 })
 const complete = machine.handle({
   root: ({ input }) => ({ input }),
-  initial: { target: targets.root.Idle, data: ({ root }) => ({ value: root.input.seed }) },
+  initial: { target: "Idle", data: ({ root }) => ({ value: root.input.seed }) },
   states: {
     Idle: {
       entry: () => {},
@@ -29,7 +28,7 @@ const complete = machine.handle({
             return select.done({ data: Done.make({ value: event.value }) })
           }
         },
-        Loaded: { target: targets.root.Done, data: ({ event }) => ({ value: event.value }) }
+        Loaded: { target: "Done", data: ({ event }) => ({ value: event.value }) }
       }
     },
     Done: {

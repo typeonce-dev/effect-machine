@@ -28,12 +28,11 @@ const ReviewEvents = Machine.eventsFromSchemas(Schema.TaggedUnion({
 }))
 const saveReview: Effect.Effect<string, string> = Effect.succeed("deterministic-chart")
 const publishReview = Effect.succeed("deterministic-chart")
-const targets1 = Machine.targets(ReviewStates)
 export const hierarchyRoutingMachine = Machine.make({
   branches: {
     transition1: {
-      save: { target: targets1.root.Workflow.Saving, title: "Save the review" },
-      invalid: { target: targets1.root.Workflow.Review.Failed, title: "Show validation failure" }
+      save: { target: "Workflow.Saving", title: "Save the review" },
+      invalid: { target: "Workflow.Review.Failed", title: "Show validation failure" }
     }
   },
   effects: { source1: Effect.suspend(() => saveReview), source2: Effect.suspend(() => publishReview) },
@@ -42,18 +41,18 @@ export const hierarchyRoutingMachine = Machine.make({
   events: ReviewEvents
 }).handle({
   initial: {
-    target: Machine.targets(ReviewStates).root.Workflow
+    target: "Workflow"
   },
   states: {
     Workflow: {
       initial: {
-        target: Machine.targets(ReviewStates).root.Workflow.Review,
+        target: "Workflow.Review",
         data: { title: "A deterministic chart" }
       },
       states: {
         Review: {
           initial: {
-            target: Machine.targets(ReviewStates).root.Workflow.Review.Form
+            target: "Workflow.Review.Form"
           },
           on: {
             Submit: {
@@ -73,9 +72,9 @@ export const hierarchyRoutingMachine = Machine.make({
           invoke: {
             src: "source1",
             id: "save-review",
-            onDone: { target: targets1.root.Workflow.Publishing },
+            onDone: { target: "Workflow.Publishing" },
             onFailure: {
-              target: targets1.root.Workflow.Review.Failed,
+              target: "Workflow.Review.Failed",
               data: () => ({ message: "The review could not be saved." })
             }
           }
@@ -84,7 +83,7 @@ export const hierarchyRoutingMachine = Machine.make({
           invoke: {
             src: "source2",
             id: "publish-review",
-            onDone: { target: targets1.root.Workflow.Complete, data: ({ output }) => ({ slug: output }) }
+            onDone: { target: "Workflow.Complete", data: ({ output }) => ({ slug: output }) }
           }
         },
         Complete: {}

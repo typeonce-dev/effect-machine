@@ -306,3 +306,25 @@ test("adapts handler-owned initial edges without changing benchmark values", () 
   assert.deepEqual(machine.handlers.states.Active.initial, { target: count, data: { value: 0 } })
   assert.equal(machine.handlers.states.Active.states.Count.on.Increment.data, from)
 })
+
+test("adapts handler-owned initial edges to declared path strings", () => {
+  const rootApi = {
+    state: (node) => ({ node }),
+    events: () => [],
+    eventsFromSchemas: (...schemas) => schemas,
+    make: (config) => ({ handle: (handlers) => ({ config, handlers }) })
+  }
+  const api = makeEffectMachineBenchmarkApi(rootApi)
+  const schema = Symbol("schema")
+  const states = api.states({ Active: { schema, initial: "Count", states: { Count: schema } } })
+  const from = ({ state }) => ({ value: state.value + 1 })
+  const machine = api.make({
+    states: states.states,
+    events: [],
+    initial: api.initial({ target: (to) => to.Active.initial, values: { "Active.Count": { value: 0 } } })
+  }).handle({ Active: { states: { Count: { on: { Increment: api.transition({ target: (to) => to.local.Count(), from }) } } } } })
+  assert.equal(machine.handlers.initial.target, "Active")
+  assert.deepEqual(machine.handlers.states.Active.initial, { target: "Active.Count", data: { value: 0 } })
+  assert.equal(machine.handlers.states.Active.states.Count.on.Increment.target, "Active.Count")
+  assert.equal(machine.handlers.states.Active.states.Count.on.Increment.data, from)
+})

@@ -47,13 +47,12 @@ const waitForResult = <A, E>(
     Effect.map((values) => Array.from(values)[0]!)
   )
 const makeCounterMachine = () => {
-  const targets1 = Machine.targets(CounterStates)
   return Machine.make({
     root: CounterStates,
     events: Machine.eventsFromSchemas(Finish)
   }).handle({
     initial: {
-      target: Machine.targets(CounterStates).root.Count,
+      target: "Count",
       decoded: true,
       data: new Count({ value: 0 })
     },
@@ -61,7 +60,7 @@ const makeCounterMachine = () => {
       Count: {
         on: {
           Finish: {
-            target: targets1.root.Count,
+            target: "Count",
             decoded: true,
             data: ({ state, event }) => (new Count({ value: state.value + event.by }))
           }
@@ -76,14 +75,13 @@ const makeInputCounterMachine = () => {
     fields: { input: Schema.Number },
     states: { Count, Done: { schema: Done, type: "final" } }
   })
-  const targets2 = Machine.targets(InputCounterStates)
   return Machine.make({
     root: InputCounterStates,
     events: Machine.eventsFromSchemas(Finish),
     input: Schema.Number
   }).handle({
     initial: {
-      target: Machine.targets(InputCounterStates).root.Count,
+      target: "Count",
       decoded: true,
       data: ({ root: { input: input } }) => new Count({ value: input })
     },
@@ -92,7 +90,7 @@ const makeInputCounterMachine = () => {
       Count: {
         on: {
           Finish: {
-            target: targets2.root.Count,
+            target: "Count",
             decoded: true,
             data: ({ state, event }) => (new Count({ value: state.value + event.by }))
           }
@@ -147,7 +145,7 @@ describe("AtomMachine", () => {
         emittedEvents: Emissions
       }).handle({
         initial: {
-          target: Machine.targets(states).root.Idle,
+          target: "Idle",
           decoded: true,
           data: new Idle({})
         },
@@ -191,7 +189,6 @@ describe("AtomMachine", () => {
       let initialCalls = 0
       const invokeStarts = yield* Ref.make(0)
       const invokeStopped = yield* Deferred.make<void>()
-      const targets3 = Machine.targets(CounterStates)
       const machine = Machine.make({
         logic: {
           source1: Machine.logic({
@@ -203,7 +200,7 @@ describe("AtomMachine", () => {
         events: Machine.eventsFromSchemas(Finish)
       }).handle({
         initial: {
-          target: Machine.targets(CounterStates).root.Count,
+          target: "Count",
           decoded: true,
           data: () => {
             initialCalls += 1
@@ -215,7 +212,7 @@ describe("AtomMachine", () => {
             invoke: { src: "source1", id: "active", address: Machine.childAddress("active") },
             on: {
               Finish: {
-                target: targets3.root.Count,
+                target: "Count",
                 decoded: true,
                 data: ({ event, state }) => (new Count({ value: state.value + event.by }))
               }
@@ -263,14 +260,13 @@ describe("AtomMachine", () => {
       const childMachine = makeCounterMachine()
       const Child = Machine.child("counter", childMachine)
       const root4 = Machine.state({ states: { Count, ValueRead } })
-      const targets4 = Machine.targets(root4)
       const parent = Machine.make({
         children: { source1: Child },
         root: root4,
         events: Machine.eventsFromSchemas(Finish, ReadValue)
       }).handle({
         initial: {
-          target: Machine.targets(root4).root.Count,
+          target: "Count",
           decoded: true,
           data: new Count({ value: 0 })
         },
@@ -278,7 +274,7 @@ describe("AtomMachine", () => {
           Count: {
             on: {
               Finish: {
-                target: targets4.root.ValueRead,
+                target: "ValueRead",
                 decoded: true,
                 data: () => (new ValueRead({ value: "active" }))
               }
@@ -287,7 +283,7 @@ describe("AtomMachine", () => {
           ValueRead: {
             invoke: { src: "source1", onDone: { none: true } },
             on: {
-              ReadValue: { target: targets4.root.Count, decoded: true, data: () => (new Count({ value: 0 })) }
+              ReadValue: { target: "Count", decoded: true, data: () => (new Count({ value: 0 })) }
             }
           }
         }
@@ -398,7 +394,7 @@ describe("AtomMachine", () => {
         events: Machine.eventsFromSchemas()
       }).handle({
         initial: {
-          target: Machine.targets(root5).root.Count,
+          target: "Count",
           decoded: true,
           data: new Count({ value: 0 })
         },
@@ -459,7 +455,7 @@ describe("AtomMachine", () => {
         events: Machine.eventsFromSchemas()
       }).handle({
         initial: {
-          target: Machine.targets(root6).root.Count,
+          target: "Count",
           decoded: true,
           data: new Count({ value: 0 })
         },
@@ -523,7 +519,7 @@ describe("AtomMachine", () => {
       input: Schema.Any
     }).handle({
       initial: {
-        target: Machine.targets(CounterStates).root.Count,
+        target: "Count",
         decoded: true,
         data: new Count({ value: 0 })
       },
@@ -699,14 +695,13 @@ describe("AtomMachine", () => {
       })
       let requiredResolverCalls = 0
       let declinableResolverCalls = 0
-      const targets7 = Machine.targets(states)
       const machine = Machine.make({
-        branches: { transition1: { destination: { target: targets7.root.CanDone } } },
+        branches: { transition1: { destination: { target: "CanDone" } } },
         root: states,
         events
       }).handle({
         initial: {
-          target: Machine.targets(states).root.CanIdle,
+          target: "CanIdle",
           decoded: true,
           data: new CanIdle({})
         },
@@ -793,7 +788,7 @@ describe("AtomMachine", () => {
         emittedEvents: emissions
       }).handle({
         initial: {
-          target: Machine.targets(CounterStates).root.Count,
+          target: "Count",
           decoded: true,
           data: new Count({ value: 0 })
         },
@@ -819,21 +814,20 @@ describe("AtomMachine", () => {
       }
       const failure = new Error("runtime failed")
       const root8 = Machine.state({ states: { FaultIdle, FaultLoading } })
-      const targets8 = Machine.targets(root8)
       const faultMachine = Machine.make({
         effects: { source1: Effect.suspend(() => Effect.die(failure)) },
         root: root8,
         events: Machine.eventsFromSchemas(Begin)
       }).handle({
         initial: {
-          target: Machine.targets(root8).root.FaultIdle,
+          target: "FaultIdle",
           decoded: true,
           data: new FaultIdle({})
         },
         states: {
           FaultIdle: {
             on: {
-              Begin: { target: targets8.root.FaultLoading, decoded: true, data: () => (new FaultLoading({})) }
+              Begin: { target: "FaultLoading", decoded: true, data: () => (new FaultLoading({})) }
             }
           },
           FaultLoading: {
@@ -884,7 +878,7 @@ describe("AtomMachine", () => {
         events: Machine.eventsFromSchemas()
       }).handle({
         initial: {
-          target: Machine.targets(states).root.Ready,
+          target: "Ready",
           decoded: true,
           data: new Ready({})
         },
@@ -899,7 +893,7 @@ describe("AtomMachine", () => {
                 initial: {
                   decoded: true,
                   data: new Editing({}),
-                  target: Machine.targets(states).root.Ready.editor.Editing
+                  target: "Ready.editor.Editing"
                 },
                 states: {
                   Editing: {},
@@ -908,7 +902,7 @@ describe("AtomMachine", () => {
               },
               network: {
                 initial: {
-                  target: Machine.targets(states).root.Ready.network.Online,
+                  target: "Ready.network.Online",
                   decoded: true,
                   data: new Online({})
                 },
@@ -1021,13 +1015,12 @@ describe("AtomMachine", () => {
           }
         }
       })
-      const targets9 = Machine.targets(root9)
       const machine = Machine.make({
         root: root9,
         events: Machine.eventsFromSchemas(Finish)
       }).handle({
         initial: {
-          target: Machine.targets(root9).root.Count,
+          target: "Count",
           decoded: true,
           data: new Count({ value: 1 })
         },
@@ -1035,7 +1028,7 @@ describe("AtomMachine", () => {
           Count: {
             on: {
               Finish: {
-                target: targets9.root.Done,
+                target: "Done",
                 decoded: true,
                 data: ({ state, event }) => (new Done({ value: state.value + event.by }))
               }

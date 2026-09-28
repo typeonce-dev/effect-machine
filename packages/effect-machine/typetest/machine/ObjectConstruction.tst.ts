@@ -23,15 +23,14 @@ describe("object construction", () => {
         }
       }
     })
-    const targets = Machine.targets(root)
     Machine.make({
       root,
       events: Machine.events({ Open: {} }),
       branches: {
-        open: { checkout: { target: targets.root.Checkout }, work: { target: targets.root.Work } }
+        open: { checkout: { target: "Checkout" }, work: { target: "Work" } }
       }
     }).handle({
-      initial: { target: targets.root.Idle },
+      initial: { target: "Idle" },
       states: {
         Idle: {
           on: {
@@ -75,7 +74,7 @@ describe("object construction", () => {
         },
         Checkout: {
           initial: {
-            target: targets.root.Checkout.Review,
+            target: "Checkout.Review",
             data: (context) => {
               expect(context).type.not.toHaveProperty("input")
               return { total: 0 }

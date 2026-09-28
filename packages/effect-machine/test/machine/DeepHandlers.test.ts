@@ -74,88 +74,84 @@ const States = Machine.state({
     }
   }
 })
-const targets1 = Machine.targets(States)
 const machine = Machine.make({
   root: States,
   events: Machine.eventsFromSchemas(Advance)
 }).handle({
-  initial: { target: Machine.targets(States).root.n0, decoded: true, data: new NodeState({ level: 0 }) },
+  initial: { target: "n0", decoded: true, data: new NodeState({ level: 0 }) },
   states: {
     n0: {
-      initial: { target: Machine.targets(States).root.n0.n1, decoded: true, data: new NodeState({ level: 1 }) },
+      initial: { target: "n0.n1", decoded: true, data: new NodeState({ level: 1 }) },
       states: {
         n1: {
-          initial: { target: Machine.targets(States).root.n0.n1.n2, decoded: true, data: new NodeState({ level: 2 }) },
+          initial: { target: "n0.n1.n2", decoded: true, data: new NodeState({ level: 2 }) },
           states: {
             n2: {
               initial: {
-                target: Machine.targets(States).root.n0.n1.n2.n3,
+                target: "n0.n1.n2.n3",
                 decoded: true,
                 data: new NodeState({ level: 3 })
               },
               states: {
                 n3: {
                   initial: {
-                    target: Machine.targets(States).root.n0.n1.n2.n3.n4,
+                    target: "n0.n1.n2.n3.n4",
                     decoded: true,
                     data: new NodeState({ level: 4 })
                   },
                   states: {
                     n4: {
                       initial: {
-                        target: Machine.targets(States).root.n0.n1.n2.n3.n4.n5,
+                        target: "n0.n1.n2.n3.n4.n5",
                         decoded: true,
                         data: new NodeState({ level: 5 })
                       },
                       states: {
                         n5: {
                           initial: {
-                            target: Machine.targets(States).root.n0.n1.n2.n3.n4.n5.n6,
+                            target: "n0.n1.n2.n3.n4.n5.n6",
                             decoded: true,
                             data: new NodeState({ level: 6 })
                           },
                           states: {
                             n6: {
                               initial: {
-                                target: Machine.targets(States).root.n0.n1.n2.n3.n4.n5.n6.n7,
+                                target: "n0.n1.n2.n3.n4.n5.n6.n7",
                                 decoded: true,
                                 data: new NodeState({ level: 7 })
                               },
                               states: {
                                 n7: {
                                   initial: {
-                                    target: Machine.targets(States).root.n0.n1.n2.n3.n4.n5.n6.n7.n8,
+                                    target: "n0.n1.n2.n3.n4.n5.n6.n7.n8",
                                     decoded: true,
                                     data: new NodeState({ level: 8 })
                                   },
                                   states: {
                                     n8: {
                                       initial: {
-                                        target: Machine.targets(States).root.n0.n1.n2.n3.n4.n5.n6.n7.n8.n9,
+                                        target: "n0.n1.n2.n3.n4.n5.n6.n7.n8.n9",
                                         decoded: true,
                                         data: new NodeState({ level: 9 })
                                       },
                                       states: {
                                         n9: {
                                           initial: {
-                                            target: Machine.targets(States).root.n0.n1.n2.n3.n4.n5.n6.n7.n8.n9.n10,
+                                            target: "n0.n1.n2.n3.n4.n5.n6.n7.n8.n9.n10",
                                             decoded: true,
                                             data: new NodeState({ level: 10 })
                                           },
                                           states: {
                                             n10: {
                                               initial: {
-                                                target:
-                                                  Machine.targets(States).root.n0.n1.n2.n3.n4.n5.n6.n7.n8.n9.n10.n11,
+                                                target: "n0.n1.n2.n3.n4.n5.n6.n7.n8.n9.n10.n11",
                                                 decoded: true,
                                                 data: new NodeState({ level: 11 })
                                               },
                                               states: {
                                                 n11: {
                                                   initial: {
-                                                    target:
-                                                      Machine.targets(States).root.n0.n1.n2.n3.n4.n5.n6.n7.n8.n9.n10.n11
-                                                        .idle,
+                                                    target: "n0.n1.n2.n3.n4.n5.n6.n7.n8.n9.n10.n11.idle",
                                                     decoded: true,
                                                     data: new DeepIdle({ value: "initial" })
                                                   },
@@ -163,8 +159,7 @@ const machine = Machine.make({
                                                     idle: {
                                                       on: {
                                                         Advance: {
-                                                          target:
-                                                            targets1.root.n0.n1.n2.n3.n4.n5.n6.n7.n8.n9.n10.n11.done,
+                                                          target: "n0.n1.n2.n3.n4.n5.n6.n7.n8.n9.n10.n11.done",
                                                           decoded: true,
                                                           data: ({ event }) => (new DeepDone({ value: event.value }))
                                                         }

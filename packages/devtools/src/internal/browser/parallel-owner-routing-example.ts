@@ -51,7 +51,7 @@ export const parallelOwnerRoutingChildMachine = Machine.make({
   parent: Machine.parent(ChildParentEvents)
 }).handle({
   initial: {
-    target: Machine.targets(ParallelOwnerChildStates).root.Idle,
+    target: "Idle",
     decoded: true,
     data: new ChildIdle({})
   },
@@ -91,7 +91,6 @@ const ParallelOwnerStates = Machine.state({
     }
   }
 })
-const targets2 = Machine.targets(ParallelOwnerStates)
 export const parallelOwnerRoutingMachine = Machine.make({
   children: { source1: ParallelOwnerChild },
   id: "parallel-owner-routing",
@@ -99,7 +98,7 @@ export const parallelOwnerRoutingMachine = Machine.make({
   events: Machine.eventsFromSchemas(PrintRequested, ChildParentEvents)
 }).handle({
   initial: {
-    target: Machine.targets(ParallelOwnerStates).root.Print,
+    target: "Print",
     decoded: true,
     data: new Print({})
   },
@@ -108,11 +107,11 @@ export const parallelOwnerRoutingMachine = Machine.make({
       initial: { Options: ({}) => ({}), Operation: ({}) => ({}) },
       invoke: {
         src: "source1",
-        onFailure: { target: targets2.root.Print.Operation.Active, decoded: true, data: () => (new Active({})) }
+        onFailure: { target: "Print.Operation.Active", decoded: true, data: () => (new Active({})) }
       },
       on: {
         PrintRequested: {
-          target: targets2.root.Print.Operation.Printing,
+          target: "Print.Operation.Printing",
           decoded: true,
           data: () => (new Printing({}))
         }
@@ -120,7 +119,7 @@ export const parallelOwnerRoutingMachine = Machine.make({
       states: {
         Options: {
           initial: {
-            target: Machine.targets(ParallelOwnerStates).root.Print.Options.Ready,
+            target: "Print.Options.Ready",
             data: ({}) => ({})
           },
           states: {
@@ -129,7 +128,7 @@ export const parallelOwnerRoutingMachine = Machine.make({
         },
         Operation: {
           initial: {
-            target: Machine.targets(ParallelOwnerStates).root.Print.Operation.Active,
+            target: "Print.Operation.Active",
             data: ({}) => ({})
           },
           states: {

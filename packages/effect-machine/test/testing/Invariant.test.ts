@@ -14,13 +14,12 @@ class Deposit extends Schema.TaggedClass<Deposit>("Deposit")("Deposit", {
 }) {}
 const States = Machine.state({ states: { account: Account } })
 const makeAccountMachine = (withdraw: (balance: number, amount: number) => number) => {
-  const targets1 = Machine.targets(States)
   return Machine.make({
     root: States,
     events: Machine.eventsFromSchemas(Withdraw, Deposit)
   }).handle({
     initial: {
-      target: Machine.targets(States).root.account,
+      target: "account",
       decoded: true,
       data: new Account({ balance: 10 })
     },
@@ -28,12 +27,12 @@ const makeAccountMachine = (withdraw: (balance: number, amount: number) => numbe
       account: {
         on: {
           Withdraw: {
-            target: targets1.root.account,
+            target: "account",
             decoded: true,
             data: ({ event, state }) => (new Account({ balance: withdraw(state.balance, event.amount) }))
           },
           Deposit: {
-            target: targets1.root.account,
+            target: "account",
             decoded: true,
             data: ({ event, state }) => (new Account({ balance: state.balance + event.amount }))
           }

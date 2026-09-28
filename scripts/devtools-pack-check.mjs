@@ -88,7 +88,7 @@ export const machine = Machine.make({
   id: "packed-fixture",
   root,
   events: Machine.events({})
-}).handle({ initial: { target: Machine.targets(root).root.Idle },})
+}).handle({ initial: { target: "Idle" } })
 `
 
 try {

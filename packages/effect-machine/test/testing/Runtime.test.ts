@@ -17,14 +17,13 @@ class Ignored extends Schema.TaggedClass<Ignored>("RuntimeIgnored")("Ignored", {
 class Burst extends Schema.TaggedClass<Burst>("RuntimeBurst")("Burst", {}) {}
 const CounterStates = Machine.state({ states: { Counter } })
 const makeCounterMachine = () => {
-  const targets1 = Machine.targets(CounterStates)
   return Machine.make({
     root: CounterStates,
     events: Machine.eventsFromSchemas(Add),
     internalEvents: Machine.internalEventsFromSchemas(InternalAdd)
   }).handle({
     initial: {
-      target: Machine.targets(CounterStates).root.Counter,
+      target: "Counter",
       decoded: true,
       data: new Counter({ count: 0 })
     },
@@ -32,12 +31,12 @@ const makeCounterMachine = () => {
       Counter: {
         on: {
           Add: {
-            target: targets1.root.Counter,
+            target: "Counter",
             decoded: true,
             data: ({ event, state }) => (new Counter({ count: state.count + event.amount }))
           },
           InternalAdd: {
-            target: targets1.root.Counter,
+            target: "Counter",
             decoded: true,
             data: ({ event, state }) => (new Counter({ count: state.count + event.amount }))
           }
@@ -46,15 +45,14 @@ const makeCounterMachine = () => {
     }
   })
 }
-const targets2 = Machine.targets(CounterStates)
 const causalMachine = Machine.make({
-  branches: { transition2: { destination: { target: targets2.root.Counter } } },
+  branches: { transition2: { destination: { target: "Counter" } } },
   root: CounterStates,
   events: Machine.eventsFromSchemas(Add, Noop, Ignored, Burst),
   internalEvents: Machine.internalEventsFromSchemas(InternalAdd)
 }).handle({
   initial: {
-    target: Machine.targets(CounterStates).root.Counter,
+    target: "Counter",
     decoded: true,
     data: new Counter({ count: 0 })
   },
@@ -62,7 +60,7 @@ const causalMachine = Machine.make({
     Counter: {
       on: {
         Add: {
-          target: targets2.root.Counter,
+          target: "Counter",
           decoded: true,
           data: ({ event, state }) => (new Counter({ count: state.count + event.amount }))
         },
@@ -75,7 +73,7 @@ const causalMachine = Machine.make({
           }
         },
         InternalAdd: {
-          target: targets2.root.Counter,
+          target: "Counter",
           decoded: true,
           data: ({ event, state }) => (new Counter({ count: state.count + event.amount }))
         }
@@ -284,7 +282,6 @@ describe("MachineTest runtime commands", () => {
       class Timeout extends Schema.TaggedClass<Timeout>("Timeout")("Timeout", {}) {
       }
       const states = Machine.state({ states: { Waiting, TimedOut } })
-      const targets3 = Machine.targets(states)
       const machine = Machine.make({
         timers: { source1: "1 second" },
         root: states,
@@ -292,7 +289,7 @@ describe("MachineTest runtime commands", () => {
         internalEvents: Machine.internalEventsFromSchemas(Timeout)
       }).handle({
         initial: {
-          target: Machine.targets(states).root.Waiting,
+          target: "Waiting",
           decoded: true,
           data: new Waiting({})
         },
@@ -301,7 +298,7 @@ describe("MachineTest runtime commands", () => {
             invoke: {
               src: "source1",
               id: "timeout",
-              onDone: { target: targets3.root.TimedOut, decoded: true, data: () => (new TimedOut({})) }
+              onDone: { target: "TimedOut", decoded: true, data: () => (new TimedOut({})) }
             }
           },
           TimedOut: {}
@@ -746,7 +743,6 @@ describe("MachineTest causal runtime commands", () => {
       class Timeout extends Schema.TaggedClass<Timeout>("CausalTimeout")("Timeout", {}) {
       }
       const states = Machine.state({ states: { Waiting, TimedOut } })
-      const targets4 = Machine.targets(states)
       const timerMachine = Machine.make({
         timers: { source1: "1 second" },
         root: states,
@@ -754,7 +750,7 @@ describe("MachineTest causal runtime commands", () => {
         internalEvents: Machine.internalEventsFromSchemas(Timeout)
       }).handle({
         initial: {
-          target: Machine.targets(states).root.Waiting,
+          target: "Waiting",
           decoded: true,
           data: new Waiting({})
         },
@@ -763,7 +759,7 @@ describe("MachineTest causal runtime commands", () => {
             invoke: {
               src: "source1",
               id: "timeout",
-              onDone: { target: targets4.root.TimedOut, decoded: true, data: () => (new TimedOut({})) }
+              onDone: { target: "TimedOut", decoded: true, data: () => (new TimedOut({})) }
             }
           },
           TimedOut: {}

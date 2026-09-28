@@ -44,7 +44,7 @@ describe("Machine.EventByTag", () => {
       events: Machine.eventsFromSchemas(FiniteUnion)
     }).handle({
       initial: {
-        target: Machine.targets(states).root.Idle,
+        target: "Idle",
         decoded: true,
         data: new Idle({})
       },

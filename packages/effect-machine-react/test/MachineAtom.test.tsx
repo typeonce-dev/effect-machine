@@ -15,14 +15,13 @@ class Active extends Schema.TaggedClass<Active>("Active")("Active", {
 class Increment extends Schema.TaggedClass<Increment>("Increment")("Increment", {}) {}
 const States = Machine.state({ fields: { seed: Schema.Number }, states: { Active } })
 const trackedMachine = (onStart: () => void) => {
-  const targets1 = Machine.targets(States)
   return Machine.make({
     root: States,
     events: Machine.eventsFromSchemas(Increment),
     input: Schema.Number
   }).handle({
     root: ({ input }) => ({ seed: input }),
-    initial: { target: targets1.root.Active, data: ({ root }) => ({ value: root.seed }) },
+    initial: { target: "Active", data: ({ root }) => ({ value: root.seed }) },
     entry: () => {
       onStart()
       return undefined
@@ -31,7 +30,7 @@ const trackedMachine = (onStart: () => void) => {
       Active: {
         on: {
           Increment: {
-            target: targets1.root.Active,
+            target: "Active",
             decoded: true,
             data: ({ state }) => (new Active({ value: state.value + 1 }))
           }

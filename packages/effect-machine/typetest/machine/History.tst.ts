@@ -153,27 +153,25 @@ describe("Machine history states", () => {
   })
   it("excludes history pseudo-states from initial edges", () => {
     const root = Machine.state({ states: { Idle: {}, recent: { type: "history" } } })
-    const targets = Machine.targets(root)
     const definition = Machine.make({ root, events: Machine.events({}) })
-    expect(definition.handle).type.toBeCallableWith({ initial: { target: targets.root.Idle } })
-    expect(definition.handle).type.not.toBeCallableWith({ initial: { target: targets.root.recent } })
+    expect(definition.handle).type.toBeCallableWith({ initial: { target: "Idle" } })
+    expect(definition.handle).type.not.toBeCallableWith({ initial: { target: "recent" } })
   })
   it("exposes history references without value overrides", () => {
-    const targets1 = Machine.targets(States)
     const definition = Machine.make({
       root: States,
       events: Machine.eventsFromSchemas(Resume)
     })
     const incomplete = definition.handle({
       initial: {
-        target: Machine.targets(States).root.support,
+        target: "support",
         decoded: true,
         data: new Support({})
       },
       states: {
         checkout: {
           initial: {
-            target: Machine.targets(States).root.checkout.shipping,
+            target: "checkout.shipping",
             data: () => {
               throw new Error("type-only constructor")
             }
@@ -182,7 +180,7 @@ describe("Machine history states", () => {
             shipping: {},
             payment: {
               initial: {
-                target: Machine.targets(States).root.checkout.payment.cardEntry,
+                target: "checkout.payment.cardEntry",
                 data: () => {
                   throw new Error("type-only constructor")
                 }
@@ -193,17 +191,15 @@ describe("Machine history states", () => {
         },
         support: {
           on: {
-            Resume: { history: targets1.root.checkout.exact }
+            Resume: { history: "checkout.exact" }
           }
         }
       }
     })
     expect(incomplete).type.toBeAssignableTo<Machine.Machine.Any>()
-    expect(targets1.root.checkout.exact).type.not.toBeAssignableTo<() => unknown>()
-    expect(targets1.root.checkout.exact).type.not.toHaveProperty("from")
     expect(definition.handle).type.toBeCallableWith({
       initial: {
-        target: Machine.targets(States).root.checkout,
+        target: "checkout",
         data: () => {
           throw new Error("type-only constructor")
         }
@@ -211,7 +207,7 @@ describe("Machine history states", () => {
       states: {
         checkout: {
           initial: {
-            target: Machine.targets(States).root.checkout.shipping,
+            target: "checkout.shipping",
             data: () => {
               throw new Error("type-only constructor")
             }
@@ -219,7 +215,7 @@ describe("Machine history states", () => {
           states: {
             payment: {
               initial: {
-                target: Machine.targets(States).root.checkout.payment.cardEntry,
+                target: "checkout.payment.cardEntry",
                 data: () => {
                   throw new Error("type-only constructor")
                 }
@@ -231,10 +227,10 @@ describe("Machine history states", () => {
     })
     expect(definition.handle).type.not.toBeCallableWith({
       states: {
-        support: { on: { Resume: { history: targets1.root.checkout.exact, from: () => ({}) } } },
+        support: { on: { Resume: { history: "checkout.exact", from: () => ({}) } } },
         checkout: {
           initial: {
-            target: Machine.targets(States).root.checkout.shipping,
+            target: "checkout.shipping",
             data: () => {
               throw new Error("type-only constructor")
             }
@@ -242,7 +238,7 @@ describe("Machine history states", () => {
           states: {
             payment: {
               initial: {
-                target: Machine.targets(States).root.checkout.payment.cardEntry,
+                target: "checkout.payment.cardEntry",
                 data: () => {
                   throw new Error("type-only constructor")
                 }
@@ -252,7 +248,7 @@ describe("Machine history states", () => {
         }
       },
       initial: {
-        target: Machine.targets(States).root.checkout,
+        target: "checkout",
         data: () => {
           throw new Error("type-only constructor")
         }
@@ -265,22 +261,21 @@ describe("Machine history states", () => {
         readonly "": typeof States.node
       }>
     >().type.toBe<"checkout.payment">()
-    const targets2 = Machine.targets(States)
     const definition = Machine.make({
-      branches: { transition1: { destination: { history: targets2.root.checkout.recent } } },
+      branches: { transition1: { destination: { history: "checkout.recent" } } },
       root: States,
       events: Machine.eventsFromSchemas(Resume)
     })
     const incomplete = definition.handle({
       initial: {
-        target: Machine.targets(States).root.support,
+        target: "support",
         decoded: true,
         data: new Support({})
       },
       states: {
         checkout: {
           initial: {
-            target: Machine.targets(States).root.checkout.shipping,
+            target: "checkout.shipping",
             data: () => {
               throw new Error("type-only constructor")
             }
@@ -289,7 +284,7 @@ describe("Machine history states", () => {
             shipping: {},
             payment: {
               initial: {
-                target: Machine.targets(States).root.checkout.payment.cardEntry,
+                target: "checkout.payment.cardEntry",
                 data: () => {
                   throw new Error("type-only constructor")
                 }
@@ -308,14 +303,14 @@ describe("Machine history states", () => {
     expect(Machine.planInitial).type.not.toBeCallableWith(incomplete)
     const complete = definition.handle({
       initial: {
-        target: Machine.targets(States).root.support,
+        target: "support",
         decoded: true,
         data: new Support({})
       },
       states: {
         checkout: {
           initial: {
-            target: Machine.targets(States).root.checkout.shipping,
+            target: "checkout.shipping",
             data: () => {
               throw new Error("type-only constructor")
             }
@@ -357,7 +352,7 @@ describe("Machine history states", () => {
             shipping: {},
             payment: {
               initial: {
-                target: Machine.targets(States).root.checkout.payment.cardEntry,
+                target: "checkout.payment.cardEntry",
                 data: () => {
                   throw new Error("type-only constructor")
                 }
@@ -378,14 +373,14 @@ describe("Machine history states", () => {
     })
     machine.handle({
       initial: {
-        target: Machine.targets(States).root.support,
+        target: "support",
         decoded: true,
         data: new Support({})
       },
       states: {
         checkout: {
           initial: {
-            target: Machine.targets(States).root.checkout.shipping,
+            target: "checkout.shipping",
             data: () => {
               throw new Error("type-only constructor")
             }
@@ -422,7 +417,7 @@ describe("Machine history states", () => {
             shipping: {},
             payment: {
               initial: {
-                target: Machine.targets(States).root.checkout.payment.cardEntry,
+                target: "checkout.payment.cardEntry",
                 data: () => {
                   throw new Error("type-only constructor")
                 }
@@ -436,14 +431,14 @@ describe("Machine history states", () => {
     })
     machine.handle({
       initial: {
-        target: Machine.targets(States).root.support,
+        target: "support",
         decoded: true,
         data: new Support({})
       },
       states: {
         checkout: {
           initial: {
-            target: Machine.targets(States).root.checkout.shipping,
+            target: "checkout.shipping",
             data: () => {
               throw new Error("type-only constructor")
             }
@@ -452,7 +447,7 @@ describe("Machine history states", () => {
             shipping: {},
             payment: {
               initial: {
-                target: Machine.targets(States).root.checkout.payment.cardEntry,
+                target: "checkout.payment.cardEntry",
                 data: () => {
                   throw new Error("type-only constructor")
                 }
@@ -466,7 +461,7 @@ describe("Machine history states", () => {
     })
     expect(machine.handle).type.toBeCallableWith({
       initial: {
-        target: Machine.targets(States).root.checkout,
+        target: "checkout",
         data: () => {
           throw new Error("type-only constructor")
         }
@@ -474,7 +469,7 @@ describe("Machine history states", () => {
       states: {
         checkout: {
           initial: {
-            target: Machine.targets(States).root.checkout.shipping,
+            target: "checkout.shipping",
             data: () => {
               throw new Error("type-only constructor")
             }
@@ -482,7 +477,7 @@ describe("Machine history states", () => {
           states: {
             payment: {
               initial: {
-                target: Machine.targets(States).root.checkout.payment.cardEntry,
+                target: "checkout.payment.cardEntry",
                 data: () => {
                   throw new Error("type-only constructor")
                 }
@@ -499,7 +494,7 @@ describe("Machine history states", () => {
             recent: {},
             payment: {
               initial: {
-                target: Machine.targets(States).root.checkout.payment.cardEntry,
+                target: "checkout.payment.cardEntry",
                 data: () => {
                   throw new Error("type-only constructor")
                 }
@@ -507,7 +502,7 @@ describe("Machine history states", () => {
             }
           },
           initial: {
-            target: Machine.targets(States).root.checkout.shipping,
+            target: "checkout.shipping",
             data: () => {
               throw new Error("type-only constructor")
             }
@@ -515,7 +510,7 @@ describe("Machine history states", () => {
         }
       },
       initial: {
-        target: Machine.targets(States).root.checkout,
+        target: "checkout",
         data: () => {
           throw new Error("type-only constructor")
         }
@@ -538,14 +533,14 @@ describe("Machine history states", () => {
     })
     const complete = machine.handle({
       initial: {
-        target: Machine.targets(NestedStates).root.Closed,
+        target: "Closed",
         decoded: true,
         data: new Closed({})
       },
       states: {
         App: {
           initial: {
-            target: Machine.targets(NestedStates).root.App.Workspace,
+            target: "App.Workspace",
             data: () => {
               throw new Error("type-only constructor")
             }
@@ -569,7 +564,7 @@ describe("Machine history states", () => {
               states: {
                 Editor: {
                   initial: {
-                    target: Machine.targets(NestedStates).root.App.Workspace.Editor.Editing,
+                    target: "App.Workspace.Editor.Editing",
                     data: () => {
                       throw new Error("type-only constructor")
                     }
@@ -596,7 +591,7 @@ describe("Machine history states", () => {
     expect(Machine.planInitial).type.toBeCallableWith(complete)
     expect(machine.handle).type.toBeCallableWith({
       initial: {
-        target: Machine.targets(NestedStates).root.App,
+        target: "App",
         data: () => {
           throw new Error("type-only constructor")
         }
@@ -604,7 +599,7 @@ describe("Machine history states", () => {
       states: {
         App: {
           initial: {
-            target: Machine.targets(NestedStates).root.App.Workspace,
+            target: "App.Workspace",
             data: () => {
               throw new Error("type-only constructor")
             }
@@ -622,7 +617,7 @@ describe("Machine history states", () => {
               states: {
                 Editor: {
                   initial: {
-                    target: Machine.targets(NestedStates).root.App.Workspace.Editor.Editing,
+                    target: "App.Workspace.Editor.Editing",
                     data: () => {
                       throw new Error("type-only constructor")
                     }
@@ -658,7 +653,7 @@ describe("Machine history states", () => {
               states: {
                 Editor: {
                   initial: {
-                    target: Machine.targets(NestedStates).root.App.Workspace.Editor.Editing,
+                    target: "App.Workspace.Editor.Editing",
                     data: () => {
                       throw new Error("type-only constructor")
                     }
@@ -668,7 +663,7 @@ describe("Machine history states", () => {
             }
           },
           initial: {
-            target: Machine.targets(NestedStates).root.App.Workspace,
+            target: "App.Workspace",
             data: () => {
               throw new Error("type-only constructor")
             }
@@ -676,7 +671,7 @@ describe("Machine history states", () => {
         }
       },
       initial: {
-        target: Machine.targets(NestedStates).root.App,
+        target: "App",
         data: () => {
           throw new Error("type-only constructor")
         }
@@ -710,7 +705,7 @@ describe("Machine history states", () => {
               states: {
                 Editor: {
                   initial: {
-                    target: Machine.targets(NestedStates).root.App.Workspace.Editor.Editing,
+                    target: "App.Workspace.Editor.Editing",
                     data: () => {
                       throw new Error("type-only constructor")
                     }
@@ -720,7 +715,7 @@ describe("Machine history states", () => {
             }
           },
           initial: {
-            target: Machine.targets(NestedStates).root.App.Workspace,
+            target: "App.Workspace",
             data: () => {
               throw new Error("type-only constructor")
             }
@@ -728,7 +723,7 @@ describe("Machine history states", () => {
         }
       },
       initial: {
-        target: Machine.targets(NestedStates).root.App,
+        target: "App",
         data: () => {
           throw new Error("type-only constructor")
         }
@@ -772,7 +767,7 @@ describe("Machine history states", () => {
               states: {
                 Editor: {
                   initial: {
-                    target: Machine.targets(NestedStates).root.App.Workspace.Editor.Editing,
+                    target: "App.Workspace.Editor.Editing",
                     data: () => {
                       throw new Error("type-only constructor")
                     }
@@ -782,7 +777,7 @@ describe("Machine history states", () => {
             }
           },
           initial: {
-            target: Machine.targets(NestedStates).root.App.Workspace,
+            target: "App.Workspace",
             data: () => {
               throw new Error("type-only constructor")
             }
@@ -790,7 +785,7 @@ describe("Machine history states", () => {
         }
       },
       initial: {
-        target: Machine.targets(NestedStates).root.App,
+        target: "App",
         data: () => {
           throw new Error("type-only constructor")
         }
@@ -830,7 +825,7 @@ describe("Machine history states", () => {
               states: {
                 Editor: {
                   initial: {
-                    target: Machine.targets(NestedStates).root.App.Workspace.Editor.Editing,
+                    target: "App.Workspace.Editor.Editing",
                     data: () => {
                       throw new Error("type-only constructor")
                     }
@@ -840,7 +835,7 @@ describe("Machine history states", () => {
             }
           },
           initial: {
-            target: Machine.targets(NestedStates).root.App.Workspace,
+            target: "App.Workspace",
             data: () => {
               throw new Error("type-only constructor")
             }
@@ -848,7 +843,7 @@ describe("Machine history states", () => {
         }
       },
       initial: {
-        target: Machine.targets(NestedStates).root.App,
+        target: "App",
         data: () => {
           throw new Error("type-only constructor")
         }
@@ -862,7 +857,7 @@ describe("Machine history states", () => {
     })
     expect(machine.handle).type.toBeCallableWith({
       initial: {
-        target: Machine.targets(NestedStates).root.App,
+        target: "App",
         data: () => {
           throw new Error("type-only constructor")
         }
@@ -870,7 +865,7 @@ describe("Machine history states", () => {
       states: {
         App: {
           initial: {
-            target: Machine.targets(NestedStates).root.App.Workspace,
+            target: "App.Workspace",
             data: () => {
               throw new Error("type-only constructor")
             }
@@ -888,7 +883,7 @@ describe("Machine history states", () => {
               states: {
                 Editor: {
                   initial: {
-                    target: Machine.targets(NestedStates).root.App.Workspace.Editor.Editing,
+                    target: "App.Workspace.Editor.Editing",
                     data: () => {
                       throw new Error("type-only constructor")
                     }
@@ -921,7 +916,7 @@ describe("Machine history states", () => {
               states: {
                 Editor: {
                   initial: {
-                    target: Machine.targets(NestedStates).root.App.Workspace.Editor.Editing,
+                    target: "App.Workspace.Editor.Editing",
                     data: () => {
                       throw new Error("type-only constructor")
                     }
@@ -931,7 +926,7 @@ describe("Machine history states", () => {
             }
           },
           initial: {
-            target: Machine.targets(NestedStates).root.App.Workspace,
+            target: "App.Workspace",
             data: () => {
               throw new Error("type-only constructor")
             }
@@ -939,7 +934,7 @@ describe("Machine history states", () => {
         }
       },
       initial: {
-        target: Machine.targets(NestedStates).root.App,
+        target: "App",
         data: () => {
           throw new Error("type-only constructor")
         }
@@ -953,14 +948,14 @@ describe("Machine history states", () => {
     })
     const afterDefaults = definition.handle({
       initial: {
-        target: Machine.targets(States).root.support,
+        target: "support",
         decoded: true,
         data: new Support({})
       },
       states: {
         checkout: {
           initial: {
-            target: Machine.targets(States).root.checkout.shipping,
+            target: "checkout.shipping",
             data: () => {
               throw new Error("type-only constructor")
             }
@@ -995,7 +990,7 @@ describe("Machine history states", () => {
             shipping: {},
             payment: {
               initial: {
-                target: Machine.targets(States).root.checkout.payment.cardEntry,
+                target: "checkout.payment.cardEntry",
                 data: () => {
                   throw new Error("type-only constructor")
                 }
@@ -1010,14 +1005,14 @@ describe("Machine history states", () => {
     expect(Machine.planInitial).type.toBeCallableWith(afterDefaults)
     const complete = definition.handle({
       initial: {
-        target: Machine.targets(States).root.support,
+        target: "support",
         decoded: true,
         data: new Support({})
       },
       states: {
         checkout: {
           initial: {
-            target: Machine.targets(States).root.checkout.shipping,
+            target: "checkout.shipping",
             data: () => {
               throw new Error("type-only constructor")
             }
@@ -1052,7 +1047,7 @@ describe("Machine history states", () => {
             shipping: {},
             payment: {
               initial: {
-                target: Machine.targets(States).root.checkout.payment.cardEntry,
+                target: "checkout.payment.cardEntry",
                 decoded: true,
                 data: ({ state }) => new CardEntry({ cardNumber: String(state.attempt) })
               },
@@ -1099,14 +1094,14 @@ describe("Machine history states", () => {
       events: Machine.eventsFromSchemas(Resume)
     }).handle({
       initial: {
-        target: Machine.targets(DeepOnlyStates).root.support,
+        target: "support",
         decoded: true,
         data: new Support({})
       },
       states: {
         checkout: {
           initial: {
-            target: Machine.targets(DeepOnlyStates).root.checkout.payment,
+            target: "checkout.payment",
             data: () => {
               throw new Error("type-only constructor")
             }
@@ -1134,7 +1129,7 @@ describe("Machine history states", () => {
           states: {
             payment: {
               initial: {
-                target: Machine.targets(DeepOnlyStates).root.checkout.payment.cardEntry,
+                target: "checkout.payment.cardEntry",
                 data: () => {
                   throw new Error("type-only constructor")
                 }
@@ -1181,14 +1176,14 @@ describe("Machine history states", () => {
     })
     const complete = machine.handle({
       initial: {
-        target: Machine.targets(ParallelStates).root.support,
+        target: "support",
         decoded: true,
         data: new Support({})
       },
       states: {
         outer: {
           initial: {
-            target: Machine.targets(ParallelStates).root.outer.all,
+            target: "outer.all",
             data: () => {
               throw new Error("type-only constructor")
             }
@@ -1235,7 +1230,7 @@ describe("Machine history states", () => {
     expect(Machine.planInitial).type.toBeCallableWith(complete)
     expect(machine.handle).type.toBeCallableWith({
       initial: {
-        target: Machine.targets(ParallelStates).root.outer,
+        target: "outer",
         data: () => {
           throw new Error("type-only constructor")
         }
@@ -1243,7 +1238,7 @@ describe("Machine history states", () => {
       states: {
         outer: {
           initial: {
-            target: Machine.targets(ParallelStates).root.outer.all,
+            target: "outer.all",
             data: () => {
               throw new Error("type-only constructor")
             }
@@ -1270,7 +1265,7 @@ describe("Machine history states", () => {
             all: { initial: { shipping: { address: "missing-card" } } }
           },
           initial: {
-            target: Machine.targets(ParallelStates).root.outer.all,
+            target: "outer.all",
             data: () => {
               throw new Error("type-only constructor")
             }
@@ -1278,7 +1273,7 @@ describe("Machine history states", () => {
         }
       },
       initial: {
-        target: Machine.targets(ParallelStates).root.outer,
+        target: "outer",
         data: () => {
           throw new Error("type-only constructor")
         }

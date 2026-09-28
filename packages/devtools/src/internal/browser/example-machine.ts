@@ -95,11 +95,10 @@ export const snapshot = {
 const initialWorkflow = (): Machine.Machine.CompleteSnapshotContaining<{
   readonly "": typeof States.node
 }, "application.workflow"> => snapshot
-const targets1 = Machine.targets(States)
 export const machine = Machine.make({
   branches: {
     transition1: {
-      destination: { target: targets1.root.application.workflow.running, update: targets1.root.application.workflow }
+      destination: { target: "application.workflow.running", update: "application.workflow" }
     }
   },
   id: "inspection-example",
@@ -107,7 +106,7 @@ export const machine = Machine.make({
   events: Machine.eventsFromSchemas(Start, Finish, Disconnect, Refresh)
 }).handle({
   initial: {
-    target: Machine.targets(States).root.application,
+    target: "application",
     decoded: true,
     data: new Application({ workspace: "effect-machine", revision: 7 })
   },
@@ -126,7 +125,7 @@ export const machine = Machine.make({
       states: {
         workflow: {
           initial: {
-            target: Machine.targets(States).root.application.workflow.idle,
+            target: "application.workflow.idle",
             decoded: true,
             data: new Idle({})
           },
@@ -149,7 +148,7 @@ export const machine = Machine.make({
                     })
                 },
                 Refresh: {
-                  update: targets1.root.application.workflow,
+                  update: "application.workflow",
                   decoded: true,
                   data: () => (new Workflow({ document: "Machine.ts", unsavedChanges: 0 }))
                 }
@@ -157,7 +156,7 @@ export const machine = Machine.make({
             },
             running: {
               initial: {
-                target: Machine.targets(States).root.application.workflow.running.editing,
+                target: "application.workflow.running.editing",
                 decoded: true,
                 data: ({}) => new Editing({})
               },
@@ -165,7 +164,7 @@ export const machine = Machine.make({
                 editing: {
                   on: {
                     Finish: {
-                      target: targets1.root.application.workflow.running.complete,
+                      target: "application.workflow.running.complete",
                       decoded: true,
                       data: () => (new Complete({}))
                     }
@@ -178,7 +177,7 @@ export const machine = Machine.make({
         },
         connection: {
           initial: {
-            target: Machine.targets(States).root.application.connection.online,
+            target: "application.connection.online",
             decoded: true,
             data: new Online({})
           },
@@ -186,7 +185,7 @@ export const machine = Machine.make({
             online: {
               on: {
                 Disconnect: {
-                  target: targets1.root.application.connection.offline,
+                  target: "application.connection.offline",
                   decoded: true,
                   data: () => (new Offline({}))
                 }

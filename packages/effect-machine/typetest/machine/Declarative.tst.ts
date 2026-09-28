@@ -22,7 +22,6 @@ const root = Machine.state({
     }
   }
 })
-const targets = Machine.targets(root)
 const definition = Machine.make({
   root,
   events: Machine.events({ Load: { count: Schema.Number }, Reset: {} }),
@@ -37,8 +36,8 @@ const definition = Machine.make({
   streams: { values: Stream.make(1, 2), emptyStream: Stream.empty },
   timers: { timeout: "1 second" },
   branches: {
-    complete: { ready: { target: targets.root.Ready }, failed: { target: targets.root.Failed } },
-    nested: { child: { target: targets.root.Nested } }
+    complete: { ready: { target: "Ready" }, failed: { target: "Failed" } },
+    nested: { child: { target: "Nested" } }
   }
 })
 describe("declarative inference", () => {
@@ -62,30 +61,30 @@ describe("declarative inference", () => {
     expect(Machine.make).type.not.toBeCallableWith({
       root,
       events: definition.events,
-      branches: { bad: { "0": { target: targets.root.Ready } } }
+      branches: { bad: { "0": { target: "Ready" } } }
     })
     expect(Machine.make).type.not.toBeCallableWith({
       root,
       events: definition.events,
-      branches: { bad: { ready: { target: targets.root.Ready, resolve: () => undefined } } }
+      branches: { bad: { ready: { target: "Ready", resolve: () => undefined } } }
     })
     expect(Machine.make).type.not.toBeCallableWith({
       root,
       events: definition.events,
-      branches: { bad: { ready: { target: targets.root.Ready, title: "" } } }
+      branches: { bad: { ready: { target: "Ready", title: "" } } }
     })
   })
   it("infers events and root data for inline construction", () => {
     definition.handle({
       initial: {
-        target: Machine.targets(root).root.Idle
+        target: "Idle"
       },
       root: () => ({ revision: 0 }),
       states: {
         Idle: {
           on: {
             Load: {
-              target: targets.root.Ready,
+              target: "Ready",
               data: ({ event, root, state }) => {
                 expect(event.count).type.toBe<number>()
                 expect(root.revision).type.toBe<number>()
@@ -99,7 +98,7 @@ describe("declarative inference", () => {
         Failed: {},
         Nested: {
           initial: {
-            target: Machine.targets(root).root.Nested.Child,
+            target: "Nested.Child",
             data: () => {
               throw new Error("type-only constructor")
             }
@@ -112,11 +111,11 @@ describe("declarative inference", () => {
       root: () => {
         throw new Error("type-only constructor")
       },
-      initial: { target: Machine.targets(root).root.Idle },
+      initial: { target: "Idle" },
       states: {
         Nested: {
           initial: {
-            target: Machine.targets(root).root.Nested.Child,
+            target: "Nested.Child",
             data: () => {
               throw new Error("type-only constructor")
             }
@@ -126,10 +125,10 @@ describe("declarative inference", () => {
     })
     expect(definition.handle).type.not.toBeCallableWith({
       states: {
-        Idle: { on: { Load: { target: targets.root.Ready } } },
+        Idle: { on: { Load: { target: "Ready" } } },
         Nested: {
           initial: {
-            target: Machine.targets(root).root.Nested.Child,
+            target: "Nested.Child",
             data: () => {
               throw new Error("type-only constructor")
             }
@@ -139,14 +138,14 @@ describe("declarative inference", () => {
       root: () => {
         throw new Error("type-only constructor")
       },
-      initial: { target: Machine.targets(root).root.Idle }
+      initial: { target: "Idle" }
     })
     expect(definition.handle).type.not.toBeCallableWith({
       states: {
-        Idle: { on: { Load: { target: targets.root.Ready, data: () => ({ count: "bad" }) } } },
+        Idle: { on: { Load: { target: "Ready", data: () => ({ count: "bad" }) } } },
         Nested: {
           initial: {
-            target: Machine.targets(root).root.Nested.Child,
+            target: "Nested.Child",
             data: () => {
               throw new Error("type-only constructor")
             }
@@ -156,14 +155,14 @@ describe("declarative inference", () => {
       root: () => {
         throw new Error("type-only constructor")
       },
-      initial: { target: Machine.targets(root).root.Idle }
+      initial: { target: "Idle" }
     })
     expect(definition.handle).type.not.toBeCallableWith({
       states: {
-        Idle: { on: { Load: { target: targets.root.Ready, resolve: () => undefined } } },
+        Idle: { on: { Load: { target: "Ready", resolve: () => undefined } } },
         Nested: {
           initial: {
-            target: Machine.targets(root).root.Nested.Child,
+            target: "Nested.Child",
             data: () => {
               throw new Error("type-only constructor")
             }
@@ -173,18 +172,18 @@ describe("declarative inference", () => {
       root: () => {
         throw new Error("type-only constructor")
       },
-      initial: { target: Machine.targets(root).root.Idle }
+      initial: { target: "Idle" }
     })
     expect(definition.handle).type.toBeCallableWith({
-      on: { Reset: { target: targets.root } },
+      on: { Reset: { initialize: true } },
       root: () => {
         throw new Error("type-only constructor")
       },
-      initial: { target: Machine.targets(root).root.Idle },
+      initial: { target: "Idle" },
       states: {
         Nested: {
           initial: {
-            target: Machine.targets(root).root.Nested.Child,
+            target: "Nested.Child",
             data: () => {
               throw new Error("type-only constructor")
             }
@@ -193,15 +192,15 @@ describe("declarative inference", () => {
       }
     })
     expect(definition.handle).type.not.toBeCallableWith({
-      on: { Reset: { update: targets.root, data: () => ({}) } },
+      on: { Reset: { update: "root", data: () => ({}) } },
       root: () => {
         throw new Error("type-only constructor")
       },
-      initial: { target: Machine.targets(root).root.Idle },
+      initial: { target: "Idle" },
       states: {
         Nested: {
           initial: {
-            target: Machine.targets(root).root.Nested.Child,
+            target: "Nested.Child",
             data: () => {
               throw new Error("type-only constructor")
             }
@@ -211,10 +210,10 @@ describe("declarative inference", () => {
     })
     expect(definition.handle).type.not.toBeCallableWith({
       states: {
-        Idle: { on: { Reset: { update: targets.root.Ready, data: () => ({ count: 1 }) } } },
+        Idle: { on: { Reset: { update: "Ready", data: () => ({ count: 1 }) } } },
         Nested: {
           initial: {
-            target: Machine.targets(root).root.Nested.Child,
+            target: "Nested.Child",
             data: () => {
               throw new Error("type-only constructor")
             }
@@ -224,13 +223,13 @@ describe("declarative inference", () => {
       root: () => {
         throw new Error("type-only constructor")
       },
-      initial: { target: Machine.targets(root).root.Idle }
+      initial: { target: "Idle" }
     })
   })
   it("infers named branch constructors without a second target declaration", () => {
     definition.handle({
       initial: {
-        target: Machine.targets(root).root.Idle
+        target: "Idle"
       },
       root: () => ({ revision: 0 }),
       states: {
@@ -258,7 +257,7 @@ describe("declarative inference", () => {
         Failed: {},
         Nested: {
           initial: {
-            target: Machine.targets(root).root.Nested.Child,
+            target: "Nested.Child",
             data: () => {
               throw new Error("type-only constructor")
             }
@@ -272,7 +271,7 @@ describe("declarative inference", () => {
         Idle: { on: { Reset: { branches: "missing", resolve: () => undefined } } },
         Nested: {
           initial: {
-            target: Machine.targets(root).root.Nested.Child,
+            target: "Nested.Child",
             data: () => {
               throw new Error("type-only constructor")
             }
@@ -282,13 +281,13 @@ describe("declarative inference", () => {
       root: () => {
         throw new Error("type-only constructor")
       },
-      initial: { target: Machine.targets(root).root.Idle }
+      initial: { target: "Idle" }
     })
   })
   it("requires exactly the reachable invocation outcomes", () => {
     definition.handle({
       initial: {
-        target: Machine.targets(root).root.Idle
+        target: "Idle"
       },
       root: () => ({ revision: 0 }),
       states: {
@@ -297,7 +296,7 @@ describe("declarative inference", () => {
             {
               src: "direct",
               onDone: {
-                target: targets.root.Ready,
+                target: "Ready",
                 data: ({ output }) => {
                   expect(output).type.toBe<number>()
                   return { count: output }
@@ -309,7 +308,7 @@ describe("declarative inference", () => {
             {
               src: "failed",
               onFailure: {
-                target: targets.root.Failed,
+                target: "Failed",
                 data: ({ error }) => {
                   expect(error).type.toBe<LoadError>()
                   return { message: error.message }
@@ -333,7 +332,7 @@ describe("declarative inference", () => {
         Failed: {},
         Nested: {
           initial: {
-            target: Machine.targets(root).root.Nested.Child,
+            target: "Nested.Child",
             data: () => {
               throw new Error("type-only constructor")
             }
@@ -348,7 +347,7 @@ describe("declarative inference", () => {
           Idle: { invoke: { src } },
           Nested: {
             initial: {
-              target: Machine.targets(root).root.Nested.Child,
+              target: "Nested.Child",
               data: () => {
                 throw new Error("type-only constructor")
               }
@@ -358,7 +357,7 @@ describe("declarative inference", () => {
         root: () => {
           throw new Error("type-only constructor")
         },
-        initial: { target: Machine.targets(root).root.Idle }
+        initial: { target: "Idle" }
       })
     }
     expect(definition.handle).type.not.toBeCallableWith({
@@ -366,7 +365,7 @@ describe("declarative inference", () => {
         Idle: { invoke: { src: "failed" } },
         Nested: {
           initial: {
-            target: Machine.targets(root).root.Nested.Child,
+            target: "Nested.Child",
             data: () => {
               throw new Error("type-only constructor")
             }
@@ -376,14 +375,14 @@ describe("declarative inference", () => {
       root: () => {
         throw new Error("type-only constructor")
       },
-      initial: { target: Machine.targets(root).root.Idle }
+      initial: { target: "Idle" }
     })
     expect(definition.handle).type.not.toBeCallableWith({
       states: {
         Idle: { invoke: { src: "direct", onDone: { none: true }, onFailure: { none: true } } },
         Nested: {
           initial: {
-            target: Machine.targets(root).root.Nested.Child,
+            target: "Nested.Child",
             data: () => {
               throw new Error("type-only constructor")
             }
@@ -393,14 +392,14 @@ describe("declarative inference", () => {
       root: () => {
         throw new Error("type-only constructor")
       },
-      initial: { target: Machine.targets(root).root.Idle }
+      initial: { target: "Idle" }
     })
     expect(definition.handle).type.not.toBeCallableWith({
       states: {
         Idle: { invoke: { src: "never", onDone: { none: true } } },
         Nested: {
           initial: {
-            target: Machine.targets(root).root.Nested.Child,
+            target: "Nested.Child",
             data: () => {
               throw new Error("type-only constructor")
             }
@@ -410,14 +409,14 @@ describe("declarative inference", () => {
       root: () => {
         throw new Error("type-only constructor")
       },
-      initial: { target: Machine.targets(root).root.Idle }
+      initial: { target: "Idle" }
     })
     expect(definition.handle).type.not.toBeCallableWith({
       states: {
         Idle: { invoke: { src: "values", onDone: { none: true } } },
         Nested: {
           initial: {
-            target: Machine.targets(root).root.Nested.Child,
+            target: "Nested.Child",
             data: () => {
               throw new Error("type-only constructor")
             }
@@ -427,13 +426,13 @@ describe("declarative inference", () => {
       root: () => {
         throw new Error("type-only constructor")
       },
-      initial: { target: Machine.targets(root).root.Idle }
+      initial: { target: "Idle" }
     })
   })
   it("requires input only for input-taking programs and carries used dependencies", () => {
     const machine = definition.handle({
       initial: {
-        target: Machine.targets(root).root.Idle
+        target: "Idle"
       },
       root: () => ({ revision: 0 }),
       states: {
@@ -441,14 +440,14 @@ describe("declarative inference", () => {
           invoke: {
             src: "load",
             input: ({ root }) => root.revision,
-            onDone: { target: targets.root.Ready, data: ({ output }) => ({ count: output }) }
+            onDone: { target: "Ready", data: ({ output }) => ({ count: output }) }
           }
         },
         Ready: {},
         Failed: {},
         Nested: {
           initial: {
-            target: Machine.targets(root).root.Nested.Child,
+            target: "Nested.Child",
             data: () => {
               throw new Error("type-only constructor")
             }
@@ -464,7 +463,7 @@ describe("declarative inference", () => {
         Idle: { invoke: { src: "load", onDone: { none: true } } },
         Nested: {
           initial: {
-            target: Machine.targets(root).root.Nested.Child,
+            target: "Nested.Child",
             data: () => {
               throw new Error("type-only constructor")
             }
@@ -474,14 +473,14 @@ describe("declarative inference", () => {
       root: () => {
         throw new Error("type-only constructor")
       },
-      initial: { target: Machine.targets(root).root.Idle }
+      initial: { target: "Idle" }
     })
     expect(definition.handle).type.not.toBeCallableWith({
       states: {
         Idle: { invoke: { src: "load", input: () => "bad", onDone: { none: true } } },
         Nested: {
           initial: {
-            target: Machine.targets(root).root.Nested.Child,
+            target: "Nested.Child",
             data: () => {
               throw new Error("type-only constructor")
             }
@@ -491,14 +490,14 @@ describe("declarative inference", () => {
       root: () => {
         throw new Error("type-only constructor")
       },
-      initial: { target: Machine.targets(root).root.Idle }
+      initial: { target: "Idle" }
     })
     expect(definition.handle).type.not.toBeCallableWith({
       states: {
         Idle: { invoke: { src: "direct", input: () => 1, onDone: { none: true } } },
         Nested: {
           initial: {
-            target: Machine.targets(root).root.Nested.Child,
+            target: "Nested.Child",
             data: () => {
               throw new Error("type-only constructor")
             }
@@ -508,7 +507,7 @@ describe("declarative inference", () => {
       root: () => {
         throw new Error("type-only constructor")
       },
-      initial: { target: Machine.targets(root).root.Idle }
+      initial: { target: "Idle" }
     })
   })
 })

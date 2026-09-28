@@ -27,10 +27,10 @@ describe("root contracts", () => {
     const definition = Machine.make({ root, events, input: Schema.Number })
     expect(Machine.start).type.not.toBeCallableWith(definition, 1)
     expect(definition).type.not.toHaveProperty("initial")
-    expect(definition.handle).type.not.toBeCallableWith({ initial: { target: Machine.targets(root).root.Saving } })
+    expect(definition.handle).type.not.toBeCallableWith({ initial: { target: "Saving" } })
     expect(definition.handle).type.not.toBeCallableWith({
       root: { count: 0 },
-      initial: { target: Machine.targets(root).root.Editing }
+      initial: { target: "Editing" }
     })
     const machine = definition.handle({
       root: ({ input }) => {
@@ -38,7 +38,7 @@ describe("root contracts", () => {
         return { count: input }
       },
       initial: {
-        target: Machine.targets(root).root.Editing,
+        target: "Editing",
         data: ({ root, state }) => {
           expect(root.count).type.toBe<number>()
           expect(state.count).type.toBe<number>()
@@ -52,9 +52,9 @@ describe("root contracts", () => {
     const definition = Machine.make({ root, events })
     const editing = definition.handle({
       root: { count: 0 },
-      initial: { target: Machine.targets(root).root.Editing, data: { draft: "" } }
+      initial: { target: "Editing", data: { draft: "" } }
     })
-    const saving = definition.handle({ root: { count: 1 }, initial: { target: Machine.targets(root).root.Saving } })
+    const saving = definition.handle({ root: { count: 1 }, initial: { target: "Saving" } })
     expect(Machine.start).type.toBeCallableWith(editing)
     expect(Machine.start).type.toBeCallableWith(saving)
     expect(root.node).type.not.toHaveProperty("initial")
@@ -67,11 +67,11 @@ describe("root contracts", () => {
     const definition = Machine.make({ root, events })
     expect(definition.handle).type.not.toBeCallableWith({
       root: { count: "zero" },
-      initial: { target: Machine.targets(root).root.Saving }
+      initial: { target: "Saving" }
     })
     expect(definition.handle).type.not.toBeCallableWith({
       root: { decoded: true, data: { count: 0 } },
-      initial: { target: Machine.targets(root).root.Saving }
+      initial: { target: "Saving" }
     })
   })
 })

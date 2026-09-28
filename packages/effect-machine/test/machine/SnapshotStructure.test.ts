@@ -17,7 +17,7 @@ it.effect("planning and encoding reject malformed snapshots through typed failur
       states: {
         Left: {
           initial: {
-            target: Machine.targets(InitialRoot1).root.Left.Ready
+            target: "Left.Ready"
           },
           states: {
             Ready: {}

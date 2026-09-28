@@ -23,13 +23,12 @@ it.effect("constructs complete parallel subtrees and resolves explicit nested ch
         }
       }
     })
-    const targets = Machine.targets(root)
     const machine = Machine.make({
       root,
       events: Machine.events({ Open: {} }),
-      branches: { open: { work: { target: targets.root.Work } } }
+      branches: { open: { work: { target: "Work" } } }
     }).handle({
-      initial: { target: targets.root.Idle },
+      initial: { target: "Idle" },
       states: {
         Idle: {
           on: {
@@ -49,17 +48,17 @@ it.effect("constructs complete parallel subtrees and resolves explicit nested ch
           initial: { Left: { id: "default" }, Right: { count: 0 } },
           states: {
             Left: {
-              initial: { target: targets.root.Work.Left.Empty },
+              initial: { target: "Work.Left.Empty" },
               states: {
                 Route: {
                   choice: {
-                    target: targets.root.Work.Left.Ready,
+                    target: "Work.Left.Ready",
                     data: ({ containingState }) => ({ id: containingState.id })
                   }
                 }
               }
             },
-            Right: { initial: { target: targets.root.Work.Right.Waiting } }
+            Right: { initial: { target: "Work.Right.Waiting" } }
           }
         }
       }
@@ -86,23 +85,22 @@ it.effect("enters a compound's default child with a retained-owner replacement",
         }
       }
     })
-    const targets = Machine.targets(root)
     const machine = Machine.make({ root, events: Machine.events({ Open: {} }) }).handle({
       root: { revision: 0 },
-      initial: { target: targets.root.Idle },
+      initial: { target: "Idle" },
       states: {
         Idle: {
           on: {
             Open: {
-              target: targets.root.Flow,
-              update: targets.root,
+              target: "Flow",
+              update: "root",
               data: { target: { title: "new" }, update: { revision: 1 } }
             }
           }
         },
         Flow: {
           initial: {
-            target: targets.root.Flow.Editing,
+            target: "Flow.Editing",
             data: ({ state, root }) => ({ title: state.title, revision: root.revision })
           }
         }

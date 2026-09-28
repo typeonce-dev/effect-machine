@@ -245,7 +245,7 @@ export interface Scenarios<M extends AnyMachine> {
  *   events: Machine.eventsFromSchemas(Reset)
  * }).handle({
  *   initial: {
- *     target: Machine.targets(States).root.Idle
+ *     target: "Idle"
  *   },
  *   states: {
  *     Idle: {
@@ -505,7 +505,7 @@ export { ProbeUnavailableError } from "../internal/testing/machine/probe.js"
  *   events: Machine.eventsFromSchemas()
  * }).handle({
  *   initial: {
- *     target: Machine.targets(States).root.Idle
+ *     target: "Idle"
  *   },
  *   states: {
  *     Idle: {}
@@ -1121,7 +1121,7 @@ export const Invariant: {
  *   events: Machine.eventsFromSchemas()
  * }).handle({
  *   initial: {
- *     target: Machine.targets(States).root.Count,
+ *     target: "Count",
  *     decoded: true,
  *     data: new Count({ value: 0 })
  *   },
@@ -1461,7 +1461,7 @@ export type ExploreOptions<M extends AnyMachine, Key extends ExplorationKey = Ex
  *   events: Machine.eventsFromSchemas(Increment)
  * }).handle({
  *   initial: {
- *     target: Machine.targets(States).root.Count,
+ *     target: "Count",
  *     decoded: true,
  *     data: new Count({ value: 0 })
  *   },
@@ -1654,7 +1654,7 @@ export type RunServices<M extends AnyMachine> = IsAny<
  *   events: Machine.eventsFromSchemas()
  * }).handle({
  *   initial: {
- *     target: Machine.targets(States).root.Idle
+ *     target: "Idle"
  *   },
  *   states: {
  *     Idle: {}
@@ -1925,7 +1925,7 @@ export interface Coverage<M extends AnyMachine> {
  *   events: Machine.eventsFromSchemas()
  * }).handle({
  *   initial: {
- *     target: Machine.targets(States).root.Idle
+ *     target: "Idle"
  *   },
  *   states: {
  *     Idle: {}
@@ -2153,7 +2153,7 @@ export interface VerifyOptions {
  *   events: Machine.eventsFromSchemas()
  * }).handle({
  *   initial: {
- *     target: Machine.targets(States).root.Idle
+ *     target: "Idle"
  *   },
  *   states: {
  *     Idle: {}

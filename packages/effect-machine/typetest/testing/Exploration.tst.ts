@@ -24,7 +24,7 @@ describe("MachineTest exploration", () => {
     input: Input
   }).handle({
     initial: {
-      target: Machine.targets(States).root.counter,
+      target: "counter",
       decoded: true,
       data: ({ root: { input: input } }) => new Counter({ count: input.seed })
     },
@@ -86,7 +86,7 @@ describe("MachineTest exploration", () => {
       events: Machine.eventsFromSchemas(Increment)
     }).handle({
       initial: {
-        target: Machine.targets(NoInputStates).root.counter,
+        target: "counter",
         decoded: true,
         data: new Counter({ count: 0 })
       },

@@ -36,23 +36,22 @@ describe("Machine choice pseudo-states", () => {
     expect<Machine.Snapshot<typeof States>["path"]>().type.not.toBe<"Flow.Routing">()
   })
   it("exposes only choice context and requires implementation before planning", () => {
-    const targets1 = Machine.targets(States)
     const incomplete = Machine.make({
-      branches: { transition1: { destination: { target: targets1.root.Flow.Approved } } },
+      branches: { transition1: { destination: { target: "Flow.Approved" } } },
       root: States,
       events: Machine.eventsFromSchemas()
     })
     expect(Machine.planInitial).type.not.toBeCallableWith(incomplete)
     const complete = incomplete.handle({
       initial: {
-        target: Machine.targets(States).root.Flow,
+        target: "Flow",
         decoded: true,
         data: new Flow({ score: 80 })
       },
       states: {
         Flow: {
           initial: {
-            target: Machine.targets(States).root.Flow.Routing
+            target: "Flow.Routing"
           },
           states: {
             Routing: {
@@ -77,22 +76,21 @@ describe("Machine choice pseudo-states", () => {
     expect(Machine.planInitial).type.toBeCallableWith(complete)
   })
   it("rejects Effects returned by choice resolvers", () => {
-    const targets2 = Machine.targets(States)
     const machine = Machine.make({
-      branches: { transition1: { destination: { target: targets2.root.Flow.Approved } } },
+      branches: { transition1: { destination: { target: "Flow.Approved" } } },
       root: States,
       events: Machine.eventsFromSchemas()
     })
     machine.handle({
       initial: {
-        target: Machine.targets(States).root.Flow,
+        target: "Flow",
         decoded: true,
         data: new Flow({ score: 80 })
       },
       states: {
         Flow: {
           initial: {
-            target: Machine.targets(States).root.Flow.Routing
+            target: "Flow.Routing"
           },
           states: {
             Routing: {
@@ -149,7 +147,7 @@ describe("Machine choice pseudo-states", () => {
     for (const invalid of invalidHandlers) {
       expect(base.handle).type.toBeCallableWith({
         initial: {
-          target: Machine.targets(States).root.Flow,
+          target: "Flow",
           data: () => {
             throw new Error("type-only constructor")
           }
@@ -157,7 +155,7 @@ describe("Machine choice pseudo-states", () => {
         states: {
           Flow: {
             initial: {
-              target: Machine.targets(States).root.Flow.Approved,
+              target: "Flow.Approved",
               data: () => {
                 throw new Error("type-only constructor")
               }
@@ -170,7 +168,7 @@ describe("Machine choice pseudo-states", () => {
           Flow: {
             states: { Routing: invalid },
             initial: {
-              target: Machine.targets(States).root.Flow.Approved,
+              target: "Flow.Approved",
               data: () => {
                 throw new Error("type-only constructor")
               }
@@ -178,7 +176,7 @@ describe("Machine choice pseudo-states", () => {
           }
         },
         initial: {
-          target: Machine.targets(States).root.Flow,
+          target: "Flow",
           data: () => {
             throw new Error("type-only constructor")
           }
@@ -187,22 +185,21 @@ describe("Machine choice pseudo-states", () => {
     }
   })
   it("validates the selected choice result", () => {
-    const targets3 = Machine.targets(States)
     const base = Machine.make({
-      branches: { transition1: { destination: { target: targets3.root.Flow.Rejected } } },
+      branches: { transition1: { destination: { target: "Flow.Rejected" } } },
       root: States,
       events: Machine.eventsFromSchemas()
     })
     base.handle({
       initial: {
-        target: Machine.targets(States).root.Flow,
+        target: "Flow",
         decoded: true,
         data: new Flow({ score: 80 })
       },
       states: {
         Flow: {
           initial: {
-            target: Machine.targets(States).root.Flow.Routing
+            target: "Flow.Routing"
           },
           states: {
             Routing: {
@@ -222,7 +219,7 @@ describe("Machine choice pseudo-states", () => {
     })
     expect(base.handle).type.toBeCallableWith({
       initial: {
-        target: Machine.targets(States).root.Flow,
+        target: "Flow",
         data: () => {
           throw new Error("type-only constructor")
         }
@@ -230,7 +227,7 @@ describe("Machine choice pseudo-states", () => {
       states: {
         Flow: {
           initial: {
-            target: Machine.targets(States).root.Flow.Approved,
+            target: "Flow.Approved",
             data: () => {
               throw new Error("type-only constructor")
             }
@@ -243,7 +240,7 @@ describe("Machine choice pseudo-states", () => {
         Flow: {
           states: { Routing: { choice: () => undefined } },
           initial: {
-            target: Machine.targets(States).root.Flow.Approved,
+            target: "Flow.Approved",
             data: () => {
               throw new Error("type-only constructor")
             }
@@ -251,7 +248,7 @@ describe("Machine choice pseudo-states", () => {
         }
       },
       initial: {
-        target: Machine.targets(States).root.Flow,
+        target: "Flow",
         data: () => {
           throw new Error("type-only constructor")
         }
@@ -270,7 +267,7 @@ describe("Machine choice pseudo-states", () => {
             }
           },
           initial: {
-            target: Machine.targets(States).root.Flow.Approved,
+            target: "Flow.Approved",
             data: () => {
               throw new Error("type-only constructor")
             }
@@ -278,7 +275,7 @@ describe("Machine choice pseudo-states", () => {
         }
       },
       initial: {
-        target: Machine.targets(States).root.Flow,
+        target: "Flow",
         data: () => {
           throw new Error("type-only constructor")
         }

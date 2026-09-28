@@ -5,12 +5,11 @@ type Equal<Left, Right> = (<Type>() => Type extends Left ? 1 : 2) extends (<Type
   : false
 type Expect<Value extends true> = Value
 type IsAny<Value> = 0 extends 1 & Value ? true : false
-const targets = Machine.targets(States)
 const complete = machine.handle({
-  initial: { target: targets.root.Flow },
+  initial: { target: "Flow" },
   states: {
     Flow: {
-      initial: { target: targets.root.Flow.Idle },
+      initial: { target: "Flow.Idle" },
       history: {
         recent: {
           default: ({ target }) =>
@@ -19,16 +18,16 @@ const complete = machine.handle({
       },
       states: {
         Route: {
-          choice: { target: targets.root.Flow.Idle }
+          choice: { target: "Flow.Idle" }
         },
         Idle: {
           on: {
-            Start: { target: targets.root.Flow.Running }
+            Start: { target: "Flow.Running" }
           }
         },
         Running: {
           on: {
-            Finish: { target: targets.root.Flow.Done, data: ({ event }) => ({ value: event.value }) }
+            Finish: { target: "Flow.Done", data: ({ event }) => ({ value: event.value }) }
           }
         },
         Done: {
@@ -39,14 +38,14 @@ const complete = machine.handle({
   }
 })
 const idleOnly = machine.handle({
-  initial: { target: targets.root.Flow },
+  initial: { target: "Flow" },
   states: {
     Flow: {
-      initial: { target: targets.root.Flow.Idle },
+      initial: { target: "Flow.Idle" },
       states: {
         Idle: {
           on: {
-            Start: { target: targets.root.Flow.Running }
+            Start: { target: "Flow.Running" }
           }
         }
       }
@@ -54,14 +53,14 @@ const idleOnly = machine.handle({
   }
 })
 const runningOnly = machine.handle({
-  initial: { target: targets.root.Flow },
+  initial: { target: "Flow" },
   states: {
     Flow: {
-      initial: { target: targets.root.Flow.Idle },
+      initial: { target: "Flow.Idle" },
       states: {
         Running: {
           on: {
-            Finish: { target: targets.root.Flow.Done, data: ({ event }) => ({ value: event.value }) }
+            Finish: { target: "Flow.Done", data: ({ event }) => ({ value: event.value }) }
           }
         }
       }

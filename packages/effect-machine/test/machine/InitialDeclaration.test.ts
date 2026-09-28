@@ -6,11 +6,10 @@ describe("handler initial declarations", () => {
   it.effect("selects an initial child and retains inspectable event targets", () =>
     Effect.gen(function*() {
       const root = Machine.state({ states: { Locked: {}, Unlocked: {} } })
-      const targets = Machine.targets(root)
       const machine = Machine.make({ root, events: Machine.events({ Coin: {} }) }).handle({
-        initial: { target: targets.root.Locked },
+        initial: { target: "Locked" },
         states: {
-          Locked: { on: { Coin: { target: targets.root.Unlocked } } },
+          Locked: { on: { Coin: { target: "Unlocked" } } },
           Unlocked: {}
         }
       })
@@ -26,14 +25,13 @@ describe("handler initial declarations", () => {
         fields: { query: Schema.String },
         states: { Loading: { fields: { query: Schema.String } } }
       })
-      const targets = Machine.targets(root)
       const machine = Machine.make({
         root,
         input: Schema.Struct({ query: Schema.String }),
         events: Machine.events({})
       }).handle({
         root: ({ input }) => ({ query: input.query }),
-        initial: { target: targets.root.Loading, data: ({ state }) => ({ query: state.query }) },
+        initial: { target: "Loading", data: ({ state }) => ({ query: state.query }) },
         states: { Loading: {} }
       })
       const initial = yield* Machine.planInitial(machine, { query: "hello" })
@@ -65,10 +63,9 @@ describe("handler initial declarations", () => {
   it.effect("reuses a structural root without sharing initial selections", () =>
     Effect.gen(function*() {
       const root = Machine.state({ states: { Left: {}, Right: {} } })
-      const targets = Machine.targets(root)
       const definition = Machine.make({ root, events: Machine.events({}) })
-      const left = definition.handle({ initial: { target: targets.root.Left } })
-      const right = definition.handle({ initial: { target: targets.root.Right } })
+      const left = definition.handle({ initial: { target: "Left" } })
+      const right = definition.handle({ initial: { target: "Right" } })
       assert.isTrue(root.matches((yield* Machine.planInitial(left)).state, "Left"))
       assert.isTrue(root.matches((yield* Machine.planInitial(right)).state, "Right"))
       assert.isFalse("initial" in root.node)
@@ -85,7 +82,6 @@ describe("handler initial declarations", () => {
           Right: { fields: { count: Schema.Number } }
         }
       })
-      const targets = Machine.targets(root)
       const order: string[] = []
       const machine = Machine.make({ root, input: Schema.Number, events: Machine.events({}) }).handle({
         root: ({ input }) => {
@@ -108,7 +104,7 @@ describe("handler initial declarations", () => {
         states: {
           Left: {
             initial: {
-              target: targets.root.Left.Ready,
+              target: "Left.Ready",
               data: ({ state }) => {
                 order.push("Ready")
                 return { label: String(state.count) }
@@ -126,10 +122,11 @@ describe("handler initial declarations", () => {
       assert.isTrue(order.includes("entry"))
     }))
 
-  it("rejects initial targets from another root", () => {
-    const root = Machine.state({ states: { Idle: {} } })
-    const other = Machine.state({ states: { Idle: {} } })
+  it("rejects initial targets that are not declared direct children", () => {
+    const root = Machine.state({ states: { Idle: {}, Nested: { states: { Child: {} } } } })
     const definition = Machine.make({ root, events: Machine.events({}) })
-    assert.throws(() => definition.handle({ initial: { target: Machine.targets(other).root.Idle } }), /direct child/)
+    assert.throws(() => definition.handle({ initial: { target: "Missing" } } as never), /direct child/)
+    assert.throws(() => definition.handle({ initial: { target: "Nested.Child" } } as never), /direct child/)
+    assert.throws(() => definition.handle({ initial: { target: "root" } } as never), /direct child/)
   })
 })

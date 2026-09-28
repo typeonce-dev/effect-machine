@@ -10,145 +10,119 @@ type Expect<Value extends true> = Value
 class DeepService extends Context.Service<DeepService, string>()("perf/depth-24/DeepService") {}
 class DeepFailure extends Data.TaggedError("DeepFailure")<{}> {}
 
-const targets = Machine.targets(States)
 const handled = machine.handle({
-  initial: { target: targets.root.n0 },
+  initial: { target: "n0" },
   states: {
     n0: {
-      initial: { target: targets.root.n0.n1 },
+      initial: { target: "n0.n1" },
       states: {
         n1: {
-          initial: { target: targets.root.n0.n1.n2 },
+          initial: { target: "n0.n1.n2" },
           states: {
             n2: {
-              initial: { target: targets.root.n0.n1.n2.n3 },
+              initial: { target: "n0.n1.n2.n3" },
               states: {
                 n3: {
-                  initial: { target: targets.root.n0.n1.n2.n3.n4 },
+                  initial: { target: "n0.n1.n2.n3.n4" },
                   states: {
                     n4: {
-                      initial: { target: targets.root.n0.n1.n2.n3.n4.n5 },
+                      initial: { target: "n0.n1.n2.n3.n4.n5" },
                       states: {
                         n5: {
-                          initial: { target: targets.root.n0.n1.n2.n3.n4.n5.n6 },
+                          initial: { target: "n0.n1.n2.n3.n4.n5.n6" },
                           states: {
                             n6: {
-                              initial: { target: targets.root.n0.n1.n2.n3.n4.n5.n6.n7 },
+                              initial: { target: "n0.n1.n2.n3.n4.n5.n6.n7" },
                               states: {
                                 n7: {
-                                  initial: { target: targets.root.n0.n1.n2.n3.n4.n5.n6.n7.n8 },
+                                  initial: { target: "n0.n1.n2.n3.n4.n5.n6.n7.n8" },
                                   states: {
                                     n8: {
-                                      initial: { target: targets.root.n0.n1.n2.n3.n4.n5.n6.n7.n8.n9 },
+                                      initial: { target: "n0.n1.n2.n3.n4.n5.n6.n7.n8.n9" },
                                       states: {
                                         n9: {
                                           initial: {
-                                            target: targets.root.n0.n1.n2.n3.n4.n5.n6.n7.n8.n9.n10
+                                            target: "n0.n1.n2.n3.n4.n5.n6.n7.n8.n9.n10"
                                           },
                                           states: {
                                             n10: {
                                               initial: {
-                                                target: targets.root.n0.n1.n2.n3.n4.n5.n6.n7.n8.n9.n10.n11
+                                                target: "n0.n1.n2.n3.n4.n5.n6.n7.n8.n9.n10.n11"
                                               },
                                               states: {
                                                 n11: {
                                                   initial: {
-                                                    target: targets.root.n0.n1.n2.n3.n4.n5.n6.n7.n8.n9.n10.n11
-                                                      .n12
+                                                    target: "n0.n1.n2.n3.n4.n5.n6.n7.n8.n9.n10.n11.n12"
                                                   },
                                                   states: {
                                                     n12: {
                                                       initial: {
-                                                        target: targets.root.n0.n1.n2.n3.n4.n5.n6.n7.n8.n9.n10
-                                                          .n11.n12.n13
+                                                        target: "n0.n1.n2.n3.n4.n5.n6.n7.n8.n9.n10.n11.n12.n13"
                                                       },
                                                       states: {
                                                         n13: {
                                                           initial: {
-                                                            target: targets.root.n0.n1.n2.n3.n4.n5.n6.n7.n8.n9
-                                                              .n10.n11.n12.n13.n14
+                                                            target: "n0.n1.n2.n3.n4.n5.n6.n7.n8.n9.n10.n11.n12.n13.n14"
                                                           },
                                                           states: {
                                                             n14: {
                                                               initial: {
-                                                                target: targets.root.n0.n1.n2.n3.n4.n5.n6.n7
-                                                                  .n8.n9.n10.n11.n12.n13.n14.n15
+                                                                target:
+                                                                  "n0.n1.n2.n3.n4.n5.n6.n7.n8.n9.n10.n11.n12.n13.n14.n15"
                                                               },
                                                               states: {
                                                                 n15: {
                                                                   initial: {
-                                                                    target: targets.root.n0.n1.n2.n3.n4.n5.n6
-                                                                      .n7.n8.n9.n10.n11.n12.n13.n14.n15.n16
+                                                                    target:
+                                                                      "n0.n1.n2.n3.n4.n5.n6.n7.n8.n9.n10.n11.n12.n13.n14.n15.n16"
                                                                   },
                                                                   states: {
                                                                     n16: {
                                                                       initial: {
-                                                                        target: targets.root.n0.n1.n2.n3.n4.n5
-                                                                          .n6.n7.n8.n9.n10.n11.n12.n13.n14.n15.n16.n17
+                                                                        target:
+                                                                          "n0.n1.n2.n3.n4.n5.n6.n7.n8.n9.n10.n11.n12.n13.n14.n15.n16.n17"
                                                                       },
                                                                       states: {
                                                                         n17: {
                                                                           initial: {
-                                                                            target: targets.root.n0.n1.n2.n3
-                                                                              .n4.n5.n6.n7.n8.n9.n10.n11.n12.n13.n14
-                                                                              .n15.n16.n17.n18
+                                                                            target:
+                                                                              "n0.n1.n2.n3.n4.n5.n6.n7.n8.n9.n10.n11.n12.n13.n14.n15.n16.n17.n18"
                                                                           },
                                                                           states: {
                                                                             n18: {
                                                                               initial: {
-                                                                                target: targets.root.n0.n1.n2
-                                                                                  .n3.n4.n5.n6.n7.n8.n9.n10.n11.n12
-                                                                                  .n13.n14.n15.n16.n17.n18.n19
+                                                                                target:
+                                                                                  "n0.n1.n2.n3.n4.n5.n6.n7.n8.n9.n10.n11.n12.n13.n14.n15.n16.n17.n18.n19"
                                                                               },
                                                                               states: {
                                                                                 n19: {
                                                                                   initial: {
-                                                                                    target: targets.root.n0.n1
-                                                                                      .n2.n3.n4.n5.n6.n7.n8.n9.n10.n11
-                                                                                      .n12.n13.n14.n15.n16.n17.n18.n19
-                                                                                      .n20
+                                                                                    target:
+                                                                                      "n0.n1.n2.n3.n4.n5.n6.n7.n8.n9.n10.n11.n12.n13.n14.n15.n16.n17.n18.n19.n20"
                                                                                   },
                                                                                   states: {
                                                                                     n20: {
                                                                                       initial: {
-                                                                                        target: targets.root
-                                                                                          .n0.n1.n2.n3.n4.n5.n6.n7.n8
-                                                                                          .n9.n10.n11.n12.n13.n14.n15
-                                                                                          .n16.n17.n18.n19.n20.n21
+                                                                                        target:
+                                                                                          "n0.n1.n2.n3.n4.n5.n6.n7.n8.n9.n10.n11.n12.n13.n14.n15.n16.n17.n18.n19.n20.n21"
                                                                                       },
                                                                                       states: {
                                                                                         n21: {
                                                                                           initial: {
                                                                                             target:
-                                                                                              Machine.targets(States)
-                                                                                                .root.n0.n1.n2.n3.n4.n5
-                                                                                                .n6.n7.n8.n9.n10.n11.n12
-                                                                                                .n13.n14.n15.n16.n17.n18
-                                                                                                .n19.n20.n21.n22
+                                                                                              "n0.n1.n2.n3.n4.n5.n6.n7.n8.n9.n10.n11.n12.n13.n14.n15.n16.n17.n18.n19.n20.n21.n22"
                                                                                           },
                                                                                           states: {
                                                                                             n22: {
                                                                                               initial: {
-                                                                                                target: Machine.targets(
-                                                                                                  States
-                                                                                                ).root.n0.n1.n2.n3.n4
-                                                                                                  .n5.n6.n7.n8.n9.n10
-                                                                                                  .n11.n12.n13.n14.n15
-                                                                                                  .n16.n17.n18.n19.n20
-                                                                                                  .n21.n22.n23
+                                                                                                target:
+                                                                                                  "n0.n1.n2.n3.n4.n5.n6.n7.n8.n9.n10.n11.n12.n13.n14.n15.n16.n17.n18.n19.n20.n21.n22.n23"
                                                                                               },
                                                                                               states: {
                                                                                                 n23: {
                                                                                                   initial: {
                                                                                                     target:
-                                                                                                      Machine.targets(
-                                                                                                        States
-                                                                                                      ).root.n0.n1.n2.n3
-                                                                                                        .n4.n5.n6.n7.n8
-                                                                                                        .n9.n10.n11.n12
-                                                                                                        .n13.n14.n15.n16
-                                                                                                        .n17.n18.n19.n20
-                                                                                                        .n21.n22.n23.n24
+                                                                                                      "n0.n1.n2.n3.n4.n5.n6.n7.n8.n9.n10.n11.n12.n13.n14.n15.n16.n17.n18.n19.n20.n21.n22.n23.n24"
                                                                                                   },
                                                                                                   states: {
                                                                                                     n24: {

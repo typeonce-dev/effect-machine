@@ -129,7 +129,7 @@ const isPropertyPlanningCallback = (
 
   const name = propertyName(property)
   if (
-    name !== undefined && ["resolve", "data", "guard"].includes(name) &&
+    name !== undefined && ["resolve", "data", "guard", "initialize"].includes(name) &&
     isTransitionConfig(property.parent, bindings)
   ) return true
   if (name === "input" && isInvocationConfig(property.parent, bindings)) return true

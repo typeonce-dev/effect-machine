@@ -53,7 +53,7 @@ const topologyMachine = Machine.make({
   events: Machine.eventsFromSchemas()
 }).handle({
   initial: {
-    target: Machine.targets(TopologyStates).root.Root,
+    target: "Root",
     decoded: true,
     data: new Root({ id: "root-1" })
   },
@@ -72,7 +72,7 @@ const topologyMachine = Machine.make({
       states: {
         left: {
           initial: {
-            target: Machine.targets(TopologyStates).root.Root.left.working,
+            target: "Root.left.working",
             decoded: true,
             data: new LeftWorking({ task: "left-1" })
           },
@@ -83,7 +83,7 @@ const topologyMachine = Machine.make({
         },
         right: {
           initial: {
-            target: Machine.targets(TopologyStates).root.Root.right.working,
+            target: "Root.right.working",
             decoded: true,
             data: new RightWorking({ enabled: true })
           },
@@ -180,20 +180,20 @@ const historyMachine = Machine.make({
   events: Machine.eventsFromSchemas()
 }).handle({
   initial: {
-    target: Machine.targets(HistoryStates).root.Outside,
+    target: "Outside",
     decoded: true,
     data: new Outside({})
   },
   states: {
     Workspace: {
       initial: {
-        target: Machine.targets(HistoryStates).root.Workspace.Editor,
+        target: "Workspace.Editor",
         data: { document: "initial" }
       },
       states: {
         Editor: {
           initial: {
-            target: Machine.targets(HistoryStates).root.Workspace.Editor.editing,
+            target: "Workspace.Editor.editing",
             data: { contents: "", payload: undefined }
           },
           states: {
@@ -241,7 +241,7 @@ const richMachine = Machine.make({
   events: Machine.eventsFromSchemas()
 }).handle({
   initial: {
-    target: Machine.targets(RichStates).root.RichState,
+    target: "RichState",
     decoded: true,
     data: new RichState({ createdAt: new Date("2026-08-19T12:00:00.000Z"), sequence: 42n, missing: undefined })
   },
@@ -264,7 +264,7 @@ const opaqueMachine = Machine.make({
   events: Machine.eventsFromSchemas()
 }).handle({
   initial: {
-    target: Machine.targets(OpaqueStates).root.OpaqueState,
+    target: "OpaqueState",
     decoded: true,
     data: { _tag: "CodecOpaqueState", resource: {} }
   },
@@ -284,7 +284,7 @@ const outputMachine = Machine.make({
   events: Machine.eventsFromSchemas()
 }).handle({
   initial: {
-    target: Machine.targets(OutputStates).root.OutputDone,
+    target: "OutputDone",
     decoded: true,
     data: new OutputDone({})
   },
@@ -459,40 +459,38 @@ describe("snapshot codec adversarial boundaries", () => {
       class After extends Schema.TaggedClass<After>("CodecAutomaticAfter")("CodecAutomaticAfter", {}) {
       }
       const states = Machine.state({ states: { Before, Boundary, After } })
-      const targets1 = Machine.targets(states)
       const original = Machine.make({
         id: "codec-automatic-original",
         root: states,
         events: Machine.eventsFromSchemas()
       }).handle({
         initial: {
-          target: Machine.targets(states).root.Before,
+          target: "Before",
           decoded: true,
           data: new Before({})
         },
         states: {
           Before: {
-            always: { target: targets1.root.Boundary, decoded: true, data: () => (new Boundary({})) }
+            always: { target: "Boundary", decoded: true, data: () => (new Boundary({})) }
           },
           Boundary: {},
           After: {}
         }
       })
-      const targets2 = Machine.targets(states)
       const changed = Machine.make({
         id: "codec-automatic-changed",
         root: states,
         events: Machine.eventsFromSchemas()
       }).handle({
         initial: {
-          target: Machine.targets(states).root.Before,
+          target: "Before",
           decoded: true,
           data: new Before({})
         },
         states: {
           Before: {},
           Boundary: {
-            always: { target: targets2.root.After, decoded: true, data: () => (new After({})) }
+            always: { target: "After", decoded: true, data: () => (new After({})) }
           },
           After: {}
         }
