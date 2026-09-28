@@ -1,5 +1,11 @@
 # @typeonce/oxlint-plugin-effect-machine
 
+## 0.39.0
+
+### Patch Changes
+
+- e20e054: Show transition declarations with declared state paths such as `{ target: "Checkout.Review" }` and `{ initialize: … }` in the devtools. `no-async-planning-callback` also checks `initialize` input mappers.
+
 ## 0.38.1
 
 ## 0.38.0
