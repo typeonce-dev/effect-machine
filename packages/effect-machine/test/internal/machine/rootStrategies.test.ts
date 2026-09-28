@@ -34,7 +34,6 @@ it.effect("matches generic startup with constructed and defaulted parallel regio
 it.effect("retains independent callback contexts across root, inline, and named transitions", () =>
   Effect.gen(function*() {
     const root = Machine.state({ fields: { count: Schema.Number }, states: { Idle: {} } })
-    const targets = Machine.targets(root)
     const retained: Array<{
       readonly root: {
         readonly count: number
@@ -47,12 +46,12 @@ it.effect("retains independent callback contexts across root, inline, and named 
       branches: { observe: { stay: { none: true } } }
     }).handle({
       initial: {
-        target: Machine.targets(root).root.Idle
+        target: "Idle"
       },
       root: () => ({ count: 0 }),
       on: {
         IncrementRoot: {
-          update: targets.root,
+          update: "root",
           data: (context) => {
             retained.push(context)
             return { count: context.root.count + 1 }
@@ -63,7 +62,7 @@ it.effect("retains independent callback contexts across root, inline, and named 
         Idle: {
           on: {
             Increment: {
-              update: targets.root,
+              update: "root",
               data: (context) => {
                 retained.push(context)
                 return { count: context.root.count + 1 }
@@ -107,7 +106,7 @@ it.effect("constructs schema defaults throughout a parallel root", () => {
   const machine = Machine.make({
     root: InitialRoot1,
     events: Machine.events({ Noop: {} })
-  }).handle({ states: { Left: { initial: { target: Machine.targets(InitialRoot1).root.Left.Idle } } } })
+  }).handle({ states: { Left: { initial: { target: "Left.Idle" } } } })
   return verifyPlannerStrategies({
     machine,
     expected: "indexed-hierarchical",
@@ -117,16 +116,15 @@ it.effect("constructs schema defaults throughout a parallel root", () => {
 })
 it.effect("compares structural leaves, reentry, raised events and completion with generic planning", () => {
   const root1 = Machine.state({ states: { Idle: {}, Busy: {}, Done: { type: "final" } } })
-  const targets1 = Machine.targets(root1)
   const machine = Machine.make({
     root: root1,
     events: Machine.events({ Begin: {}, Reenter: {}, Finish: {}, Complete: {} })
   }).handle({
     initial: {
-      target: Machine.targets(root1).root.Idle
+      target: "Idle"
     },
     states: {
-      Idle: { on: { Begin: { target: targets1.root.Busy } } },
+      Idle: { on: { Begin: { target: "Busy" } } },
       Busy: {
         on: {
           Reenter: { none: true, reenter: true },
@@ -136,7 +134,7 @@ it.effect("compares structural leaves, reentry, raised events and completion wit
               enqueue.raise({ _tag: "Complete" })
             }
           },
-          Complete: { target: targets1.root.Done }
+          Complete: { target: "Done" }
         }
       },
       Done: {}
@@ -155,14 +153,13 @@ it.effect("compares structural leaves, reentry, raised events and completion wit
 })
 it.effect("keeps flat root updates and retained snapshots equal to generic planning", () => {
   const root = Machine.state({ fields: { count: Schema.Number } })
-  const targets2 = Machine.targets(root)
   const machine = Machine.make({
     root,
     events: Machine.events({ Increment: { by: Schema.Number }, Noop: {}, Reenter: {} })
   }).handle({
     root: () => ({ count: 0 }),
     on: {
-      Increment: { update: targets2.root, data: ({ root: current, event }) => ({ count: current.count + event.by }) },
+      Increment: { update: "root", data: ({ root: current, event }) => ({ count: current.count + event.by }) },
       Noop: { none: true },
       Reenter: { none: true, reenter: true }
     }
@@ -181,21 +178,20 @@ it.effect("keeps flat root updates and retained snapshots equal to generic plann
 })
 it.effect("keeps root values and child transitions equal to generic planning", () => {
   const root = Machine.state({ fields: { count: Schema.Number }, states: { Idle: {}, Busy: {} } })
-  const targets3 = Machine.targets(root)
   const machine = Machine.make({
     root,
     events: Machine.events({ Increment: { by: Schema.Number }, Start: {}, Stop: {} })
   }).handle({
     initial: {
-      target: Machine.targets(root).root.Idle
+      target: "Idle"
     },
     root: () => ({ count: 0 }),
     on: {
-      Increment: { update: targets3.root, data: ({ root: current, event }) => ({ count: current.count + event.by }) }
+      Increment: { update: "root", data: ({ root: current, event }) => ({ count: current.count + event.by }) }
     },
     states: {
-      Idle: { on: { Start: { target: targets3.root.Busy } } },
-      Busy: { on: { Stop: { target: targets3.root.Idle } } }
+      Idle: { on: { Start: { target: "Busy" } } },
+      Busy: { on: { Stop: { target: "Idle" } } }
     }
   })
   return verifyPlannerStrategies({
@@ -222,10 +218,8 @@ it.effect("reuses only immutable startup builders and keeps input values indepen
       events: Machine.events({ Noop: {} })
     }).handle({
       root: ({ input }) => ({ count: input.count }),
-      initial: { target: Machine.targets(InitialRoot2).root.Idle, data: ({ root }) => ({ count: root.count }) }
+      initial: { target: "Idle", data: ({ root }) => ({ count: root.count }) }
     })
-    const targets = Machine.targets(InitialRoot2)
-    assert.strictEqual(Reflect.set(targets.root, "Idle", targets.root.Busy), false)
     const first = yield* Machine.planInitial(machine, { count: 1 })
     const second = yield* Machine.planInitial(machine, { count: 2 })
     assert.deepStrictEqual(first.state, {
@@ -249,6 +243,38 @@ it.effect("reuses only immutable startup builders and keeps input values indepen
     }
   }))
 
+it.effect("compares input-less root initialization across planners", () => {
+  const root = Machine.state({
+    fields: { count: Schema.Number },
+    states: { Idle: {}, Busy: { fields: { step: Schema.Number } } }
+  })
+  const machine = Machine.make({
+    root,
+    events: Machine.events({ Work: {}, Count: {}, Reset: {}, Restart: {} })
+  }).handle({
+    root: { count: 0 },
+    initial: { target: "Idle" },
+    on: {
+      Count: { update: "root", data: ({ root }) => ({ count: root.count + 1 }) },
+      Reset: { initialize: true },
+      Restart: { initialize: true, reenter: true }
+    },
+    states: { Idle: { on: { Work: { target: "Busy", data: ({ root }) => ({ step: root.count }) } } } }
+  })
+  return verifyPlannerStrategies({
+    machine,
+    label: "input-less root initialization",
+    events: [
+      { _tag: "Count" },
+      { _tag: "Work" },
+      { _tag: "Reset" },
+      { _tag: "Count" },
+      { _tag: "Work" },
+      { _tag: "Restart" }
+    ]
+  })
+})
+
 it.effect("compares fresh root input and parallel initial constructors across planners", () => {
   const root = Machine.state({
     type: "parallel",
@@ -257,7 +283,6 @@ it.effect("compares fresh root input and parallel initial constructors across pl
       Right: { fields: { label: Schema.String } }
     }
   })
-  const targets = Machine.targets(root)
   const machine = Machine.make({
     root,
     input: Schema.Number,
@@ -265,8 +290,8 @@ it.effect("compares fresh root input and parallel initial constructors across pl
   }).handle({
     initial: { Left: ({ input }) => ({ count: input }), Right: ({ input }) => ({ label: String(input) }) },
     on: {
-      Reset: { target: targets.root, input: ({ event }) => event.count },
-      Restart: { target: targets.root, input: ({ event }) => event.count, reenter: true }
+      Reset: { initialize: ({ event }) => event.count },
+      Restart: { initialize: ({ event }) => event.count, reenter: true }
     }
   })
   return verifyPlannerStrategies({
@@ -285,21 +310,20 @@ it.effect("preserves owner updates while resolving compound initial descendants"
       Work: { fields: { title: Schema.String }, states: { Ready: { fields: { count: Schema.Number } } } }
     }
   })
-  const targets = Machine.targets(root)
   const machine = Machine.make({ root, events: Machine.events({ Open: {} }) }).handle({
     root: { count: 0 },
-    initial: { target: targets.root.Idle },
+    initial: { target: "Idle" },
     states: {
       Idle: {
         on: {
           Open: {
-            target: targets.root.Work,
-            update: targets.root,
+            target: "Work",
+            update: "root",
             data: { target: { title: "new" }, update: { count: 1 } }
           }
         }
       },
-      Work: { initial: { target: targets.root.Work.Ready, data: ({ root }) => ({ count: root.count }) } }
+      Work: { initial: { target: "Work.Ready", data: ({ root }) => ({ count: root.count }) } }
     }
   })
   return verifyPlannerStrategies({

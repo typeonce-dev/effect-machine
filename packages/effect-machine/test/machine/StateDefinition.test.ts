@@ -47,12 +47,12 @@ describe("exact state-definition runtime validation", () => {
     assert.isTrue(Object.isFrozen(machine.root.node.states.Root.states))
     const compiled = machine.handle({
       initial: {
-        target: Machine.targets(InitialRoot1).root.Root
+        target: "Root"
       },
       states: {
         Root: {
           initial: {
-            target: Machine.targets(InitialRoot1).root.Root.Idle
+            target: "Root.Idle"
           },
           states: {
             Idle: {},
@@ -128,13 +128,13 @@ describe("exact state-definition runtime validation", () => {
       events: Machine.eventsFromSchemas()
     }).handle({
       initial: {
-        target: Machine.targets(states).root.Idle
+        target: "Idle"
       },
       states: {
         Idle: {},
         Flow: {
           initial: {
-            target: Machine.targets(states).root.Flow.Waiting
+            target: "Flow.Waiting"
           },
           states: {
             Waiting: {},
@@ -170,7 +170,7 @@ describe("exact state-definition runtime validation", () => {
       events: Machine.eventsFromSchemas()
     }).handle({
       initial: {
-        target: Machine.targets(states).root.Idle,
+        target: "Idle",
         decoded: true,
         data: new Idle({})
       },
@@ -190,7 +190,7 @@ describe("exact state-definition runtime validation", () => {
       events: Machine.eventsFromSchemas()
     }).handle({
       initial: {
-        target: Machine.targets(states).root.Opaque,
+        target: "Opaque",
         decoded: true,
         data: { _tag: "OpaqueState", value: 1 }
       },

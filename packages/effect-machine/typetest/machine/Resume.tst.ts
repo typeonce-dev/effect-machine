@@ -12,14 +12,13 @@ const States = Machine.state({
   states: { Idle }
 })
 type Snapshot = Machine.Snapshot<typeof States>
-const targets1 = Machine.targets(States)
 const machine = Machine.make({
   root: States,
   events: Machine.eventsFromSchemas(Tick),
   input: Schema.Struct({ seed: Schema.Number })
 }).handle({
   initial: {
-    target: Machine.targets(States).root.Idle,
+    target: "Idle",
     decoded: true,
     data: ({ root: { input: input } }) => new Idle({ value: input.seed })
   },
@@ -27,7 +26,7 @@ const machine = Machine.make({
   states: {
     Idle: {
       on: {
-        Tick: { target: targets1.root.Idle, decoded: true, data: ({ state }) => (new Idle({ value: state.value + 1 })) }
+        Tick: { target: "Idle", decoded: true, data: ({ state }) => (new Idle({ value: state.value + 1 })) }
       }
     }
   }

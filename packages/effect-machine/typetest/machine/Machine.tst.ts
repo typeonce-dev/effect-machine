@@ -235,7 +235,7 @@ describe("Machine", () => {
       internalEvents: InternalEvents
     }).handle({
       initial: {
-        target: Machine.targets(States).root.State,
+        target: "State",
         data: () => {
           throw new Error("type-only constructor")
         }
@@ -436,7 +436,7 @@ describe("Machine", () => {
       events: Machine.eventsFromSchemas(SignIn)
     }).handle({
       initial: {
-        target: Machine.targets(UpStates).root.down,
+        target: "down",
         decoded: true,
         data: new Down({})
       },
@@ -445,7 +445,7 @@ describe("Machine", () => {
           states: {
             auth: {
               initial: {
-                target: Machine.targets(UpStates).root.up.auth.signedOut,
+                target: "up.auth.signedOut",
                 data: () => {
                   throw new Error("type-only constructor")
                 }
@@ -453,7 +453,7 @@ describe("Machine", () => {
             },
             sync: {
               initial: {
-                target: Machine.targets(UpStates).root.up.sync.idle,
+                target: "up.sync.idle",
                 data: () => {
                   throw new Error("type-only constructor")
                 }
@@ -487,7 +487,7 @@ describe("Machine", () => {
       events: Machine.eventsFromSchemas(SignIn)
     }).handle({
       initial: {
-        target: Machine.targets(UpStates).root.down,
+        target: "down",
         decoded: true,
         data: new Down({})
       },
@@ -496,7 +496,7 @@ describe("Machine", () => {
           states: {
             auth: {
               initial: {
-                target: Machine.targets(UpStates).root.up.auth.signedOut,
+                target: "up.auth.signedOut",
                 data: () => {
                   throw new Error("type-only constructor")
                 }
@@ -504,7 +504,7 @@ describe("Machine", () => {
             },
             sync: {
               initial: {
-                target: Machine.targets(UpStates).root.up.sync.idle,
+                target: "up.sync.idle",
                 data: () => {
                   throw new Error("type-only constructor")
                 }
@@ -547,7 +547,7 @@ describe("Machine", () => {
     })
     const machine = definition.handle({
       initial: {
-        target: Machine.targets(UpStates).root.down,
+        target: "down",
         decoded: true,
         data: new Down({})
       },
@@ -556,7 +556,7 @@ describe("Machine", () => {
           states: {
             auth: {
               initial: {
-                target: Machine.targets(UpStates).root.up.auth.signedOut,
+                target: "up.auth.signedOut",
                 data: () => {
                   throw new Error("type-only constructor")
                 }
@@ -565,7 +565,7 @@ describe("Machine", () => {
             },
             sync: {
               initial: {
-                target: Machine.targets(UpStates).root.up.sync.idle,
+                target: "up.sync.idle",
                 data: () => {
                   throw new Error("type-only constructor")
                 }
@@ -590,7 +590,7 @@ describe("Machine", () => {
     expect<Effect.Success<typeof planned>["commands"]>().type.toBe<ReadonlyArray<Machine.Command>>()
     expect(definition.handle).type.toBeCallableWith({
       initial: {
-        target: Machine.targets(UpStates).root.up,
+        target: "up",
         data: () => {
           throw new Error("type-only constructor")
         }
@@ -608,7 +608,7 @@ describe("Machine", () => {
           states: {
             auth: {
               initial: {
-                target: Machine.targets(UpStates).root.up.auth.signedOut,
+                target: "up.auth.signedOut",
                 data: () => {
                   throw new Error("type-only constructor")
                 }
@@ -616,7 +616,7 @@ describe("Machine", () => {
             },
             sync: {
               initial: {
-                target: Machine.targets(UpStates).root.up.sync.idle,
+                target: "up.sync.idle",
                 data: () => {
                   throw new Error("type-only constructor")
                 }
@@ -641,7 +641,7 @@ describe("Machine", () => {
           states: {
             auth: {
               initial: {
-                target: Machine.targets(UpStates).root.up.auth.signedOut,
+                target: "up.auth.signedOut",
                 data: () => {
                   throw new Error("type-only constructor")
                 }
@@ -649,7 +649,7 @@ describe("Machine", () => {
             },
             sync: {
               initial: {
-                target: Machine.targets(UpStates).root.up.sync.idle,
+                target: "up.sync.idle",
                 data: () => {
                   throw new Error("type-only constructor")
                 }
@@ -659,7 +659,7 @@ describe("Machine", () => {
         }
       },
       initial: {
-        target: Machine.targets(UpStates).root.up,
+        target: "up",
         data: () => {
           throw new Error("type-only constructor")
         }
@@ -669,15 +669,14 @@ describe("Machine", () => {
   })
   it("types the closed enqueue protocol without exposing Effects", () => {
     const worker = Machine.childAddress<SignIn>("worker")
-    const targets1 = Machine.targets(UpStates)
     const machine = Machine.make({
-      branches: { transition1: { destination: { target: targets1.root.down } } },
+      branches: { transition1: { destination: { target: "down" } } },
       root: UpStates,
       events: Machine.eventsFromSchemas(SignIn),
       emittedEvents: Machine.emittedEventsFromSchemas(SignInCompleted)
     }).handle({
       initial: {
-        target: Machine.targets(UpStates).root.down,
+        target: "down",
         decoded: true,
         data: new Down({})
       },
@@ -686,7 +685,7 @@ describe("Machine", () => {
           states: {
             auth: {
               initial: {
-                target: Machine.targets(UpStates).root.up.auth.signedOut,
+                target: "up.auth.signedOut",
                 data: () => {
                   throw new Error("type-only constructor")
                 }
@@ -695,7 +694,7 @@ describe("Machine", () => {
             },
             sync: {
               initial: {
-                target: Machine.targets(UpStates).root.up.sync.idle,
+                target: "up.sync.idle",
                 data: () => {
                   throw new Error("type-only constructor")
                 }
@@ -768,7 +767,6 @@ describe("Machine", () => {
   })
   it("invoke infers one-shot outputs from factories in the owning state", () => {
     expect(Machine).type.not.toHaveProperty("invoke")
-    const targets2 = Machine.targets(UpStates)
     const machine = Machine.make({
       effects: { source1: Effect.suspend(() => Effect.succeed(1)) },
       root: UpStates,
@@ -776,7 +774,7 @@ describe("Machine", () => {
     })
     machine.handle({
       initial: {
-        target: Machine.targets(UpStates).root.down,
+        target: "down",
         decoded: true,
         data: new Down({})
       },
@@ -785,7 +783,7 @@ describe("Machine", () => {
           states: {
             auth: {
               initial: {
-                target: Machine.targets(UpStates).root.up.auth.signedOut,
+                target: "up.auth.signedOut",
                 data: () => {
                   throw new Error("type-only constructor")
                 }
@@ -794,7 +792,7 @@ describe("Machine", () => {
             },
             sync: {
               initial: {
-                target: Machine.targets(UpStates).root.up.sync.idle,
+                target: "up.sync.idle",
                 data: () => {
                   throw new Error("type-only constructor")
                 }
@@ -815,14 +813,14 @@ describe("Machine", () => {
           invoke: {
             src: "source1",
             id: "valid",
-            onDone: { target: targets2.root.down, decoded: true, data: () => (new Down({})) }
+            onDone: { target: "down", decoded: true, data: () => (new Down({})) }
           }
         }
       }
     })
     expect(machine.handle).type.toBeCallableWith({
       initial: {
-        target: Machine.targets(UpStates).root.up,
+        target: "up",
         data: () => {
           throw new Error("type-only constructor")
         }
@@ -840,7 +838,7 @@ describe("Machine", () => {
           states: {
             auth: {
               initial: {
-                target: Machine.targets(UpStates).root.up.auth.signedOut,
+                target: "up.auth.signedOut",
                 data: () => {
                   throw new Error("type-only constructor")
                 }
@@ -848,7 +846,7 @@ describe("Machine", () => {
             },
             sync: {
               initial: {
-                target: Machine.targets(UpStates).root.up.sync.idle,
+                target: "up.sync.idle",
                 data: () => {
                   throw new Error("type-only constructor")
                 }
@@ -873,7 +871,7 @@ describe("Machine", () => {
           states: {
             auth: {
               initial: {
-                target: Machine.targets(UpStates).root.up.auth.signedOut,
+                target: "up.auth.signedOut",
                 data: () => {
                   throw new Error("type-only constructor")
                 }
@@ -881,7 +879,7 @@ describe("Machine", () => {
             },
             sync: {
               initial: {
-                target: Machine.targets(UpStates).root.up.sync.idle,
+                target: "up.sync.idle",
                 data: () => {
                   throw new Error("type-only constructor")
                 }
@@ -891,7 +889,7 @@ describe("Machine", () => {
         }
       },
       initial: {
-        target: Machine.targets(UpStates).root.up,
+        target: "up",
         data: () => {
           throw new Error("type-only constructor")
         }
@@ -913,7 +911,7 @@ describe("Machine", () => {
           states: {
             auth: {
               initial: {
-                target: Machine.targets(UpStates).root.up.auth.signedOut,
+                target: "up.auth.signedOut",
                 data: () => {
                   throw new Error("type-only constructor")
                 }
@@ -921,7 +919,7 @@ describe("Machine", () => {
             },
             sync: {
               initial: {
-                target: Machine.targets(UpStates).root.up.sync.idle,
+                target: "up.sync.idle",
                 data: () => {
                   throw new Error("type-only constructor")
                 }
@@ -931,7 +929,7 @@ describe("Machine", () => {
         }
       },
       initial: {
-        target: Machine.targets(UpStates).root.up,
+        target: "up",
         data: () => {
           throw new Error("type-only constructor")
         }
@@ -939,7 +937,6 @@ describe("Machine", () => {
     })
   })
   it("contextually types dynamic Effect sources through registered invocation sources", () => {
-    const targets3 = Machine.targets(UpStates)
     const machine = Machine.make({
       effects: {
         source1: ({ state }: Machine.Machine.InvokeContext<
@@ -965,7 +962,7 @@ describe("Machine", () => {
     })
     machine.handle({
       initial: {
-        target: Machine.targets(UpStates).root.down,
+        target: "down",
         decoded: true,
         data: new Down({})
       },
@@ -974,7 +971,7 @@ describe("Machine", () => {
           states: {
             auth: {
               initial: {
-                target: Machine.targets(UpStates).root.up.auth.signedOut,
+                target: "up.auth.signedOut",
                 data: () => {
                   throw new Error("type-only constructor")
                 }
@@ -983,7 +980,7 @@ describe("Machine", () => {
             },
             sync: {
               initial: {
-                target: Machine.targets(UpStates).root.up.sync.idle,
+                target: "up.sync.idle",
                 data: () => {
                   throw new Error("type-only constructor")
                 }
@@ -1005,7 +1002,7 @@ describe("Machine", () => {
             src: "source1",
             id: "dynamic",
             input: (context) => context,
-            onDone: { target: targets3.root.down, decoded: true, data: () => (new Down({})) }
+            onDone: { target: "down", decoded: true, data: () => (new Down({})) }
           }
         }
       }
@@ -1060,7 +1057,7 @@ describe("Machine", () => {
     })
     const handled = machine.handle({
       initial: {
-        target: Machine.targets(UpStates).root.down,
+        target: "down",
         decoded: true,
         data: new Down({})
       },
@@ -1069,7 +1066,7 @@ describe("Machine", () => {
           states: {
             auth: {
               initial: {
-                target: Machine.targets(UpStates).root.up.auth.signedOut,
+                target: "up.auth.signedOut",
                 data: () => {
                   throw new Error("type-only constructor")
                 }
@@ -1078,7 +1075,7 @@ describe("Machine", () => {
             },
             sync: {
               initial: {
-                target: Machine.targets(UpStates).root.up.sync.idle,
+                target: "up.sync.idle",
                 data: () => {
                   throw new Error("type-only constructor")
                 }
@@ -1121,7 +1118,7 @@ describe("Machine", () => {
     expect<Machine.Machine.Error<typeof handled>>().type.not.toBe<any>()
     const staticHandled = machine.handle({
       initial: {
-        target: Machine.targets(UpStates).root.down,
+        target: "down",
         decoded: true,
         data: new Down({})
       },
@@ -1130,7 +1127,7 @@ describe("Machine", () => {
           states: {
             auth: {
               initial: {
-                target: Machine.targets(UpStates).root.up.auth.signedOut,
+                target: "up.auth.signedOut",
                 data: () => {
                   throw new Error("type-only constructor")
                 }
@@ -1139,7 +1136,7 @@ describe("Machine", () => {
             },
             sync: {
               initial: {
-                target: Machine.targets(UpStates).root.up.sync.idle,
+                target: "up.sync.idle",
                 data: () => {
                   throw new Error("type-only constructor")
                 }
@@ -1189,7 +1186,7 @@ describe("Machine", () => {
     })
     expect(machine.handle).type.toBeCallableWith({
       initial: {
-        target: Machine.targets(UpStates).root.up,
+        target: "up",
         data: () => {
           throw new Error("type-only constructor")
         }
@@ -1207,7 +1204,7 @@ describe("Machine", () => {
           states: {
             auth: {
               initial: {
-                target: Machine.targets(UpStates).root.up.auth.signedOut,
+                target: "up.auth.signedOut",
                 data: () => {
                   throw new Error("type-only constructor")
                 }
@@ -1215,7 +1212,7 @@ describe("Machine", () => {
             },
             sync: {
               initial: {
-                target: Machine.targets(UpStates).root.up.sync.idle,
+                target: "up.sync.idle",
                 data: () => {
                   throw new Error("type-only constructor")
                 }
@@ -1240,7 +1237,7 @@ describe("Machine", () => {
           states: {
             auth: {
               initial: {
-                target: Machine.targets(UpStates).root.up.auth.signedOut,
+                target: "up.auth.signedOut",
                 data: () => {
                   throw new Error("type-only constructor")
                 }
@@ -1248,7 +1245,7 @@ describe("Machine", () => {
             },
             sync: {
               initial: {
-                target: Machine.targets(UpStates).root.up.sync.idle,
+                target: "up.sync.idle",
                 data: () => {
                   throw new Error("type-only constructor")
                 }
@@ -1258,7 +1255,7 @@ describe("Machine", () => {
         }
       },
       initial: {
-        target: Machine.targets(UpStates).root.up,
+        target: "up",
         data: () => {
           throw new Error("type-only constructor")
         }
@@ -1279,7 +1276,7 @@ describe("Machine", () => {
           states: {
             auth: {
               initial: {
-                target: Machine.targets(UpStates).root.up.auth.signedOut,
+                target: "up.auth.signedOut",
                 data: () => {
                   throw new Error("type-only constructor")
                 }
@@ -1287,7 +1284,7 @@ describe("Machine", () => {
             },
             sync: {
               initial: {
-                target: Machine.targets(UpStates).root.up.sync.idle,
+                target: "up.sync.idle",
                 data: () => {
                   throw new Error("type-only constructor")
                 }
@@ -1297,7 +1294,7 @@ describe("Machine", () => {
         }
       },
       initial: {
-        target: Machine.targets(UpStates).root.up,
+        target: "up",
         data: () => {
           throw new Error("type-only constructor")
         }
@@ -1318,7 +1315,7 @@ describe("Machine", () => {
           states: {
             auth: {
               initial: {
-                target: Machine.targets(UpStates).root.up.auth.signedOut,
+                target: "up.auth.signedOut",
                 data: () => {
                   throw new Error("type-only constructor")
                 }
@@ -1326,7 +1323,7 @@ describe("Machine", () => {
             },
             sync: {
               initial: {
-                target: Machine.targets(UpStates).root.up.sync.idle,
+                target: "up.sync.idle",
                 data: () => {
                   throw new Error("type-only constructor")
                 }
@@ -1336,7 +1333,7 @@ describe("Machine", () => {
         }
       },
       initial: {
-        target: Machine.targets(UpStates).root.up,
+        target: "up",
         data: () => {
           throw new Error("type-only constructor")
         }
@@ -1359,7 +1356,7 @@ describe("Machine", () => {
           states: {
             auth: {
               initial: {
-                target: Machine.targets(UpStates).root.up.auth.signedOut,
+                target: "up.auth.signedOut",
                 data: () => {
                   throw new Error("type-only constructor")
                 }
@@ -1367,7 +1364,7 @@ describe("Machine", () => {
             },
             sync: {
               initial: {
-                target: Machine.targets(UpStates).root.up.sync.idle,
+                target: "up.sync.idle",
                 data: () => {
                   throw new Error("type-only constructor")
                 }
@@ -1377,7 +1374,7 @@ describe("Machine", () => {
         }
       },
       initial: {
-        target: Machine.targets(UpStates).root.up,
+        target: "up",
         data: () => {
           throw new Error("type-only constructor")
         }
@@ -1414,7 +1411,7 @@ describe("Machine", () => {
     })
     machine.handle({
       initial: {
-        target: Machine.targets(UpStates).root.down,
+        target: "down",
         decoded: true,
         data: new Down({})
       },
@@ -1423,7 +1420,7 @@ describe("Machine", () => {
           states: {
             auth: {
               initial: {
-                target: Machine.targets(UpStates).root.up.auth.signedOut,
+                target: "up.auth.signedOut",
                 data: () => {
                   throw new Error("type-only constructor")
                 }
@@ -1432,7 +1429,7 @@ describe("Machine", () => {
             },
             sync: {
               initial: {
-                target: Machine.targets(UpStates).root.up.sync.idle,
+                target: "up.sync.idle",
                 data: () => {
                   throw new Error("type-only constructor")
                 }
@@ -1543,7 +1540,7 @@ describe("Machine", () => {
     })
     machine.handle({
       initial: {
-        target: Machine.targets(UpStates).root.down,
+        target: "down",
         decoded: true,
         data: new Down({})
       },
@@ -1552,7 +1549,7 @@ describe("Machine", () => {
           states: {
             auth: {
               initial: {
-                target: Machine.targets(UpStates).root.up.auth.signedOut,
+                target: "up.auth.signedOut",
                 data: () => {
                   throw new Error("type-only constructor")
                 }
@@ -1561,7 +1558,7 @@ describe("Machine", () => {
             },
             sync: {
               initial: {
-                target: Machine.targets(UpStates).root.up.sync.idle,
+                target: "up.sync.idle",
                 data: () => {
                   throw new Error("type-only constructor")
                 }
@@ -1595,7 +1592,7 @@ describe("Machine", () => {
     })
     const requirementsHandled = machine.handle({
       initial: {
-        target: Machine.targets(UpStates).root.down,
+        target: "down",
         decoded: true,
         data: new Down({})
       },
@@ -1604,7 +1601,7 @@ describe("Machine", () => {
           states: {
             auth: {
               initial: {
-                target: Machine.targets(UpStates).root.up.auth.signedOut,
+                target: "up.auth.signedOut",
                 data: () => {
                   throw new Error("type-only constructor")
                 }
@@ -1613,7 +1610,7 @@ describe("Machine", () => {
             },
             sync: {
               initial: {
-                target: Machine.targets(UpStates).root.up.sync.idle,
+                target: "up.sync.idle",
                 data: () => {
                   throw new Error("type-only constructor")
                 }
@@ -1651,7 +1648,7 @@ describe("Machine", () => {
     })
     expect(machine.handle).type.toBeCallableWith({
       initial: {
-        target: Machine.targets(UpStates).root.up,
+        target: "up",
         data: () => {
           throw new Error("type-only constructor")
         }
@@ -1669,7 +1666,7 @@ describe("Machine", () => {
           states: {
             auth: {
               initial: {
-                target: Machine.targets(UpStates).root.up.auth.signedOut,
+                target: "up.auth.signedOut",
                 data: () => {
                   throw new Error("type-only constructor")
                 }
@@ -1677,7 +1674,7 @@ describe("Machine", () => {
             },
             sync: {
               initial: {
-                target: Machine.targets(UpStates).root.up.sync.idle,
+                target: "up.sync.idle",
                 data: () => {
                   throw new Error("type-only constructor")
                 }
@@ -1702,7 +1699,7 @@ describe("Machine", () => {
           states: {
             auth: {
               initial: {
-                target: Machine.targets(UpStates).root.up.auth.signedOut,
+                target: "up.auth.signedOut",
                 data: () => {
                   throw new Error("type-only constructor")
                 }
@@ -1710,7 +1707,7 @@ describe("Machine", () => {
             },
             sync: {
               initial: {
-                target: Machine.targets(UpStates).root.up.sync.idle,
+                target: "up.sync.idle",
                 data: () => {
                   throw new Error("type-only constructor")
                 }
@@ -1720,7 +1717,7 @@ describe("Machine", () => {
         }
       },
       initial: {
-        target: Machine.targets(UpStates).root.up,
+        target: "up",
         data: () => {
           throw new Error("type-only constructor")
         }
@@ -1741,7 +1738,7 @@ describe("Machine", () => {
           states: {
             auth: {
               initial: {
-                target: Machine.targets(UpStates).root.up.auth.signedOut,
+                target: "up.auth.signedOut",
                 data: () => {
                   throw new Error("type-only constructor")
                 }
@@ -1749,7 +1746,7 @@ describe("Machine", () => {
             },
             sync: {
               initial: {
-                target: Machine.targets(UpStates).root.up.sync.idle,
+                target: "up.sync.idle",
                 data: () => {
                   throw new Error("type-only constructor")
                 }
@@ -1759,7 +1756,7 @@ describe("Machine", () => {
         }
       },
       initial: {
-        target: Machine.targets(UpStates).root.up,
+        target: "up",
         data: () => {
           throw new Error("type-only constructor")
         }
@@ -1787,7 +1784,7 @@ describe("Machine", () => {
           states: {
             auth: {
               initial: {
-                target: Machine.targets(UpStates).root.up.auth.signedOut,
+                target: "up.auth.signedOut",
                 data: () => {
                   throw new Error("type-only constructor")
                 }
@@ -1795,7 +1792,7 @@ describe("Machine", () => {
             },
             sync: {
               initial: {
-                target: Machine.targets(UpStates).root.up.sync.idle,
+                target: "up.sync.idle",
                 data: () => {
                   throw new Error("type-only constructor")
                 }
@@ -1805,7 +1802,7 @@ describe("Machine", () => {
         }
       },
       initial: {
-        target: Machine.targets(UpStates).root.up,
+        target: "up",
         data: () => {
           throw new Error("type-only constructor")
         }
@@ -1833,7 +1830,7 @@ describe("Machine", () => {
           states: {
             auth: {
               initial: {
-                target: Machine.targets(UpStates).root.up.auth.signedOut,
+                target: "up.auth.signedOut",
                 data: () => {
                   throw new Error("type-only constructor")
                 }
@@ -1841,7 +1838,7 @@ describe("Machine", () => {
             },
             sync: {
               initial: {
-                target: Machine.targets(UpStates).root.up.sync.idle,
+                target: "up.sync.idle",
                 data: () => {
                   throw new Error("type-only constructor")
                 }
@@ -1851,7 +1848,7 @@ describe("Machine", () => {
         }
       },
       initial: {
-        target: Machine.targets(UpStates).root.up,
+        target: "up",
         data: () => {
           throw new Error("type-only constructor")
         }
@@ -1872,7 +1869,7 @@ describe("Machine", () => {
           states: {
             auth: {
               initial: {
-                target: Machine.targets(UpStates).root.up.auth.signedOut,
+                target: "up.auth.signedOut",
                 data: () => {
                   throw new Error("type-only constructor")
                 }
@@ -1880,7 +1877,7 @@ describe("Machine", () => {
             },
             sync: {
               initial: {
-                target: Machine.targets(UpStates).root.up.sync.idle,
+                target: "up.sync.idle",
                 data: () => {
                   throw new Error("type-only constructor")
                 }
@@ -1890,7 +1887,7 @@ describe("Machine", () => {
         }
       },
       initial: {
-        target: Machine.targets(UpStates).root.up,
+        target: "up",
         data: () => {
           throw new Error("type-only constructor")
         }
@@ -1911,7 +1908,7 @@ describe("Machine", () => {
           states: {
             auth: {
               initial: {
-                target: Machine.targets(UpStates).root.up.auth.signedOut,
+                target: "up.auth.signedOut",
                 data: () => {
                   throw new Error("type-only constructor")
                 }
@@ -1919,7 +1916,7 @@ describe("Machine", () => {
             },
             sync: {
               initial: {
-                target: Machine.targets(UpStates).root.up.sync.idle,
+                target: "up.sync.idle",
                 data: () => {
                   throw new Error("type-only constructor")
                 }
@@ -1929,7 +1926,7 @@ describe("Machine", () => {
         }
       },
       initial: {
-        target: Machine.targets(UpStates).root.up,
+        target: "up",
         data: () => {
           throw new Error("type-only constructor")
         }
@@ -1937,7 +1934,7 @@ describe("Machine", () => {
     })
     machine.handle({
       initial: {
-        target: Machine.targets(UpStates).root.up,
+        target: "up",
         data: () => {
           throw new Error("type-only constructor")
         }
@@ -1947,7 +1944,7 @@ describe("Machine", () => {
           states: {
             auth: {
               initial: {
-                target: Machine.targets(UpStates).root.up.auth.signedOut,
+                target: "up.auth.signedOut",
                 data: () => {
                   throw new Error("type-only constructor")
                 }
@@ -1956,7 +1953,7 @@ describe("Machine", () => {
             },
             sync: {
               initial: {
-                target: Machine.targets(UpStates).root.up.sync.idle,
+                target: "up.sync.idle",
                 data: () => {
                   throw new Error("type-only constructor")
                 }
@@ -1984,7 +1981,7 @@ describe("Machine", () => {
       internalEvents: Machine.internalEventsFromSchemas(SignInCompleted)
     }).handle({
       initial: {
-        target: Machine.targets(UpStates).root.down,
+        target: "down",
         decoded: true,
         data: new Down({})
       },
@@ -1993,7 +1990,7 @@ describe("Machine", () => {
           states: {
             auth: {
               initial: {
-                target: Machine.targets(UpStates).root.up.auth.signedOut,
+                target: "up.auth.signedOut",
                 data: () => {
                   throw new Error("type-only constructor")
                 }
@@ -2002,7 +1999,7 @@ describe("Machine", () => {
             },
             sync: {
               initial: {
-                target: Machine.targets(UpStates).root.up.sync.idle,
+                target: "up.sync.idle",
                 data: () => {
                   throw new Error("type-only constructor")
                 }
@@ -2092,7 +2089,7 @@ describe("Machine", () => {
     })
     expect(machine.handle).type.toBeCallableWith({
       initial: {
-        target: Machine.targets(UpStates).root.up,
+        target: "up",
         data: () => {
           throw new Error("type-only constructor")
         }
@@ -2110,7 +2107,7 @@ describe("Machine", () => {
           states: {
             auth: {
               initial: {
-                target: Machine.targets(UpStates).root.up.auth.signedOut,
+                target: "up.auth.signedOut",
                 data: () => {
                   throw new Error("type-only constructor")
                 }
@@ -2118,7 +2115,7 @@ describe("Machine", () => {
             },
             sync: {
               initial: {
-                target: Machine.targets(UpStates).root.up.sync.idle,
+                target: "up.sync.idle",
                 data: () => {
                   throw new Error("type-only constructor")
                 }
@@ -2143,7 +2140,7 @@ describe("Machine", () => {
           states: {
             auth: {
               initial: {
-                target: Machine.targets(UpStates).root.up.auth.signedOut,
+                target: "up.auth.signedOut",
                 data: () => {
                   throw new Error("type-only constructor")
                 }
@@ -2151,7 +2148,7 @@ describe("Machine", () => {
             },
             sync: {
               initial: {
-                target: Machine.targets(UpStates).root.up.sync.idle,
+                target: "up.sync.idle",
                 data: () => {
                   throw new Error("type-only constructor")
                 }
@@ -2161,7 +2158,7 @@ describe("Machine", () => {
         }
       },
       initial: {
-        target: Machine.targets(UpStates).root.up,
+        target: "up",
         data: () => {
           throw new Error("type-only constructor")
         }
@@ -2182,7 +2179,7 @@ describe("Machine", () => {
           states: {
             auth: {
               initial: {
-                target: Machine.targets(UpStates).root.up.auth.signedOut,
+                target: "up.auth.signedOut",
                 data: () => {
                   throw new Error("type-only constructor")
                 }
@@ -2190,7 +2187,7 @@ describe("Machine", () => {
             },
             sync: {
               initial: {
-                target: Machine.targets(UpStates).root.up.sync.idle,
+                target: "up.sync.idle",
                 data: () => {
                   throw new Error("type-only constructor")
                 }
@@ -2200,7 +2197,7 @@ describe("Machine", () => {
         }
       },
       initial: {
-        target: Machine.targets(UpStates).root.up,
+        target: "up",
         data: () => {
           throw new Error("type-only constructor")
         }
@@ -2208,7 +2205,7 @@ describe("Machine", () => {
     })
     machine.handle({
       initial: {
-        target: Machine.targets(UpStates).root.down,
+        target: "down",
         decoded: true,
         data: new Down({})
       },
@@ -2217,7 +2214,7 @@ describe("Machine", () => {
           states: {
             auth: {
               initial: {
-                target: Machine.targets(UpStates).root.up.auth.signedOut,
+                target: "up.auth.signedOut",
                 data: () => {
                   throw new Error("type-only constructor")
                 }
@@ -2226,7 +2223,7 @@ describe("Machine", () => {
             },
             sync: {
               initial: {
-                target: Machine.targets(UpStates).root.up.sync.idle,
+                target: "up.sync.idle",
                 data: () => {
                   throw new Error("type-only constructor")
                 }
@@ -2249,14 +2246,13 @@ describe("Machine", () => {
   })
   it("constructs sibling targets from destructured source fields", () => {
     const states = Machine.state({ states: { source: Up, target: RetaggedUp } })
-    const targets9 = Machine.targets(states)
     Machine.make({
-      branches: { transition1: { destination: { target: targets9.root.target } } },
+      branches: { transition1: { destination: { target: "target" } } },
       root: states,
       events: Machine.eventsFromSchemas(SignIn)
     }).handle({
       initial: {
-        target: Machine.targets(states).root.source,
+        target: "source",
         decoded: true,
         data: new Up({ id: "up-1" })
       },
@@ -2297,7 +2293,7 @@ describe("Machine", () => {
       input: ChildInput
     }).handle({
       initial: {
-        target: Machine.targets(childStates).root.done,
+        target: "done",
         decoded: true,
         data: new Down({})
       },
@@ -2313,7 +2309,7 @@ describe("Machine", () => {
     })
     parent.handle({
       initial: {
-        target: Machine.targets(UpStates).root.down,
+        target: "down",
         decoded: true,
         data: new Down({})
       },
@@ -2322,7 +2318,7 @@ describe("Machine", () => {
           states: {
             auth: {
               initial: {
-                target: Machine.targets(UpStates).root.up.auth.signedOut,
+                target: "up.auth.signedOut",
                 data: () => {
                   throw new Error("type-only constructor")
                 }
@@ -2331,7 +2327,7 @@ describe("Machine", () => {
             },
             sync: {
               initial: {
-                target: Machine.targets(UpStates).root.up.sync.idle,
+                target: "up.sync.idle",
                 data: () => {
                   throw new Error("type-only constructor")
                 }
@@ -2373,7 +2369,7 @@ describe("Machine", () => {
     })
     expect(parent.handle).type.toBeCallableWith({
       initial: {
-        target: Machine.targets(UpStates).root.up,
+        target: "up",
         data: () => {
           throw new Error("type-only constructor")
         }
@@ -2391,7 +2387,7 @@ describe("Machine", () => {
           states: {
             auth: {
               initial: {
-                target: Machine.targets(UpStates).root.up.auth.signedOut,
+                target: "up.auth.signedOut",
                 data: () => {
                   throw new Error("type-only constructor")
                 }
@@ -2399,7 +2395,7 @@ describe("Machine", () => {
             },
             sync: {
               initial: {
-                target: Machine.targets(UpStates).root.up.sync.idle,
+                target: "up.sync.idle",
                 data: () => {
                   throw new Error("type-only constructor")
                 }
@@ -2424,7 +2420,7 @@ describe("Machine", () => {
           states: {
             auth: {
               initial: {
-                target: Machine.targets(UpStates).root.up.auth.signedOut,
+                target: "up.auth.signedOut",
                 data: () => {
                   throw new Error("type-only constructor")
                 }
@@ -2432,7 +2428,7 @@ describe("Machine", () => {
             },
             sync: {
               initial: {
-                target: Machine.targets(UpStates).root.up.sync.idle,
+                target: "up.sync.idle",
                 data: () => {
                   throw new Error("type-only constructor")
                 }
@@ -2442,7 +2438,7 @@ describe("Machine", () => {
         }
       },
       initial: {
-        target: Machine.targets(UpStates).root.up,
+        target: "up",
         data: () => {
           throw new Error("type-only constructor")
         }
@@ -2463,7 +2459,7 @@ describe("Machine", () => {
           states: {
             auth: {
               initial: {
-                target: Machine.targets(UpStates).root.up.auth.signedOut,
+                target: "up.auth.signedOut",
                 data: () => {
                   throw new Error("type-only constructor")
                 }
@@ -2471,7 +2467,7 @@ describe("Machine", () => {
             },
             sync: {
               initial: {
-                target: Machine.targets(UpStates).root.up.sync.idle,
+                target: "up.sync.idle",
                 data: () => {
                   throw new Error("type-only constructor")
                 }
@@ -2481,7 +2477,7 @@ describe("Machine", () => {
         }
       },
       initial: {
-        target: Machine.targets(UpStates).root.up,
+        target: "up",
         data: () => {
           throw new Error("type-only constructor")
         }
@@ -2509,7 +2505,7 @@ describe("Machine", () => {
           states: {
             auth: {
               initial: {
-                target: Machine.targets(UpStates).root.up.auth.signedOut,
+                target: "up.auth.signedOut",
                 data: () => {
                   throw new Error("type-only constructor")
                 }
@@ -2517,7 +2513,7 @@ describe("Machine", () => {
             },
             sync: {
               initial: {
-                target: Machine.targets(UpStates).root.up.sync.idle,
+                target: "up.sync.idle",
                 data: () => {
                   throw new Error("type-only constructor")
                 }
@@ -2527,7 +2523,7 @@ describe("Machine", () => {
         }
       },
       initial: {
-        target: Machine.targets(UpStates).root.up,
+        target: "up",
         data: () => {
           throw new Error("type-only constructor")
         }
@@ -2542,7 +2538,7 @@ describe("Machine", () => {
     })
     machine.handle({
       initial: {
-        target: Machine.targets(UpStates).root.down,
+        target: "down",
         decoded: true,
         data: new Down({})
       },
@@ -2551,7 +2547,7 @@ describe("Machine", () => {
           states: {
             auth: {
               initial: {
-                target: Machine.targets(UpStates).root.up.auth.signedOut,
+                target: "up.auth.signedOut",
                 data: () => {
                   throw new Error("type-only constructor")
                 }
@@ -2563,7 +2559,7 @@ describe("Machine", () => {
             },
             sync: {
               initial: {
-                target: Machine.targets(UpStates).root.up.sync.idle,
+                target: "up.sync.idle",
                 data: () => {
                   throw new Error("type-only constructor")
                 }
@@ -2612,13 +2608,12 @@ describe("Machine", () => {
     expect<Effect.Error<Effect.Success<typeof spawned>["join"]>>().type.toBe<"child-runtime" | Machine.StoppedError>()
   })
   it("start exposes machine infrastructure failure channels", () => {
-    const targets12 = Machine.targets(UpStates)
     const machine = Machine.make({
       root: UpStates,
       events: Machine.eventsFromSchemas(SignIn)
     }).handle({
       initial: {
-        target: Machine.targets(UpStates).root.down,
+        target: "down",
         decoded: true,
         data: new Down({})
       },
@@ -2627,7 +2622,7 @@ describe("Machine", () => {
           states: {
             auth: {
               initial: {
-                target: Machine.targets(UpStates).root.up.auth.signedOut,
+                target: "up.auth.signedOut",
                 data: () => {
                   throw new Error("type-only constructor")
                 }
@@ -2636,7 +2631,7 @@ describe("Machine", () => {
             },
             sync: {
               initial: {
-                target: Machine.targets(UpStates).root.up.sync.idle,
+                target: "up.sync.idle",
                 data: () => {
                   throw new Error("type-only constructor")
                 }
@@ -2655,7 +2650,7 @@ describe("Machine", () => {
         },
         down: {
           on: {
-            SignIn: { target: targets12.root.down, decoded: true, data: () => (new Down({})) }
+            SignIn: { target: "down", decoded: true, data: () => (new Down({})) }
           }
         }
       }
@@ -2684,7 +2679,7 @@ describe("Machine", () => {
       events: Machine.eventsFromSchemas(SignIn)
     }).handle({
       initial: {
-        target: Machine.targets(UpStates).root.down,
+        target: "down",
         decoded: true,
         data: new Down({})
       },
@@ -2693,7 +2688,7 @@ describe("Machine", () => {
           states: {
             auth: {
               initial: {
-                target: Machine.targets(UpStates).root.up.auth.signedOut,
+                target: "up.auth.signedOut",
                 data: () => {
                   throw new Error("type-only constructor")
                 }
@@ -2701,7 +2696,7 @@ describe("Machine", () => {
             },
             sync: {
               initial: {
-                target: Machine.targets(UpStates).root.up.sync.idle,
+                target: "up.sync.idle",
                 data: () => {
                   throw new Error("type-only constructor")
                 }
@@ -2772,7 +2767,7 @@ describe("Machine", () => {
     expect<IsCallable<typeof machine.handle>>().type.toBe<true>()
     expect(machine.handle).type.toBeCallableWith({
       initial: {
-        target: Machine.targets(UpStates).root.up,
+        target: "up",
         data: () => {
           throw new Error("type-only constructor")
         }
@@ -2790,7 +2785,7 @@ describe("Machine", () => {
           states: {
             auth: {
               initial: {
-                target: Machine.targets(UpStates).root.up.auth.signedOut,
+                target: "up.auth.signedOut",
                 data: () => {
                   throw new Error("type-only constructor")
                 }
@@ -2798,7 +2793,7 @@ describe("Machine", () => {
             },
             sync: {
               initial: {
-                target: Machine.targets(UpStates).root.up.sync.idle,
+                target: "up.sync.idle",
                 data: () => {
                   throw new Error("type-only constructor")
                 }
@@ -2827,7 +2822,7 @@ describe("Machine", () => {
           states: {
             auth: {
               initial: {
-                target: Machine.targets(UpStates).root.up.auth.signedOut,
+                target: "up.auth.signedOut",
                 data: () => {
                   throw new Error("type-only constructor")
                 }
@@ -2835,7 +2830,7 @@ describe("Machine", () => {
             },
             sync: {
               initial: {
-                target: Machine.targets(UpStates).root.up.sync.idle,
+                target: "up.sync.idle",
                 data: () => {
                   throw new Error("type-only constructor")
                 }
@@ -2845,7 +2840,7 @@ describe("Machine", () => {
         }
       },
       initial: {
-        target: Machine.targets(UpStates).root.up,
+        target: "up",
         data: () => {
           throw new Error("type-only constructor")
         }
@@ -2870,7 +2865,7 @@ describe("Machine", () => {
           states: {
             auth: {
               initial: {
-                target: Machine.targets(UpStates).root.up.auth.signedOut,
+                target: "up.auth.signedOut",
                 data: () => {
                   throw new Error("type-only constructor")
                 }
@@ -2878,7 +2873,7 @@ describe("Machine", () => {
             },
             sync: {
               initial: {
-                target: Machine.targets(UpStates).root.up.sync.idle,
+                target: "up.sync.idle",
                 data: () => {
                   throw new Error("type-only constructor")
                 }
@@ -2888,7 +2883,7 @@ describe("Machine", () => {
         }
       },
       initial: {
-        target: Machine.targets(UpStates).root.up,
+        target: "up",
         data: () => {
           throw new Error("type-only constructor")
         }
@@ -2896,16 +2891,15 @@ describe("Machine", () => {
     })
   })
   it("branching transitions infer unbounded named targets", () => {
-    const targets13 = Machine.targets(UpStates)
     const machine = Machine.make({
       branches: {
         transition1: {
-          recognized: { target: targets13.root.down, title: "recognized user" },
+          recognized: { target: "down", title: "recognized user" },
           measured: { none: true, title: "measured user id" },
-          named: { target: targets13.root.down, title: "named user" },
+          named: { target: "down", title: "named user" },
           active: { none: true, title: "active user" }
         },
-        transition2: { accepted: { target: targets13.root.down }, consumed: { none: true } },
+        transition2: { accepted: { target: "down" }, consumed: { none: true } },
         transition3: { ignored: { none: true } }
       },
       root: UpStates,
@@ -2913,7 +2907,7 @@ describe("Machine", () => {
     })
     machine.handle({
       initial: {
-        target: Machine.targets(UpStates).root.down,
+        target: "down",
         decoded: true,
         data: new Down({})
       },
@@ -2922,7 +2916,7 @@ describe("Machine", () => {
           states: {
             auth: {
               initial: {
-                target: Machine.targets(UpStates).root.up.auth.signedOut,
+                target: "up.auth.signedOut",
                 data: () => {
                   throw new Error("type-only constructor")
                 }
@@ -2931,7 +2925,7 @@ describe("Machine", () => {
             },
             sync: {
               initial: {
-                target: Machine.targets(UpStates).root.up.sync.idle,
+                target: "up.sync.idle",
                 data: () => {
                   throw new Error("type-only constructor")
                 }
@@ -2976,7 +2970,7 @@ describe("Machine", () => {
     })
     machine.handle({
       initial: {
-        target: Machine.targets(UpStates).root.down,
+        target: "down",
         decoded: true,
         data: new Down({})
       },
@@ -2985,7 +2979,7 @@ describe("Machine", () => {
           states: {
             auth: {
               initial: {
-                target: Machine.targets(UpStates).root.up.auth.signedOut,
+                target: "up.auth.signedOut",
                 data: () => {
                   throw new Error("type-only constructor")
                 }
@@ -2994,7 +2988,7 @@ describe("Machine", () => {
             },
             sync: {
               initial: {
-                target: Machine.targets(UpStates).root.up.sync.idle,
+                target: "up.sync.idle",
                 data: () => {
                   throw new Error("type-only constructor")
                 }
@@ -3022,7 +3016,7 @@ describe("Machine", () => {
     })
     machine.handle({
       initial: {
-        target: Machine.targets(UpStates).root.down,
+        target: "down",
         decoded: true,
         data: new Down({})
       },
@@ -3031,7 +3025,7 @@ describe("Machine", () => {
           states: {
             auth: {
               initial: {
-                target: Machine.targets(UpStates).root.up.auth.signedOut,
+                target: "up.auth.signedOut",
                 data: () => {
                   throw new Error("type-only constructor")
                 }
@@ -3040,7 +3034,7 @@ describe("Machine", () => {
             },
             sync: {
               initial: {
-                target: Machine.targets(UpStates).root.up.sync.idle,
+                target: "up.sync.idle",
                 data: () => {
                   throw new Error("type-only constructor")
                 }
@@ -3060,14 +3054,14 @@ describe("Machine", () => {
         down: {
           on: {
             // @ts-expect-error!
-            SignIn: { target: targets13.root.up }
+            SignIn: { target: "up" }
           }
         }
       }
     })
     machine.handle({
       initial: {
-        target: Machine.targets(UpStates).root.down,
+        target: "down",
         decoded: true,
         data: new Down({})
       },
@@ -3076,7 +3070,7 @@ describe("Machine", () => {
           states: {
             auth: {
               initial: {
-                target: Machine.targets(UpStates).root.up.auth.signedOut,
+                target: "up.auth.signedOut",
                 data: () => {
                   throw new Error("type-only constructor")
                 }
@@ -3085,7 +3079,7 @@ describe("Machine", () => {
             },
             sync: {
               initial: {
-                target: Machine.targets(UpStates).root.up.sync.idle,
+                target: "up.sync.idle",
                 data: () => {
                   throw new Error("type-only constructor")
                 }
@@ -3124,7 +3118,7 @@ describe("Machine", () => {
     })
     machine.handle({
       initial: {
-        target: Machine.targets(UpStates).root.down,
+        target: "down",
         decoded: true,
         data: new Down({})
       },
@@ -3133,7 +3127,7 @@ describe("Machine", () => {
           states: {
             auth: {
               initial: {
-                target: Machine.targets(UpStates).root.up.auth.signedOut,
+                target: "up.auth.signedOut",
                 data: () => {
                   throw new Error("type-only constructor")
                 }
@@ -3142,7 +3136,7 @@ describe("Machine", () => {
             },
             sync: {
               initial: {
-                target: Machine.targets(UpStates).root.up.sync.idle,
+                target: "up.sync.idle",
                 data: () => {
                   throw new Error("type-only constructor")
                 }
@@ -3173,7 +3167,7 @@ describe("Machine", () => {
     })
     machine.handle({
       initial: {
-        target: Machine.targets(UpStates).root.down,
+        target: "down",
         decoded: true,
         data: new Down({})
       },
@@ -3182,7 +3176,7 @@ describe("Machine", () => {
           states: {
             auth: {
               initial: {
-                target: Machine.targets(UpStates).root.up.auth.signedOut,
+                target: "up.auth.signedOut",
                 data: () => {
                   throw new Error("type-only constructor")
                 }
@@ -3191,7 +3185,7 @@ describe("Machine", () => {
             },
             sync: {
               initial: {
-                target: Machine.targets(UpStates).root.up.sync.idle,
+                target: "up.sync.idle",
                 data: () => {
                   throw new Error("type-only constructor")
                 }
@@ -3219,7 +3213,7 @@ describe("Machine", () => {
     const widenedDeclinable = true as boolean
     machine.handle({
       initial: {
-        target: Machine.targets(UpStates).root.down,
+        target: "down",
         decoded: true,
         data: new Down({})
       },
@@ -3228,7 +3222,7 @@ describe("Machine", () => {
           states: {
             auth: {
               initial: {
-                target: Machine.targets(UpStates).root.up.auth.signedOut,
+                target: "up.auth.signedOut",
                 data: () => {
                   throw new Error("type-only constructor")
                 }
@@ -3237,7 +3231,7 @@ describe("Machine", () => {
             },
             sync: {
               initial: {
-                target: Machine.targets(UpStates).root.up.sync.idle,
+                target: "up.sync.idle",
                 data: () => {
                   throw new Error("type-only constructor")
                 }
@@ -3264,7 +3258,7 @@ describe("Machine", () => {
     })
     machine.handle({
       initial: {
-        target: Machine.targets(UpStates).root.down,
+        target: "down",
         decoded: true,
         data: new Down({})
       },
@@ -3273,7 +3267,7 @@ describe("Machine", () => {
           states: {
             auth: {
               initial: {
-                target: Machine.targets(UpStates).root.up.auth.signedOut,
+                target: "up.auth.signedOut",
                 data: () => {
                   throw new Error("type-only constructor")
                 }
@@ -3282,7 +3276,7 @@ describe("Machine", () => {
             },
             sync: {
               initial: {
-                target: Machine.targets(UpStates).root.up.sync.idle,
+                target: "up.sync.idle",
                 data: () => {
                   throw new Error("type-only constructor")
                 }
@@ -3330,15 +3324,14 @@ describe("Machine", () => {
     })
   })
   it("handle accepts nested states through reserved states objects", () => {
-    const targets14 = Machine.targets(UpStates)
     const machine = Machine.make({
-      branches: { transition1: { destination: { target: targets14.root.up.auth.signedIn } } },
+      branches: { transition1: { destination: { target: "up.auth.signedIn" } } },
       root: UpStates,
       events: Machine.eventsFromSchemas(SignIn)
     })
     machine.handle({
       initial: {
-        target: Machine.targets(UpStates).root.down,
+        target: "down",
         decoded: true,
         data: new Down({})
       },
@@ -3347,7 +3340,7 @@ describe("Machine", () => {
           states: {
             auth: {
               initial: {
-                target: Machine.targets(UpStates).root.up.auth.signedOut,
+                target: "up.auth.signedOut",
                 data: () => {
                   throw new Error("type-only constructor")
                 }
@@ -3370,7 +3363,7 @@ describe("Machine", () => {
             },
             sync: {
               initial: {
-                target: Machine.targets(UpStates).root.up.sync.idle,
+                target: "up.sync.idle",
                 data: () => {
                   throw new Error("type-only constructor")
                 }
@@ -3392,14 +3385,13 @@ describe("Machine", () => {
     })
   })
   it("handle accepts parent config and child config in the same object", () => {
-    const targets15 = Machine.targets(UpStates)
     const machine = Machine.make({
       root: UpStates,
       events: Machine.eventsFromSchemas(SignIn)
     })
     machine.handle({
       initial: {
-        target: Machine.targets(UpStates).root.down,
+        target: "down",
         decoded: true,
         data: new Down({})
       },
@@ -3425,7 +3417,7 @@ describe("Machine", () => {
           states: {
             auth: {
               initial: {
-                target: Machine.targets(UpStates).root.up.auth.signedOut,
+                target: "up.auth.signedOut",
                 data: () => {
                   throw new Error("type-only constructor")
                 }
@@ -3434,7 +3426,7 @@ describe("Machine", () => {
                 signedOut: {
                   on: {
                     SignIn: {
-                      target: targets15.root.up.auth.signedIn,
+                      target: "up.auth.signedIn",
                       decoded: true,
                       data: ({ event }) => (new SignedIn({ userId: event.userId }))
                     }
@@ -3445,7 +3437,7 @@ describe("Machine", () => {
             },
             sync: {
               initial: {
-                target: Machine.targets(UpStates).root.up.sync.idle,
+                target: "up.sync.idle",
                 data: () => {
                   throw new Error("type-only constructor")
                 }
@@ -3475,14 +3467,13 @@ describe("Machine", () => {
     })
   })
   it("onDone handlers receive typed state context without Effect requirements", () => {
-    const targets16 = Machine.targets(UpStates)
     const machine = Machine.make({
-      branches: { transition1: { destination: { target: targets16.root.down } } },
+      branches: { transition1: { destination: { target: "down" } } },
       root: UpStates,
       events: Machine.eventsFromSchemas(SignIn)
     }).handle({
       initial: {
-        target: Machine.targets(UpStates).root.up,
+        target: "up",
         decoded: true,
         data: new Up({ id: "up-1" })
       },
@@ -3491,7 +3482,7 @@ describe("Machine", () => {
           states: {
             auth: {
               initial: {
-                target: Machine.targets(UpStates).root.up.auth.signedOut,
+                target: "up.auth.signedOut",
                 data: () => {
                   throw new Error("type-only constructor")
                 }
@@ -3509,7 +3500,7 @@ describe("Machine", () => {
             },
             sync: {
               initial: {
-                target: Machine.targets(UpStates).root.up.sync.idle,
+                target: "up.sync.idle",
                 decoded: true,
                 data: new SyncIdle({})
               },
@@ -3556,7 +3547,7 @@ describe("Machine", () => {
     })
     const first = definition.handle({
       initial: {
-        target: Machine.targets(UpStates).root.down,
+        target: "down",
         decoded: true,
         data: new Down({})
       },
@@ -3565,7 +3556,7 @@ describe("Machine", () => {
           states: {
             auth: {
               initial: {
-                target: Machine.targets(UpStates).root.up.auth.signedOut,
+                target: "up.auth.signedOut",
                 data: () => {
                   throw new Error("type-only constructor")
                 }
@@ -3574,7 +3565,7 @@ describe("Machine", () => {
             },
             sync: {
               initial: {
-                target: Machine.targets(UpStates).root.up.sync.idle,
+                target: "up.sync.idle",
                 data: () => {
                   throw new Error("type-only constructor")
                 }
@@ -3596,7 +3587,7 @@ describe("Machine", () => {
     })
     const second = definition.handle({
       initial: {
-        target: Machine.targets(UpStates).root.down,
+        target: "down",
         decoded: true,
         data: new Down({})
       },
@@ -3605,7 +3596,7 @@ describe("Machine", () => {
           states: {
             auth: {
               initial: {
-                target: Machine.targets(UpStates).root.up.auth.signedOut,
+                target: "up.auth.signedOut",
                 data: () => {
                   throw new Error("type-only constructor")
                 }
@@ -3614,7 +3605,7 @@ describe("Machine", () => {
             },
             sync: {
               initial: {
-                target: Machine.targets(UpStates).root.up.sync.idle,
+                target: "up.sync.idle",
                 data: () => {
                   throw new Error("type-only constructor")
                 }
@@ -3653,7 +3644,7 @@ describe("Machine", () => {
       events: Machine.eventsFromSchemas(SignIn)
     }).handle({
       initial: {
-        target: Machine.targets(InitialRoot1).root.down,
+        target: "down",
         decoded: true,
         data: new Down({})
       },
@@ -3682,7 +3673,7 @@ describe("Machine", () => {
       events: Machine.eventsFromSchemas(SignIn)
     }).handle({
       initial: {
-        target: Machine.targets(States).root.signedIn,
+        target: "signedIn",
         decoded: true,
         data: new SignedIn({ userId: "user-1" })
       },
@@ -3736,7 +3727,7 @@ describe("Machine", () => {
     >
     expect(machine.handle).type.toBeCallableWith({
       initial: {
-        target: Machine.targets(States).root.signedIn,
+        target: "signedIn",
         data: () => {
           throw new Error("type-only constructor")
         }
@@ -3745,7 +3736,7 @@ describe("Machine", () => {
     expect(machine.handle).type.not.toBeCallableWith({
       states: { signedIn: { output: () => 1 } },
       initial: {
-        target: Machine.targets(States).root.signedIn,
+        target: "signedIn",
         data: () => {
           throw new Error("type-only constructor")
         }
@@ -3754,7 +3745,7 @@ describe("Machine", () => {
     expect(machine.handle).type.not.toBeCallableWith({
       states: { signedIn: { type: "final", output: () => "user-1" } },
       initial: {
-        target: Machine.targets(States).root.signedIn,
+        target: "signedIn",
         data: () => {
           throw new Error("type-only constructor")
         }
@@ -3768,13 +3759,13 @@ describe("Machine", () => {
       children: {
         incomplete: Machine.child(
           "incomplete",
-          machine.handle({ initial: { target: Machine.targets(States).root.signedIn, data: { userId: "user-1" } } })
+          machine.handle({ initial: { target: "signedIn", data: { userId: "user-1" } } })
         )
       }
     })
     expect(parent.handle).type.toBeCallableWith({
       initial: {
-        target: Machine.targets(UpStates).root.up,
+        target: "up",
         data: () => {
           throw new Error("type-only constructor")
         }
@@ -3792,7 +3783,7 @@ describe("Machine", () => {
           states: {
             auth: {
               initial: {
-                target: Machine.targets(UpStates).root.up.auth.signedOut,
+                target: "up.auth.signedOut",
                 data: () => {
                   throw new Error("type-only constructor")
                 }
@@ -3800,7 +3791,7 @@ describe("Machine", () => {
             },
             sync: {
               initial: {
-                target: Machine.targets(UpStates).root.up.sync.idle,
+                target: "up.sync.idle",
                 data: () => {
                   throw new Error("type-only constructor")
                 }
@@ -3825,7 +3816,7 @@ describe("Machine", () => {
           states: {
             auth: {
               initial: {
-                target: Machine.targets(UpStates).root.up.auth.signedOut,
+                target: "up.auth.signedOut",
                 data: () => {
                   throw new Error("type-only constructor")
                 }
@@ -3833,7 +3824,7 @@ describe("Machine", () => {
             },
             sync: {
               initial: {
-                target: Machine.targets(UpStates).root.up.sync.idle,
+                target: "up.sync.idle",
                 data: () => {
                   throw new Error("type-only constructor")
                 }
@@ -3843,7 +3834,7 @@ describe("Machine", () => {
         }
       },
       initial: {
-        target: Machine.targets(UpStates).root.up,
+        target: "up",
         data: () => {
           throw new Error("type-only constructor")
         }
@@ -3852,7 +3843,7 @@ describe("Machine", () => {
     expect(machine).type.not.toBeAssignableTo<ForgedCompleteMachine>()
     const complete = machine.handle({
       initial: {
-        target: Machine.targets(States).root.signedIn,
+        target: "signedIn",
         decoded: true,
         data: new SignedIn({ userId: "user-1" })
       },
@@ -3881,7 +3872,7 @@ describe("Machine", () => {
       events: Machine.eventsFromSchemas(SignIn)
     }).handle({
       initial: {
-        target: Machine.targets(States).root.active,
+        target: "active",
         decoded: true,
         data: new Down({})
       },
@@ -3895,7 +3886,7 @@ describe("Machine", () => {
       events: Machine.eventsFromSchemas(SignIn)
     }).handle({
       initial: {
-        target: Machine.targets(InitialRoot2).root.active,
+        target: "active",
         decoded: true,
         data: new Down({})
       },
@@ -3921,22 +3912,21 @@ describe("Machine", () => {
         down: Down
       }
     })
-    const targets17 = Machine.targets(States)
     const machine = Machine.make({
-      branches: { transition1: { destination: { target: targets17.root.down } } },
+      branches: { transition1: { destination: { target: "down" } } },
       root: States,
       events: Machine.eventsFromSchemas(SignIn)
     })
     machine.handle({
       initial: {
-        target: Machine.targets(States).root.auth,
+        target: "auth",
         decoded: true,
         data: new Auth({ userId: "user-1" })
       },
       states: {
         auth: {
           initial: {
-            target: Machine.targets(States).root.auth.signedOut,
+            target: "auth.signedOut",
             decoded: true,
             data: new SignedOut({})
           },
@@ -3975,7 +3965,7 @@ describe("Machine", () => {
     })
     expect(machine.handle).type.toBeCallableWith({
       initial: {
-        target: Machine.targets(States).root.auth,
+        target: "auth",
         data: () => {
           throw new Error("type-only constructor")
         }
@@ -3983,7 +3973,7 @@ describe("Machine", () => {
       states: {
         auth: {
           initial: {
-            target: Machine.targets(States).root.auth.signedOut,
+            target: "auth.signedOut",
             data: () => {
               throw new Error("type-only constructor")
             }
@@ -3996,7 +3986,7 @@ describe("Machine", () => {
         auth: {
           onDone: () => undefined,
           initial: {
-            target: Machine.targets(States).root.auth.signedOut,
+            target: "auth.signedOut",
             data: () => {
               throw new Error("type-only constructor")
             }
@@ -4004,7 +3994,7 @@ describe("Machine", () => {
         }
       },
       initial: {
-        target: Machine.targets(States).root.auth,
+        target: "auth",
         data: () => {
           throw new Error("type-only constructor")
         }
@@ -4044,14 +4034,14 @@ describe("Machine", () => {
     })
     machine.handle({
       initial: {
-        target: Machine.targets(States).root.payment,
+        target: "payment",
         decoded: true,
         data: new Payment({})
       },
       states: {
         payment: {
           initial: {
-            target: Machine.targets(States).root.payment.pending,
+            target: "payment.pending",
             decoded: true,
             data: new PendingPayment({})
           },
@@ -4129,7 +4119,7 @@ describe("Machine", () => {
     })
     const complete = machine.handle({
       initial: {
-        target: Machine.targets(States).root.up,
+        target: "up",
         decoded: true,
         data: new Up({ id: "up-1" })
       },
@@ -4154,7 +4144,7 @@ describe("Machine", () => {
           states: {
             auth: {
               initial: {
-                target: Machine.targets(States).root.up.auth.signedOut,
+                target: "up.auth.signedOut",
                 data: () => {
                   throw new Error("type-only constructor")
                 }
@@ -4163,7 +4153,7 @@ describe("Machine", () => {
             },
             sync: {
               initial: {
-                target: Machine.targets(States).root.up.sync.idle,
+                target: "up.sync.idle",
                 decoded: true,
                 data: new SyncIdle({})
               },
@@ -4219,7 +4209,7 @@ describe("Machine", () => {
     })
     expect(machine.handle).type.toBeCallableWith({
       initial: {
-        target: Machine.targets(States).root.up,
+        target: "up",
         data: () => {
           throw new Error("type-only constructor")
         }
@@ -4236,7 +4226,7 @@ describe("Machine", () => {
             auth: {
               states: { signedIn: { output: () => ({ userId: "user-1" }) } },
               initial: {
-                target: Machine.targets(States).root.up.auth.signedOut,
+                target: "up.auth.signedOut",
                 data: () => {
                   throw new Error("type-only constructor")
                 }
@@ -4262,7 +4252,7 @@ describe("Machine", () => {
                 }
               },
               initial: {
-                target: Machine.targets(States).root.up.auth.signedOut,
+                target: "up.auth.signedOut",
                 data: () => {
                   throw new Error("type-only constructor")
                 }
@@ -4277,7 +4267,7 @@ describe("Machine", () => {
         }
       },
       initial: {
-        target: Machine.targets(States).root.up,
+        target: "up",
         data: () => {
           throw new Error("type-only constructor")
         }
@@ -4951,7 +4941,7 @@ describe("Machine", () => {
     })
     expect(definition.handle).type.toBeCallableWith({
       initial: {
-        target: Machine.targets(UpStates).root.up,
+        target: "up",
         data: () => {
           throw new Error("type-only constructor")
         }
@@ -4969,7 +4959,7 @@ describe("Machine", () => {
           states: {
             auth: {
               initial: {
-                target: Machine.targets(UpStates).root.up.auth.signedOut,
+                target: "up.auth.signedOut",
                 data: () => {
                   throw new Error("type-only constructor")
                 }
@@ -4977,7 +4967,7 @@ describe("Machine", () => {
             },
             sync: {
               initial: {
-                target: Machine.targets(UpStates).root.up.sync.idle,
+                target: "up.sync.idle",
                 data: () => {
                   throw new Error("type-only constructor")
                 }
@@ -5002,7 +4992,7 @@ describe("Machine", () => {
           states: {
             auth: {
               initial: {
-                target: Machine.targets(UpStates).root.up.auth.signedOut,
+                target: "up.auth.signedOut",
                 data: () => {
                   throw new Error("type-only constructor")
                 }
@@ -5010,7 +5000,7 @@ describe("Machine", () => {
             },
             sync: {
               initial: {
-                target: Machine.targets(UpStates).root.up.sync.idle,
+                target: "up.sync.idle",
                 data: () => {
                   throw new Error("type-only constructor")
                 }
@@ -5020,7 +5010,7 @@ describe("Machine", () => {
         }
       },
       initial: {
-        target: Machine.targets(UpStates).root.up,
+        target: "up",
         data: () => {
           throw new Error("type-only constructor")
         }
@@ -5028,7 +5018,7 @@ describe("Machine", () => {
     })
     expect(definition.handle({
       initial: {
-        target: Machine.targets(UpStates).root.down,
+        target: "down",
         decoded: true,
         data: new Down({})
       },
@@ -5037,7 +5027,7 @@ describe("Machine", () => {
           states: {
             auth: {
               initial: {
-                target: Machine.targets(UpStates).root.up.auth.signedOut,
+                target: "up.auth.signedOut",
                 data: () => {
                   throw new Error("type-only constructor")
                 }
@@ -5046,7 +5036,7 @@ describe("Machine", () => {
             },
             sync: {
               initial: {
-                target: Machine.targets(UpStates).root.up.sync.idle,
+                target: "up.sync.idle",
                 data: () => {
                   throw new Error("type-only constructor")
                 }
@@ -5078,7 +5068,7 @@ describe("Machine", () => {
     })).type.not.toRaiseError()
     definition.handle({
       initial: {
-        target: Machine.targets(UpStates).root.down,
+        target: "down",
         decoded: true,
         data: new Down({})
       },
@@ -5087,7 +5077,7 @@ describe("Machine", () => {
           states: {
             auth: {
               initial: {
-                target: Machine.targets(UpStates).root.up.auth.signedOut,
+                target: "up.auth.signedOut",
                 data: () => {
                   throw new Error("type-only constructor")
                 }
@@ -5096,7 +5086,7 @@ describe("Machine", () => {
             },
             sync: {
               initial: {
-                target: Machine.targets(UpStates).root.up.sync.idle,
+                target: "up.sync.idle",
                 data: () => {
                   throw new Error("type-only constructor")
                 }

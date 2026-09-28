@@ -3,14 +3,13 @@ import { describe, expect, it } from "vitest"
 import { Machine } from "../../src/index.js"
 const CounterRoot = Machine.state({ fields: { count: Schema.Number } })
 const Events = Machine.events({ Increment: { by: Schema.Number } })
-const targets1 = Machine.targets(CounterRoot)
 const counter = Machine.make({
   root: CounterRoot,
   events: Events
 }).handle({
   root: () => ({ count: 0 }),
   on: {
-    Increment: { update: targets1.root, data: ({ root: current, event }) => ({ count: current.count + event.by }) }
+    Increment: { update: "root", data: ({ root: current, event }) => ({ count: current.count + event.by }) }
   }
 })
 describe("root", () => {
@@ -28,21 +27,20 @@ const EditorRoot = Machine.state({
   states: { Editing: {}, Saving: {} }
 })
 const EditorEvents = Machine.events({ Save: {}, Edit: {}, Increment: { by: Schema.Number } })
-const targets2 = Machine.targets(EditorRoot)
 const editor = Machine.make({
   root: EditorRoot,
   events: EditorEvents
 }).handle({
   initial: {
-    target: Machine.targets(EditorRoot).root.Editing
+    target: "Editing"
   },
   root: () => ({ count: 0 }),
   on: {
-    Increment: { update: targets2.root, data: ({ root: current, event }) => ({ count: current.count + event.by }) }
+    Increment: { update: "root", data: ({ root: current, event }) => ({ count: current.count + event.by }) }
   },
   states: {
-    Editing: { on: { Save: { target: targets2.root.Saving } } },
-    Saving: { on: { Edit: { target: targets2.root.Editing } } }
+    Editing: { on: { Save: { target: "Saving" } } },
+    Saving: { on: { Edit: { target: "Editing" } } }
   }
 })
 it("retains root data while moving among children", async () => {
@@ -76,7 +74,7 @@ it("defaults structural roots and allows an explicit starting configuration", as
     events: Machine.events({})
   }).handle({
     initial: {
-      target: Machine.targets(root).root.Editing
+      target: "Editing"
     },
     states: {
       Editing: {},
@@ -88,7 +86,7 @@ it("defaults structural roots and allows an explicit starting configuration", as
     events: Machine.events({})
   }).handle({
     initial: {
-      target: Machine.targets(root).root.Saving
+      target: "Saving"
     },
     states: {
       Editing: {},
@@ -110,17 +108,16 @@ it("declines guarded child transitions and tries the root handler", async () => 
   const root = Machine.state({ fields: { count: Schema.Number }, states: { Idle: {}, Busy: {} } })
   let constructed = 0
   const events = Machine.events({ Go: { allowed: Schema.Boolean } })
-  const targets3 = Machine.targets(root)
   const machine = Machine.make({
-    branches: { transition1: { destination: { target: targets3.root.Busy } } },
+    branches: { transition1: { destination: { target: "Busy" } } },
     root,
     events
   }).handle({
     initial: {
-      target: Machine.targets(root).root.Idle
+      target: "Idle"
     },
     root: () => ({ count: 0 }),
-    on: { Go: { update: targets3.root, data: ({ root: current }) => ({ count: current.count + 1 }) } },
+    on: { Go: { update: "root", data: ({ root: current }) => ({ count: current.count + 1 }) } },
     states: {
       Idle: {
         on: {
@@ -159,7 +156,7 @@ it("initializes required child values from root-owned data", async () => {
     events: Machine.events({})
   }).handle({
     initial: {
-      target: Machine.targets(root).root.Editing,
+      target: "Editing",
       data: ({ state }) => ({ draft: state.title })
     },
     root: () => ({ title: "Example" }),
@@ -177,22 +174,21 @@ it("returns the completed workflow output through the root boundary", async () =
       Workflow: { states: { Working: {}, Finished: { type: "final", output: Schema.Number } } }
     }
   })
-  const targets4 = Machine.targets(root)
   const machine = Machine.make({
     root,
     events: Machine.events({ Finish: {} })
   }).handle({
     initial: {
-      target: Machine.targets(root).root.Workflow
+      target: "Workflow"
     },
     root: () => ({ title: "Work" }),
     states: {
       Workflow: {
         initial: {
-          target: Machine.targets(root).root.Workflow.Working
+          target: "Workflow.Working"
         },
         states: {
-          Working: { on: { Finish: { target: targets4.root.Workflow.Finished } } },
+          Working: { on: { Finish: { target: "Workflow.Finished" } } },
           Finished: { output: () => 42 }
         }
       }
@@ -218,17 +214,17 @@ it("keeps completion inside an unfinished nested workflow", async () => {
     events: Machine.events({})
   }).handle({
     initial: {
-      target: Machine.targets(root).root.Outer
+      target: "Outer"
     },
     states: {
       Outer: {
         initial: {
-          target: Machine.targets(root).root.Outer.Inner
+          target: "Outer.Inner"
         },
         states: {
           Inner: {
             initial: {
-              target: Machine.targets(root).root.Outer.Inner.Finished
+              target: "Outer.Inner.Finished"
             },
             states: {
               Finished: {}
@@ -251,30 +247,29 @@ it("retains current root fields when restoring descendant history", async () => 
     }
   })
   const events = Machine.events({ Next: {}, Leave: {}, Return: {}, Increment: {} })
-  const targets5 = Machine.targets(root)
   const machine = Machine.make({
-    branches: { transition1: { destination: { history: targets5.root.Editing.recent } } },
+    branches: { transition1: { destination: { history: "Editing.recent" } } },
     root,
     events
   }).handle({
     initial: {
-      target: Machine.targets(root).root.Editing
+      target: "Editing"
     },
     root: () => ({ count: 0 }),
-    on: { Increment: { update: targets5.root, data: ({ root: current }) => ({ count: current.count + 1 }) } },
+    on: { Increment: { update: "root", data: ({ root: current }) => ({ count: current.count + 1 }) } },
     states: {
       Editing: {
         initial: {
-          target: Machine.targets(root).root.Editing.A
+          target: "Editing.A"
         },
-        on: { Leave: { target: targets5.root.Away } },
+        on: { Leave: { target: "Away" } },
         history: {
           recent: {
             default: ({ target }) => target({ data: { count: 999 }, states: { Editing: { states: { A: {} } } } })
           }
         },
         states: {
-          A: { on: { Next: { target: targets5.root.Editing.B } } },
+          A: { on: { Next: { target: "Editing.B" } } },
           B: {}
         }
       },
@@ -290,16 +285,15 @@ it("retains current root fields when restoring descendant history", async () => 
 })
 it("checks a bare guard before selecting a default destination", async () => {
   const root = Machine.state({ states: { Idle: {}, Busy: {} } })
-  const targets6 = Machine.targets(root)
   const machine = Machine.make({
     root,
     events: Machine.events({ Start: { allowed: Schema.Boolean } })
   }).handle({
     initial: {
-      target: Machine.targets(root).root.Idle
+      target: "Idle"
     },
     states: {
-      Idle: { on: { Start: { target: targets6.root.Busy, guard: ({ event }) => event.allowed } } },
+      Idle: { on: { Start: { target: "Busy", guard: ({ event }) => event.allowed } } },
       Busy: {}
     }
   })

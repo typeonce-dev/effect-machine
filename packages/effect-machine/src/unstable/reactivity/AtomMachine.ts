@@ -397,7 +397,7 @@ type EnsureValuedSelectorPath<State, Path extends string> = [Path] extends [Valu
  *   events: Machine.eventsFromSchemas()
  * }).handle({
  *   initial: {
- *     target: Machine.targets(States).root.Count,
+ *     target: "Count",
  *     decoded: true,
  *     data: new Count({ value: 0 })
  *   },
@@ -642,7 +642,7 @@ export const selectSnapshotChild: {
  *   events: Machine.eventsFromSchemas()
  * }).handle({
  *   initial: {
- *     target: Machine.targets(States).root.Idle
+ *     target: "Idle"
  *   },
  *   states: {
  *     Idle: {}
@@ -1125,7 +1125,7 @@ export const familyChild: <
  *   events: Machine.eventsFromSchemas()
  * }).handle({
  *   initial: {
- *     target: Machine.targets(States).root.Idle
+ *     target: "Idle"
  *   },
  *   states: {
  *     Idle: {}

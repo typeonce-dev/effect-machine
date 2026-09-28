@@ -10,21 +10,20 @@ class CompositionService extends Context.Service<CompositionService, string>()("
 }
 class CompositionFailure extends Data.TaggedError("CompositionFailure")<{}> {
 }
-const targets = Machine.targets(States)
 const machine = Machine.make({
-  branches: { enter: { app: { target: targets.root.App } } },
+  branches: { enter: { app: { target: "App" } } },
   root: States,
   events: Machine.eventsFromSchemas()
 })
 const handled = machine.handle({
   initial: {
-    target: Machine.targets(States).root.App,
+    target: "App",
     data: App.make({})
   },
   states: {
     App: {
       initial: {
-        target: Machine.targets(States).root.App.Workspace,
+        target: "App.Workspace",
         data: Workspace.make({})
       },
       states: {
@@ -58,7 +57,7 @@ const handled = machine.handle({
           states: {
             Editor: {
               initial: {
-                target: Machine.targets(States).root.App.Workspace.Editor.Editing,
+                target: "App.Workspace.Editor.Editing",
                 data: Editing.make({})
               },
               states: {
@@ -72,7 +71,7 @@ const handled = machine.handle({
             },
             Sync: {
               initial: {
-                target: Machine.targets(States).root.App.Workspace.Sync.Idle,
+                target: "App.Workspace.Sync.Idle",
                 data: SyncIdle.make({})
               },
               states: {

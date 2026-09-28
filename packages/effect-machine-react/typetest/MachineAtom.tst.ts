@@ -12,7 +12,7 @@ const machine = Machine.make({
   events: Machine.eventsFromSchemas(Continue)
 }).handle({
   initial: {
-    target: Machine.targets(States).root.Idle,
+    target: "Idle",
     decoded: true,
     data: new Idle({})
   },
@@ -37,7 +37,7 @@ const withInput = Machine.make({
   events: Machine.events({ Close: {} })
 }).handle({
   initial: {
-    target: Machine.targets(Root).root.Editing,
+    target: "Editing",
     data: ({}) => ({ draft: "" })
   },
   root: ({ input }) => ({ count: input }),

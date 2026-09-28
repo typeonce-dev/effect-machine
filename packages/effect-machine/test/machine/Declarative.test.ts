@@ -11,7 +11,6 @@ const Root = Machine.state({
     }
   }
 })
-const targets = Machine.targets(Root)
 const events = Machine.events({ Complete: { count: Schema.Number } })
 describe("declarative transitions", () => {
   it.effect("accepts a service class as a direct lazy Effect", () =>
@@ -26,17 +25,16 @@ describe("declarative transitions", () => {
           Done: { type: "final", fields: { count: Schema.Number }, output: Schema.Number }
         }
       })
-      const refs = Machine.targets(root)
       const machine = Machine.make({
         root,
         events: Machine.events({}),
         effects: { value: Value }
       }).handle({
         initial: {
-          target: Machine.targets(root).root.Loading
+          target: "Loading"
         },
         states: {
-          Loading: { invoke: { src: "value", onDone: { target: refs.root.Done, data: ({ output }) => output } } },
+          Loading: { invoke: { src: "value", onDone: { target: "Done", data: ({ output }) => output } } },
           Done: { output: ({ state }) => state.count }
         }
       })
@@ -54,14 +52,13 @@ describe("declarative transitions", () => {
           Done: { type: "final", fields: { value: Schema.Number }, output: Schema.Number }
         }
       })
-      const refs = Machine.targets(root)
       const effects = { load: Effect.succeed(1) }
-      const branches = { finish: { done: { target: refs.root.Done } } }
+      const branches = { finish: { done: { target: "Done" } } } as const
       const definition = Machine.make({ root, events: Machine.events({}), effects, branches })
       effects.load = Effect.succeed(99)
       const machine = definition.handle({
         initial: {
-          target: Machine.targets(root).root.Loading
+          target: "Loading"
         },
         states: {
           Loading: {
@@ -79,17 +76,16 @@ describe("declarative transitions", () => {
   it.effect("allows inline entry into a choice with inspectable destinations", () =>
     Effect.gen(function*() {
       const root = Machine.state({ states: { Idle: {}, Route: { type: "choice" }, Ready: {} } })
-      const refs = Machine.targets(root)
       const machine = Machine.make({
         root,
         events: Machine.events({ Go: {} })
       }).handle({
         initial: {
-          target: Machine.targets(root).root.Idle
+          target: "Idle"
         },
         states: {
-          Idle: { on: { Go: { target: refs.root.Route } } },
-          Route: { choice: { target: refs.root.Ready } },
+          Idle: { on: { Go: { target: "Route" } } },
+          Route: { choice: { target: "Ready" } },
           Ready: {}
         }
       })
@@ -106,13 +102,13 @@ describe("declarative transitions", () => {
         events
       }).handle({
         initial: {
-          target: Machine.targets(Root).root.Idle
+          target: "Idle"
         },
         states: {
           Idle: {
             on: {
               Complete: {
-                target: targets.root.Ready,
+                target: "Ready",
                 data: ({ event }) => {
                   calls++
                   return { count: event.count }
@@ -123,7 +119,7 @@ describe("declarative transitions", () => {
           Ready: {},
           Checkout: {
             initial: {
-              target: Machine.targets(Root).root.Checkout.Review,
+              target: "Checkout.Review",
               data: { total: 0 }
             },
             states: {
@@ -150,11 +146,11 @@ describe("declarative transitions", () => {
         root: Root,
         events,
         branches: {
-          checkout: { review: { target: targets.root.Checkout } }
+          checkout: { review: { target: "Checkout" } }
         }
       }).handle({
         initial: {
-          target: Machine.targets(Root).root.Idle
+          target: "Idle"
         },
         states: {
           Idle: {
@@ -174,7 +170,7 @@ describe("declarative transitions", () => {
           Ready: {},
           Checkout: {
             initial: {
-              target: Machine.targets(Root).root.Checkout.Review,
+              target: "Checkout.Review",
               data: { total: 0 }
             },
             states: {
@@ -213,7 +209,6 @@ describe("declarative transitions", () => {
           Done: { type: "final", schema: Schema.TaggedStruct("Done", { count: Schema.Number }), output: Schema.Number }
         }
       })
-      const refs = Machine.targets(root)
       const machine = Machine.make({
         root,
         events: Machine.events({}),
@@ -222,7 +217,7 @@ describe("declarative transitions", () => {
         }
       }).handle({
         initial: {
-          target: Machine.targets(root).root.Idle
+          target: "Idle"
         },
         states: {
           Idle: {
@@ -230,7 +225,7 @@ describe("declarative transitions", () => {
               src: "load",
               input: () => 2,
               onDone: {
-                target: refs.root.Done,
+                target: "Done",
                 data: ({ output }) => ({ count: output })
               }
             }

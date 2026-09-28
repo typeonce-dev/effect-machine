@@ -18,7 +18,7 @@ const childMachine = Machine.make({
   events: Machine.eventsFromSchemas()
 }).handle({
   initial: {
-    target: Machine.targets(childStates).root.ChildIdle,
+    target: "ChildIdle",
     decoded: true,
     data: new ChildIdle({})
   },
@@ -50,7 +50,7 @@ const activityMachine = Machine.make({
   events: Machine.eventsFromSchemas(WorkSucceeded, WorkFailed, LoadTimedOut)
 }).handle({
   initial: {
-    target: Machine.targets(activityStates).root.Loading,
+    target: "Loading",
     decoded: true,
     data: new Loading({})
   },
@@ -177,7 +177,7 @@ describe("machine activity metadata", () => {
         events: Machine.eventsFromSchemas(LoadTimedOut)
       }).handle({
         initial: {
-          target: Machine.targets(activityStates).root.Loading,
+          target: "Loading",
           decoded: true,
           data: new Loading({})
         },

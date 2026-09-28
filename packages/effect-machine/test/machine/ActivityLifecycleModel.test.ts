@@ -66,21 +66,20 @@ describe("machine activity lifecycle model", () => {
         Effect.gen(function*() {
           const probe = yield* makeActivityProbe
           const states = Machine.state({ states: { Idle, Active } })
-          const targets1 = Machine.targets(states)
           const machine = Machine.make({
             logic: { source1: probe.logic("active", { _tag: "Blocked" }) },
             root: states,
             events: Machine.eventsFromSchemas(Enter, Leave, Restart)
           }).handle({
             initial: {
-              target: Machine.targets(states).root.Idle,
+              target: "Idle",
               decoded: true,
               data: new Idle({})
             },
             states: {
               Idle: {
                 on: {
-                  Enter: { target: targets1.root.Active, decoded: true, data: () => (new Active({})) }
+                  Enter: { target: "Active", decoded: true, data: () => (new Active({})) }
                 }
               },
               Active: {
@@ -92,8 +91,8 @@ describe("machine activity lifecycle model", () => {
                   onFailure: { none: true }
                 },
                 on: {
-                  Leave: { target: targets1.root.Idle, decoded: true, data: () => (new Idle({})) },
-                  Restart: { target: targets1.root.Active, reenter: true, decoded: true, data: () => (new Active({})) }
+                  Leave: { target: "Idle", decoded: true, data: () => (new Idle({})) },
+                  Restart: { target: "Active", reenter: true, decoded: true, data: () => (new Active({})) }
                 }
               }
             }
@@ -144,7 +143,6 @@ describe("machine activity lifecycle model", () => {
           Done: { schema: Done, type: "final", output: Schema.Number }
         }
       })
-      const targets2 = Machine.targets(states)
       const machine = Machine.make({
         logic: { source1: probe.immediate("immediate", (epoch) => new Completed({ epoch })) },
         root: states,
@@ -152,7 +150,7 @@ describe("machine activity lifecycle model", () => {
         internalEvents: Machine.internalEventsFromSchemas(Completed)
       }).handle({
         initial: {
-          target: Machine.targets(states).root.Active,
+          target: "Active",
           decoded: true,
           data: new Active({})
         },
@@ -163,7 +161,7 @@ describe("machine activity lifecycle model", () => {
               id: "immediate",
               address: Machine.childAddress("immediate"),
               onDone: {
-                target: targets2.root.Done,
+                target: "Done",
                 decoded: true,
                 data: ({ output }) => (new Done({ epoch: output.epoch }))
               },
@@ -190,7 +188,6 @@ describe("machine activity lifecycle model", () => {
       }) {
       }
       const states = Machine.state({ states: { Active: EpochActive, Done } })
-      const targets3 = Machine.targets(states)
       const machine = Machine.make({
         logic: {
           source1: probe.logic("epoch", {
@@ -203,7 +200,7 @@ describe("machine activity lifecycle model", () => {
         internalEvents: Machine.internalEventsFromSchemas(Completed)
       }).handle({
         initial: {
-          target: Machine.targets(states).root.Active,
+          target: "Active",
           decoded: true,
           data: new EpochActive({ acknowledged: 0 })
         },
@@ -218,18 +215,18 @@ describe("machine activity lifecycle model", () => {
             },
             on: {
               Restart: {
-                target: targets3.root.Active,
+                target: "Active",
                 reenter: true,
                 decoded: true,
                 data: ({ state }) => (new EpochActive({ acknowledged: state.acknowledged }))
               },
               QueueBarrier: {
-                target: targets3.root.Active,
+                target: "Active",
                 decoded: true,
                 data: ({ state }) => (new EpochActive({ acknowledged: state.acknowledged + 1 }))
               },
               Completed: {
-                target: targets3.root.Done,
+                target: "Done",
                 decoded: true,
                 data: ({ event }) => (new Done({ epoch: event.epoch }))
               }
@@ -307,7 +304,6 @@ describe("machine activity lifecycle model", () => {
           }
         }
       })
-      const targets4 = Machine.targets(root4)
       const machine = Machine.make({
         logic: {
           source1: probe.logic("left", { _tag: "Blocked" }),
@@ -317,7 +313,7 @@ describe("machine activity lifecycle model", () => {
         events: Machine.eventsFromSchemas(LeaveLeft)
       }).handle({
         initial: {
-          target: Machine.targets(root4).root.Root,
+          target: "Root",
           decoded: true,
           data: new Root({})
         },
@@ -327,7 +323,7 @@ describe("machine activity lifecycle model", () => {
             states: {
               left: {
                 initial: {
-                  target: Machine.targets(root4).root.Root.left.active,
+                  target: "Root.left.active",
                   decoded: true,
                   data: new LeftActive({})
                 },
@@ -341,7 +337,7 @@ describe("machine activity lifecycle model", () => {
                       onFailure: { none: true }
                     },
                     on: {
-                      LeaveLeft: { target: targets4.root.Root.left.idle, decoded: true, data: () => (new LeftIdle({})) }
+                      LeaveLeft: { target: "Root.left.idle", decoded: true, data: () => (new LeftIdle({})) }
                     }
                   },
                   idle: {}
@@ -349,7 +345,7 @@ describe("machine activity lifecycle model", () => {
               },
               right: {
                 initial: {
-                  target: Machine.targets(root4).root.Root.right.active,
+                  target: "Root.right.active",
                   decoded: true,
                   data: new RightActive({})
                 },
@@ -389,7 +385,6 @@ describe("machine activity lifecycle model", () => {
     Effect.gen(function*() {
       const probe = yield* makeActivityProbe
       const states = Machine.state({ states: { Idle, Active, Done } })
-      const targets5 = Machine.targets(states)
       const machine = Machine.make({
         timers: { source2: "1 hour" },
         logic: { source1: probe.logic("timed", { _tag: "Blocked" }) },
@@ -398,7 +393,7 @@ describe("machine activity lifecycle model", () => {
         internalEvents: Machine.internalEventsFromSchemas(TimerFired)
       }).handle({
         initial: {
-          target: Machine.targets(states).root.Active,
+          target: "Active",
           decoded: true,
           data: new Active({})
         },
@@ -414,10 +409,10 @@ describe("machine activity lifecycle model", () => {
             }, {
               src: "source2",
               id: "deadline",
-              onDone: { target: targets5.root.Done, decoded: true, data: () => (new Done({ epoch: -1 })) }
+              onDone: { target: "Done", decoded: true, data: () => (new Done({ epoch: -1 })) }
             }],
             on: {
-              Leave: { target: targets5.root.Idle, decoded: true, data: () => (new Idle({})) }
+              Leave: { target: "Idle", decoded: true, data: () => (new Idle({})) }
             }
           },
           Done: {}
@@ -450,7 +445,7 @@ describe("machine activity lifecycle model", () => {
         events: Machine.eventsFromSchemas()
       }).handle({
         initial: {
-          target: Machine.targets(states).root.Active,
+          target: "Active",
           decoded: true,
           data: new Active({})
         },
@@ -505,7 +500,7 @@ describe("machine activity lifecycle model", () => {
         events: Machine.eventsFromSchemas()
       }).handle({
         initial: {
-          target: Machine.targets(states).root.Active,
+          target: "Active",
           decoded: true,
           data: new Active({})
         },

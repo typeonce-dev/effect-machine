@@ -41,7 +41,7 @@ describe("machine reference event channels", () => {
     emittedEvents: Emissions
   }).handle({
     initial: {
-      target: Machine.targets(states).root.Idle,
+      target: "Idle",
       decoded: true,
       data: new Idle({})
     },
@@ -107,7 +107,7 @@ describe("machine reference event channels", () => {
       events: Events
     }).handle({
       initial: {
-        target: Machine.targets(states).root.Idle,
+        target: "Idle",
         decoded: true,
         data: new Idle({})
       },
@@ -134,7 +134,7 @@ describe("machine reference event channels", () => {
       emittedEvents: Emissions
     }).handle({
       initial: {
-        target: Machine.targets(states).root.Idle,
+        target: "Idle",
         decoded: true,
         data: new Idle({})
       },
@@ -172,7 +172,7 @@ describe("machine reference event channels", () => {
     })
     compatible.handle({
       initial: {
-        target: Machine.targets(states).root.Idle,
+        target: "Idle",
         decoded: true,
         data: new Idle({})
       },
@@ -185,7 +185,7 @@ describe("machine reference event channels", () => {
     })
     expect(incompatible.handle).type.toBeCallableWith({
       initial: {
-        target: Machine.targets(states).root.Idle,
+        target: "Idle",
         data: () => {
           throw new Error("type-only constructor")
         }
@@ -194,7 +194,7 @@ describe("machine reference event channels", () => {
     expect(incompatible.handle).type.not.toBeCallableWith({
       states: { Idle: { invoke: { src: "worker" } } },
       initial: {
-        target: Machine.targets(states).root.Idle,
+        target: "Idle",
         data: () => {
           throw new Error("type-only constructor")
         }
@@ -270,7 +270,7 @@ describe("machine reference event channels", () => {
       emittedEvents: Emissions
     }).handle({
       initial: {
-        target: Machine.targets(states).root.Idle,
+        target: "Idle",
         decoded: true,
         data: new Idle({})
       },
@@ -300,7 +300,7 @@ describe("machine reference event channels", () => {
       parent: Machine.parent(ParentEvents)
     }).handle({
       initial: {
-        target: Machine.targets(states).root.Idle,
+        target: "Idle",
         data: () => {
           throw new Error("type-only constructor")
         }

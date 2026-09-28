@@ -9,9 +9,8 @@ const events = Machine.events({
   Change: { allowed: Schema.Boolean }
 })
 const root1 = Machine.state({ schema: Root, states: { Idle: {}, Saved: { schema: Saved } } })
-const targets1 = Machine.targets(root1)
 const definition = Machine.make({
-  branches: { rootUpdate: { updated: { update: targets1.root } } },
+  branches: { rootUpdate: { updated: { update: "root" } } },
   root: root1,
   events
 })
@@ -26,15 +25,15 @@ describe("transition construction", () => {
       > = []
       const machine = definition.handle({
         initial: {
-          target: Machine.targets(root1).root.Idle
+          target: "Idle"
         },
         root: () => ({ count: 0 }),
         states: {
           Idle: {
             on: {
               Save: {
-                target: targets1.root.Saved,
-                update: targets1.root,
+                target: "Saved",
+                update: "root",
                 data: ({ event }) => ({
                   target: { text: event.text },
                   update: { count: event.count }
@@ -63,15 +62,15 @@ describe("transition construction", () => {
       const rootValue = new Root({ count: 2 })
       const machine = definition.handle({
         initial: {
-          target: Machine.targets(root1).root.Idle
+          target: "Idle"
         },
         root: () => ({ count: 0 }),
         states: {
           Idle: {
             on: {
               Save: {
-                target: targets1.root.Saved,
-                update: targets1.root,
+                target: "Saved",
+                update: "root",
                 decoded: true,
                 data: () => ({ target: targetValue, update: rootValue })
               }
@@ -91,16 +90,16 @@ describe("transition construction", () => {
     Effect.gen(function*() {
       const machine = definition.handle({
         initial: {
-          target: Machine.targets(root1).root.Idle
+          target: "Idle"
         },
         root: () => ({ count: 0 }),
         states: {
-          Idle: { on: { Save: { target: targets1.root.Saved, data: ({ event }) => ({ text: event.text }) } } },
+          Idle: { on: { Save: { target: "Saved", data: ({ event }) => ({ text: event.text }) } } },
           Saved: {
             on: {
               Reset: {
-                target: targets1.root.Idle,
-                update: targets1.root,
+                target: "Idle",
+                update: "root",
                 data: () => ({ target: undefined, update: { count: 5 } })
               }
             }
@@ -120,15 +119,15 @@ describe("transition construction", () => {
         let entered = false
         const machine = definition.handle({
           initial: {
-            target: Machine.targets(root1).root.Idle
+            target: "Idle"
           },
           root: () => ({ count: 0 }),
           states: {
             Idle: {
               on: {
                 Save: {
-                  target: targets1.root.Saved,
-                  update: targets1.root,
+                  target: "Saved",
+                  update: "root",
                   data: () => ({
                     target: { text: invalidOwner ? "valid" : 42 as unknown as string },
                     update: { count: invalidOwner ? "invalid" as unknown as number : 1 }
@@ -158,17 +157,17 @@ describe("transition construction", () => {
         let constructed = 0
         const machine = definition.handle({
           initial: {
-            target: Machine.targets(root1).root.Idle
+            target: "Idle"
           },
           root: () => ({ count: 0 }),
-          on: { Change: { update: targets1.root, data: ({ root: current }) => ({ count: current.count + 10 }) } },
+          on: { Change: { update: "root", data: ({ root: current }) => ({ count: current.count + 10 }) } },
           states: {
             Idle: {
               on: {
                 Change: combined ?
                   {
-                    target: targets1.root.Saved,
-                    update: targets1.root,
+                    target: "Saved",
+                    update: "root",
                     guard: ({ root, event }) => root.count === 0 && event.allowed,
                     data: () => {
                       constructed++
@@ -207,14 +206,14 @@ describe("transition construction", () => {
       const lifecycle: Array<string> = []
       const machine = definition.handle({
         initial: {
-          target: Machine.targets(root1).root.Idle
+          target: "Idle"
         },
         root: () => ({ count: 0 }),
         entry: () => {
           lifecycle.push("root")
         },
         states: {
-          Idle: { on: { Save: { target: targets1.root.Saved, data: ({ event }) => ({ text: event.text }) } } },
+          Idle: { on: { Save: { target: "Saved", data: ({ event }) => ({ text: event.text }) } } },
           Saved: {
             entry: () => {
               lifecycle.push("enter")
@@ -224,8 +223,8 @@ describe("transition construction", () => {
             },
             on: {
               Change: {
-                target: targets1.root.Saved,
-                update: targets1.root,
+                target: "Saved",
+                update: "root",
                 reenter: true,
                 guard: ({ event }) => event.allowed,
                 data: ({ root: current, state }) => ({
@@ -262,7 +261,7 @@ describe("transition construction", () => {
       let entered = 0
       const machine = definition.handle({
         initial: {
-          target: Machine.targets(root1).root.Idle
+          target: "Idle"
         },
         root: () => ({ count: 0 }),
         states: {
@@ -289,7 +288,7 @@ describe("transition construction", () => {
     assert.throws(() =>
       definition.handle({
         initial: {
-          target: Machine.targets(root1).root.Idle
+          target: "Idle"
         },
         root: () => ({ count: 0 }),
         states: {

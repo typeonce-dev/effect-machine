@@ -29,7 +29,7 @@ describe("machine protocols", () => {
         internalEvents: Machine.internalEventsFromSchemas(InternalEvent)
       }).handle({
         initial: {
-          target: Machine.targets(states).root.ProtocolIdle,
+          target: "ProtocolIdle",
           decoded: true,
           data: new ProtocolIdle({})
         },

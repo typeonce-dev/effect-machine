@@ -12,18 +12,17 @@ describe("machine scheduling", () => {
   it.effect("drains a large synchronous raised-event burst without growing the stack", () =>
     Effect.gen(function*() {
       const states = Machine.state({ states: { SchedulingActive } })
-      const targets1 = Machine.targets(states)
       const machine = Machine.make({
         branches: {
-          transition1: { destination: { target: targets1.root.SchedulingActive } },
-          transition2: { destination: { target: targets1.root.SchedulingActive } }
+          transition1: { destination: { target: "SchedulingActive" } },
+          transition2: { destination: { target: "SchedulingActive" } }
         },
         root: states,
         events: Machine.eventsFromSchemas(StartBurst),
         internalEvents: Machine.internalEventsFromSchemas(Burst)
       }).handle({
         initial: {
-          target: Machine.targets(states).root.SchedulingActive,
+          target: "SchedulingActive",
           decoded: true,
           data: new SchedulingActive({ count: 0 })
         },

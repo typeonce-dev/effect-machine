@@ -65,25 +65,24 @@ const States = Machine.state({
   }
 })
 const makeMachine = () => {
-  const targets1 = Machine.targets(States)
   return Machine.make({
     branches: {
-      transition1: { destination: { target: targets1.root.player.transport.Loading } },
-      transition2: { destination: { target: targets1.root.player.transport.Ready } },
-      transition3: { destination: { target: targets1.root.player.transport.Ready.Playing } }
+      transition1: { destination: { target: "player.transport.Loading" } },
+      transition2: { destination: { target: "player.transport.Ready" } },
+      transition3: { destination: { target: "player.transport.Ready.Playing" } }
     },
     root: States,
     events: Machine.eventsFromSchemas(SourceSelected, Loaded, Play, Mute)
   }).handle({
     initial: {
-      target: Machine.targets(States).root.player
+      target: "player"
     },
     states: {
       player: {
         states: {
           transport: {
             initial: {
-              target: Machine.targets(States).root.player.transport.Empty
+              target: "player.transport.Empty"
             },
             states: {
               Empty: {
@@ -110,7 +109,7 @@ const makeMachine = () => {
               },
               Ready: {
                 initial: {
-                  target: Machine.targets(States).root.player.transport.Ready.Paused
+                  target: "player.transport.Ready.Paused"
                 },
                 states: {
                   Paused: {
@@ -127,7 +126,7 @@ const makeMachine = () => {
                   Playing: {
                     on: {
                       Mute: {
-                        target: targets1.root.player.settings.Muted,
+                        target: "player.settings.Muted",
                         data: ({ event }) => ({ volume: event.volume })
                       }
                     }
@@ -138,7 +137,7 @@ const makeMachine = () => {
           },
           settings: {
             initial: {
-              target: Machine.targets(States).root.player.settings.Audible,
+              target: "player.settings.Audible",
               data: { volume: 1 }
             },
             states: {
@@ -181,41 +180,40 @@ const historyFallback = () => ({
     }
   }
 })
-const targets2 = Machine.targets(HistoryStates)
 const historyMachine = Machine.make({
   branches: {
-    transition1: { destination: { target: targets2.root.away } },
-    transition2: { destination: { target: targets2.root.flow.section.Editing } },
-    transition3: { destination: { history: targets2.root.flow.recent } },
-    transition4: { destination: { history: targets2.root.flow.exact } }
+    transition1: { destination: { target: "away" } },
+    transition2: { destination: { target: "flow.section.Editing" } },
+    transition3: { destination: { history: "flow.recent" } },
+    transition4: { destination: { history: "flow.exact" } }
   },
   root: HistoryStates,
   events: Machine.eventsFromSchemas(Edit, Leave, ResumeShallow, ResumeDeep)
 }).handle({
   initial: {
-    target: Machine.targets(HistoryStates).root.flow
+    target: "flow"
   },
   states: {
     flow: {
       initial: {
-        target: Machine.targets(HistoryStates).root.flow.section
+        target: "flow.section"
       },
       history: {
         recent: { default: historyFallback },
         exact: { default: historyFallback }
       },
       on: {
-        Leave: { target: targets2.root.away }
+        Leave: { target: "away" }
       },
       states: {
         section: {
           initial: {
-            target: Machine.targets(HistoryStates).root.flow.section.Idle
+            target: "flow.section.Idle"
           },
           states: {
             Idle: {
               on: {
-                Edit: { target: targets2.root.flow.section.Editing, data: ({ event }) => ({ draft: event.draft }) }
+                Edit: { target: "flow.section.Editing", data: ({ event }) => ({ draft: event.draft }) }
               }
             },
             Editing: {}
@@ -345,7 +343,7 @@ describe("structural active states", () => {
         events: Machine.eventsFromSchemas()
       }).handle({
         initial: {
-          target: Machine.targets(FinalStates).root.Done
+          target: "Done"
         },
         states: {
           Done: {

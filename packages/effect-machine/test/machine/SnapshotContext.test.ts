@@ -52,11 +52,10 @@ describe("Machine transition snapshot context", () => {
   it.effect("lets an effectful event handler inspect a sibling region", () =>
     Effect.gen(function*() {
       let captured: Machine.Snapshot<typeof States> | undefined
-      const targets1 = Machine.targets(States)
       const machine = Machine.make({
         branches: {
           transition1: {
-            online: { target: targets1.root.System.Playback.Playing, title: "Network is online" },
+            online: { target: "System.Playback.Playing", title: "Network is online" },
             unchanged: { none: true }
           }
         },
@@ -64,7 +63,7 @@ describe("Machine transition snapshot context", () => {
         events: Machine.eventsFromSchemas(BufferReady)
       }).handle({
         initial: {
-          target: Machine.targets(States).root.System,
+          target: "System",
           decoded: true,
           data: new System({})
         },
@@ -83,7 +82,7 @@ describe("Machine transition snapshot context", () => {
             states: {
               Playback: {
                 initial: {
-                  target: Machine.targets(States).root.System.Playback.Buffering,
+                  target: "System.Playback.Buffering",
                   decoded: true,
                   data: new Buffering({})
                 },
@@ -106,7 +105,7 @@ describe("Machine transition snapshot context", () => {
               },
               Network: {
                 initial: {
-                  target: Machine.targets(States).root.System.Network.Online,
+                  target: "System.Network.Online",
                   decoded: true,
                   data: new Online({})
                 },
@@ -128,17 +127,16 @@ describe("Machine transition snapshot context", () => {
   it.effect("shares one beginning-of-microstep snapshot across parallel transitions", () =>
     Effect.gen(function*() {
       const captured: Array<Machine.Snapshot<typeof States>> = []
-      const targets2 = Machine.targets(States)
       const machine = Machine.make({
         branches: {
-          transition1: { destination: { target: targets2.root.System.Playback.Playing } },
-          transition2: { destination: { target: targets2.root.System.Network.Offline } }
+          transition1: { destination: { target: "System.Playback.Playing" } },
+          transition2: { destination: { target: "System.Network.Offline" } }
         },
         root: States,
         events: Machine.eventsFromSchemas(Disconnect)
       }).handle({
         initial: {
-          target: Machine.targets(States).root.System,
+          target: "System",
           decoded: true,
           data: new System({})
         },
@@ -157,7 +155,7 @@ describe("Machine transition snapshot context", () => {
             states: {
               Playback: {
                 initial: {
-                  target: Machine.targets(States).root.System.Playback.Buffering,
+                  target: "System.Playback.Buffering",
                   decoded: true,
                   data: new Buffering({})
                 },
@@ -178,7 +176,7 @@ describe("Machine transition snapshot context", () => {
               },
               Network: {
                 initial: {
-                  target: Machine.targets(States).root.System.Network.Online,
+                  target: "System.Network.Online",
                   decoded: true,
                   data: new Online({})
                 },
@@ -213,11 +211,10 @@ describe("Machine transition snapshot context", () => {
   it.effect("captures the complete configuration for an eventless transition", () =>
     Effect.gen(function*() {
       let captured: Machine.Snapshot<typeof States> | undefined
-      const targets3 = Machine.targets(States)
       const machine = Machine.make({
         branches: {
           transition1: {
-            online: { target: targets3.root.System.Playback.Playing, title: "Network is online" },
+            online: { target: "System.Playback.Playing", title: "Network is online" },
             unchanged: { none: true }
           }
         },
@@ -225,7 +222,7 @@ describe("Machine transition snapshot context", () => {
         events: Machine.eventsFromSchemas()
       }).handle({
         initial: {
-          target: Machine.targets(States).root.System,
+          target: "System",
           decoded: true,
           data: new System({})
         },
@@ -244,7 +241,7 @@ describe("Machine transition snapshot context", () => {
             states: {
               Playback: {
                 initial: {
-                  target: Machine.targets(States).root.System.Playback.Buffering,
+                  target: "System.Playback.Buffering",
                   decoded: true,
                   data: new Buffering({})
                 },
@@ -265,7 +262,7 @@ describe("Machine transition snapshot context", () => {
               },
               Network: {
                 initial: {
-                  target: Machine.targets(States).root.System.Network.Online,
+                  target: "System.Network.Online",
                   decoded: true,
                   data: new Online({})
                 },
@@ -317,14 +314,13 @@ describe("Machine transition snapshot context", () => {
         }
       })
       let captured: Machine.Snapshot<typeof completionStates> | undefined
-      const targets4 = Machine.targets(completionStates)
       const machine = Machine.make({
-        branches: { transition1: { destination: { target: targets4.root.System.Work.Restarted } } },
+        branches: { transition1: { destination: { target: "System.Work.Restarted" } } },
         root: completionStates,
         events: Machine.eventsFromSchemas()
       }).handle({
         initial: {
-          target: Machine.targets(completionStates).root.System,
+          target: "System",
           decoded: true,
           data: new System({})
         },
@@ -336,7 +332,7 @@ describe("Machine transition snapshot context", () => {
                 initial: {
                   decoded: true,
                   data: new Finished({}),
-                  target: Machine.targets(completionStates).root.System.Work.Finished
+                  target: "System.Work.Finished"
                 },
                 onDone: {
                   branches: "transition1",
@@ -352,7 +348,7 @@ describe("Machine transition snapshot context", () => {
               },
               Monitor: {
                 initial: {
-                  target: Machine.targets(completionStates).root.System.Monitor.Active,
+                  target: "System.Monitor.Active",
                   decoded: true,
                   data: new Active({})
                 },

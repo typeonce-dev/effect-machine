@@ -3,7 +3,6 @@ import { hasProperty } from "effect/Predicate"
 import * as Schema from "effect/Schema"
 import type { Machine } from "../../Machine.js"
 import { SnapshotBuilderStateTypeId } from "./symbols.js"
-import * as Reference from "./targetReference.js"
 import * as Topology from "./topology.js"
 
 const initializers = new WeakSet<object>()
@@ -96,18 +95,17 @@ export const capture = (
       if (Reflect.ownKeys(edge).some((key) => !["target", "data", "decoded"].includes(String(key)))) {
         throw new Error("Machine initial edge accepts only target, data, and decoded")
       }
-      if (!hasProperty(edge.target, Reference.TypeId)) throw new Error("Machine initial requires a target reference")
-      const ref = (edge.target as Reference.Reference)[Reference.TypeId]
       const prefix = path === "" ? "" : `${path}.`
-      const key = ref.path.slice(prefix.length)
-      if (
-        ref.root !== root || !ref.path.startsWith(prefix) || key.includes(".") || !(key in node.states) ||
-        ref.kind === "history"
-      ) {
-        throw new Error(`Machine initial target must be a direct child of "${path}"`)
+      const key = typeof edge.target === "string" && edge.target.startsWith(prefix)
+        ? edge.target.slice(prefix.length)
+        : undefined
+      const selected = key === undefined || !Object.hasOwn(node.states, key) ? undefined : node.states[key]!
+      const kind = selected === undefined || Schema.isSchema(selected) ? "state" : selected.type
+      if (key === undefined || selected === undefined || kind === "history") {
+        throw new Error(`Machine initial target must be a direct child of "${path === "" ? "root" : path}"`)
       }
       initialKey = key
-      if (ref.kind === "choice" && (hasProperty(edge, "data") || hasProperty(edge, "decoded"))) {
+      if (kind === "choice" && (hasProperty(edge, "data") || hasProperty(edge, "decoded"))) {
         throw new Error("Machine choice initial edges cannot construct data")
       }
       const construct = edgeConstruction(edge)

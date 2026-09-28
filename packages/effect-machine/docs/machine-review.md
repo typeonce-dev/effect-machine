@@ -32,8 +32,8 @@ provider has no ownership purpose, inspect that code more closely.
 
 ## Keep ordinary transitions inline
 
-Use `{ target: targets.root.Running }` for a state with default construction.
-Use `{ target: targets.root.Running, from: ({ event }) => ({ count: event.count }) }`
+Use `{ target: "Running" }` for a state with default construction.
+Use `{ target: "Running", data: ({ event }) => ({ count: event.count }) }`
 when the destination needs data. The checker rejects missing required fields.
 Use `decoded` for values already decoded by their schema.
 
@@ -155,19 +155,18 @@ and its lifetime:
 
 ```ts
 // In make: effects: { submitOrder }
-// targets is Machine.targets(OrderStates).
 machine.handle({ states: {
   Editing: {
     on: {
-      Submit: { target: targets.root.Submitting, from: ({ event }) => ({ order: event.order }) }
+      Submit: { target: "Submitting", data: ({ event }) => ({ order: event.order }) }
     }
   },
   Submitting: {
     invoke: {
       src: "submitOrder",
       input: ({ state }) => state.order,
-      onDone: { target: targets.root.Complete, from: ({ output }) => ({ order: output }) },
-      onFailure: { target: targets.root.Failed, from: ({ error }) => ({ message: String(error) }) }
+      onDone: { target: "Complete", data: ({ output }) => ({ order: output }) },
+      onFailure: { target: "Failed", data: ({ error }) => ({ message: String(error) }) }
     }
   }
 } })

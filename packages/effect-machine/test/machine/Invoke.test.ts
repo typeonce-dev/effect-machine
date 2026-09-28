@@ -28,7 +28,7 @@ describe("inline invoke", () => {
       timers: { timeout: "1 second" }
     }).handle({
       initial: {
-        target: Machine.targets(States).root.Loading
+        target: "Loading"
       },
       states: {
         Idle: {},
@@ -43,15 +43,14 @@ describe("inline invoke", () => {
   })
   it.effect("ignores an invocation outcome when its transition declines", () =>
     Effect.gen(function*() {
-      const targets2 = Machine.targets(States)
       const machine = Machine.make({
-        branches: { transition1: { destination: { target: targets2.root.Complete } } },
+        branches: { transition1: { destination: { target: "Complete" } } },
         effects: { source1: Effect.suspend(() => Effect.succeed("ignored")) },
         root: States,
         events: Machine.eventsFromSchemas()
       }).handle({
         initial: {
-          target: Machine.targets(States).root.Loading
+          target: "Loading"
         },
         states: {
           Idle: {},
@@ -76,7 +75,6 @@ describe("inline invoke", () => {
   it.effect("handles Stream elements sequentially before completion", () =>
     Effect.gen(function*() {
       const states = Machine.state({ states: { Collecting, Complete } })
-      const targets3 = Machine.targets(states)
       const definition = Machine.make({
         streams: { source1: Stream.suspend(() => Stream.fromIterable([1, 2, 3])) },
         root: states,
@@ -84,7 +82,7 @@ describe("inline invoke", () => {
       })
       const machine = definition.handle({
         initial: {
-          target: Machine.targets(states).root.Collecting,
+          target: "Collecting",
           decoded: true,
           data: new Collecting({ values: [] })
         },
@@ -100,14 +98,14 @@ describe("inline invoke", () => {
                 }
               },
               onDone: {
-                target: targets3.root.Complete,
+                target: "Complete",
                 decoded: true,
                 data: ({ state }) => (new Complete({ value: state.values.join(",") }))
               }
             },
             on: {
               Add: {
-                target: targets3.root.Collecting,
+                target: "Collecting",
                 decoded: true,
                 data: ({ event, state }) => (new Collecting({ values: [...state.values, event.value] }))
               }
@@ -167,7 +165,6 @@ describe("inline invoke", () => {
     }))
   it.effect("routes a Stream typed failure through onFailure", () =>
     Effect.gen(function*() {
-      const targets4 = Machine.targets(States)
       const definition = Machine.make({
         streams: { source1: Stream.suspend(() => Stream.fail("offline")) },
         root: States,
@@ -175,7 +172,7 @@ describe("inline invoke", () => {
       })
       const machine = definition.handle({
         initial: {
-          target: Machine.targets(States).root.Loading
+          target: "Loading"
         },
         states: {
           Idle: {},
@@ -185,7 +182,7 @@ describe("inline invoke", () => {
               id: "updates",
               onDone: { none: true },
               onFailure: {
-                target: targets4.root.Failed,
+                target: "Failed",
                 decoded: true,
                 data: ({ error }) => (new Failed({ message: error }))
               }
@@ -216,7 +213,7 @@ describe("inline invoke", () => {
       })
       const machine = definition.handle({
         initial: {
-          target: Machine.targets(States).root.Loading
+          target: "Loading"
         },
         states: {
           Idle: {},
@@ -246,7 +243,6 @@ describe("inline invoke", () => {
           finalized = true
         }))
       )
-      const targets6 = Machine.targets(States)
       const definition = Machine.make({
         streams: { source1: Stream.suspend(() => source) },
         root: States,
@@ -254,7 +250,7 @@ describe("inline invoke", () => {
       })
       const machine = definition.handle({
         initial: {
-          target: Machine.targets(States).root.Loading
+          target: "Loading"
         },
         states: {
           Idle: {},
@@ -272,7 +268,7 @@ describe("inline invoke", () => {
             },
             on: {
               FinishStream: {
-                target: targets6.root.Complete,
+                target: "Complete",
                 decoded: true,
                 data: ({ event }) => (new Complete({ value: String(event.value) }))
               }
@@ -295,14 +291,13 @@ describe("inline invoke", () => {
     }))
   it.effect("plans a successful Effect outcome directly", () =>
     Effect.gen(function*() {
-      const targets7 = Machine.targets(States)
       const machine = Machine.make({
         effects: { source1: Effect.suspend(() => Effect.succeed("ready")) },
         root: States,
         events: Machine.eventsFromSchemas()
       }).handle({
         initial: {
-          target: Machine.targets(States).root.Loading
+          target: "Loading"
         },
         states: {
           Idle: {},
@@ -311,7 +306,7 @@ describe("inline invoke", () => {
               src: "source1",
               id: "load",
               onDone: {
-                target: targets7.root.Complete,
+                target: "Complete",
                 decoded: true,
                 data: ({ output }) => (new Complete({ value: output }))
               }
@@ -344,14 +339,13 @@ describe("inline invoke", () => {
     }))
   it.effect("plans a typed Effect failure directly", () =>
     Effect.gen(function*() {
-      const targets8 = Machine.targets(States)
       const machine = Machine.make({
         effects: { source1: Effect.suspend(() => Effect.fail("offline")) },
         root: States,
         events: Machine.eventsFromSchemas()
       }).handle({
         initial: {
-          target: Machine.targets(States).root.Loading
+          target: "Loading"
         },
         states: {
           Idle: {},
@@ -360,7 +354,7 @@ describe("inline invoke", () => {
               src: "source1",
               id: "load",
               onFailure: {
-                target: targets8.root.Failed,
+                target: "Failed",
                 decoded: true,
                 data: ({ error }) => (new Failed({ message: error }))
               }
@@ -382,7 +376,6 @@ describe("inline invoke", () => {
   it.effect("fails the owning machine when an Effect source factory defects", () =>
     Effect.gen(function*() {
       const defect = new Error("source defect")
-      const targets9 = Machine.targets(States)
       const machine = Machine.make({
         effects: {
           source1: Effect.suspend((): Effect.Effect<string> => {
@@ -393,12 +386,12 @@ describe("inline invoke", () => {
         events: Machine.eventsFromSchemas(Start)
       }).handle({
         initial: {
-          target: Machine.targets(States).root.Idle
+          target: "Idle"
         },
         states: {
           Idle: {
             on: {
-              Start: { target: targets9.root.Loading }
+              Start: { target: "Loading" }
             }
           },
           Loading: {
@@ -427,19 +420,18 @@ describe("inline invoke", () => {
         initial: () => Effect.fail(failure),
         run: () => Effect.never
       })
-      const targets10 = Machine.targets(States)
       const machine = Machine.make({
         logic: { source1: logic },
         root: States,
         events: Machine.eventsFromSchemas(Start)
       }).handle({
         initial: {
-          target: Machine.targets(States).root.Idle
+          target: "Idle"
         },
         states: {
           Idle: {
             on: {
-              Start: { target: targets10.root.Loading }
+              Start: { target: "Loading" }
             }
           },
           Loading: {

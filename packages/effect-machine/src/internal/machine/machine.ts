@@ -38,7 +38,6 @@ import * as internalRuntime from "./runtimeProtocol.js"
 import * as Serialization from "./serialization.js"
 import * as StateDefinition from "./stateDefinition.js"
 import { ChildMachineLogicTypeId } from "./symbols.js"
-import * as TargetReference from "./targetReference.js"
 import * as Topology from "./topology.js"
 
 export {
@@ -53,8 +52,6 @@ export {
 export { ChildMachineLogicTypeId, InitialEventTypeId, SnapshotBuilderStateTypeId } from "./symbols.js"
 
 /** Internal seam for the public target-reference factory and its opaque brand. */
-export const TargetReferenceTypeId: typeof TargetReference.TypeId = TargetReference.TypeId
-export const targets: (root: Machine.Any["root"]) => any = TargetReference.make
 
 const TypeId = "~effect/Machine"
 const ParentTypeId = "~effect/Machine/Parent"
@@ -310,7 +307,7 @@ const constructBranch = (
   if (selection.kind === "update") return Construction.update(stateNodes, selection.path!, config)
   if (selection.path === "") {
     if (Reflect.ownKeys(config).some((key) => key !== "input")) {
-      throw new Error("Machine root targets accept input only")
+      throw new Error("Machine initialize branches accept input only")
     }
     if (declaration.initialize === undefined) throw new Error("Machine root initialization is unavailable")
     return declaration.initialize(config.input)
@@ -379,7 +376,7 @@ const normalizeObjectTransition = (
   const allowed = [
     "target",
     "update",
-    "input",
+    "initialize",
     "history",
     "none",
     "branches",
@@ -418,7 +415,7 @@ const normalizeObjectTransition = (
       throw new Error("Machine branching transition requires a registered group and resolver")
     }
     if (
-      ["target", "update", "input", "history", "none", "data", "decoded"].some((key) => config[key] !== undefined)
+      ["target", "update", "initialize", "history", "none", "data", "decoded"].some((key) => config[key] !== undefined)
     ) throw new Error("Machine branching transition cannot redeclare its destination")
     const entries = Object.fromEntries(
       Object.entries(group).map(([key, spec]) => [key, {
@@ -445,14 +442,19 @@ const normalizeObjectTransition = (
   if (resolve !== undefined && selection.kind !== "none") {
     throw new Error("Machine advanced construction requires a declared branch group")
   }
-  const input = config.input
-  const constructInput = typeof input === "function" ? input : () => input
-  if (selection.path !== "" && Object.hasOwn(config, "input")) {
-    throw new Error("Machine input belongs only to root targets")
+  const initialize = config.initialize
+  const initializes = initialize !== undefined
+  if (initializes && (hasData || config.decoded !== undefined)) {
+    throw new Error("Machine initialize accepts machine input instead of data")
   }
-  if (selection.path === "" && selection.kind !== "update" && (hasData || config.decoded !== undefined)) {
-    throw new Error("Machine root targets accept input instead of data")
+  if (initializes && !declaration.input && initialize !== true) {
+    throw new Error("Machine initialize requires true when the machine declares no input")
   }
+  const constructInput = !declaration.input
+    ? () => undefined
+    : typeof initialize === "function"
+    ? initialize
+    : () => initialize
   return {
     target: () => selection,
     reenter: config.reenter,
@@ -460,7 +462,7 @@ const normalizeObjectTransition = (
     resolve: (context: Record<string, any>, enqueue: unknown) => {
       if (guarded && !guard(context)) return Topology.makeDeclined()
       if (resolve !== undefined) return resolve(context, enqueue)
-      if (selection.path === "" && selection.kind !== "update") {
+      if (initializes) {
         return constructBranch(selection, stateNodes, declaration, { input: constructInput(context) })
       }
       const value = construct(context)
@@ -726,7 +728,10 @@ const makeHandle = (self: Definition.Any, declaration: Declaration.Declaration):
     const handlers: Record<PropertyKey, CapturedStateConfig> = Object.create(null)
     flattenHandlers(handlers, compiled.stateNodes, compiled.states, "", {
       ...declaration,
-      initialize: (input) => compiled.initial(Protocol.decodeInputSync(compiled, compiled.input, input))
+      initialize: (input) =>
+        compiled.initial(
+          compiled.input === undefined ? undefined : Protocol.decodeInputSync(compiled, compiled.input, input)
+        )
     }, { "": captured.handlers })
     return makeWithHandlers(compiled, handlers)
   }) as Definition.Any["handle"]

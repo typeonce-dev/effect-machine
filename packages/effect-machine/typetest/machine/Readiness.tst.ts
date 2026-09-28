@@ -26,7 +26,7 @@ const choiceIncomplete = Machine.make({
   events: Machine.eventsFromSchemas(Tick)
 }).handle({
   initial: {
-    target: Machine.targets(choiceStates).root.Ready,
+    target: "Ready",
     decoded: true,
     data: new Ready({})
   },
@@ -34,7 +34,7 @@ const choiceIncomplete = Machine.make({
     Ready: {},
     Flow: {
       initial: {
-        target: Machine.targets(choiceStates).root.Flow.Route
+        target: "Flow.Route"
       },
       states: { Idle: {} }
     }
@@ -58,7 +58,7 @@ const historyIncomplete = Machine.make({
   events: Machine.eventsFromSchemas(Tick)
 }).handle({
   initial: {
-    target: Machine.targets(historyStates).root.Ready,
+    target: "Ready",
     decoded: true,
     data: new Ready({})
   },
@@ -66,7 +66,7 @@ const historyIncomplete = Machine.make({
     Ready: {},
     Flow: {
       initial: {
-        target: Machine.targets(historyStates).root.Flow.Idle,
+        target: "Flow.Idle",
         data: () => {
           throw new Error("type-only constructor")
         }
@@ -91,7 +91,7 @@ const outputIncomplete = Machine.make({
   events: Machine.eventsFromSchemas(Tick)
 }).handle({
   initial: {
-    target: Machine.targets(outputStates).root.Ready,
+    target: "Ready",
     decoded: true,
     data: new Ready({})
   },
@@ -118,7 +118,7 @@ describe("executable machine readiness", () => {
     expect(Machine.resume).type.not.toBeCallableWith(choiceIncomplete, choiceSnapshot)
     expect(parent.handle).type.toBeCallableWith({
       initial: {
-        target: Machine.targets(outputStates).root.Ready,
+        target: "Ready",
         data: () => {
           throw new Error("type-only constructor")
         }
@@ -127,7 +127,7 @@ describe("executable machine readiness", () => {
     expect(parent.handle).type.not.toBeCallableWith({
       states: { Ready: { invoke: { src: "choice", onDone: { none: true } } } },
       initial: {
-        target: Machine.targets(outputStates).root.Ready,
+        target: "Ready",
         data: () => {
           throw new Error("type-only constructor")
         }
@@ -152,7 +152,7 @@ describe("executable machine readiness", () => {
     expect(parent.handle).type.not.toBeCallableWith({
       states: { Ready: { invoke: { src: "history", onDone: { none: true } } } },
       initial: {
-        target: Machine.targets(outputStates).root.Ready,
+        target: "Ready",
         data: () => {
           throw new Error("type-only constructor")
         }
@@ -177,7 +177,7 @@ describe("executable machine readiness", () => {
     expect(parent.handle).type.not.toBeCallableWith({
       states: { Ready: { invoke: { src: "output", onDone: { none: true } } } },
       initial: {
-        target: Machine.targets(outputStates).root.Ready,
+        target: "Ready",
         data: () => {
           throw new Error("type-only constructor")
         }
@@ -211,20 +211,19 @@ describe("executable machine readiness", () => {
         }
       }
     })
-    const targets1 = Machine.targets(completeStates)
     const complete = Machine.make({
       root: completeStates,
       events: Machine.eventsFromSchemas(Tick)
     }).handle({
       initial: {
-        target: Machine.targets(completeStates).root.Ready,
+        target: "Ready",
         decoded: true,
         data: new Ready({})
       },
       states: {
         Flow: {
           initial: {
-            target: Machine.targets(completeStates).root.Flow.Route
+            target: "Flow.Route"
           },
           history: {
             recent: {
@@ -238,7 +237,7 @@ describe("executable machine readiness", () => {
           },
           states: {
             Route: {
-              choice: { target: targets1.root.Flow.Idle, decoded: true, data: () => (new Idle({})) }
+              choice: { target: "Flow.Idle", decoded: true, data: () => (new Idle({})) }
             },
             Done: { output: ({ state }) => state.value }
           }

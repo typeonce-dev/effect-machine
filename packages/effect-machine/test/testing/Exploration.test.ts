@@ -13,14 +13,13 @@ class Select extends Schema.TaggedClass<Select>("ExplorationSelect")("Select", {
 }) {}
 class Seed extends Schema.Class<Seed>("Seed")({ count: Schema.Int }) {}
 const States = Machine.state({ states: { counter: Counter } })
-const targets1 = Machine.targets(States)
 const machine = Machine.make({
-  branches: { transition1: { destination: { target: targets1.root.counter } } },
+  branches: { transition1: { destination: { target: "counter" } } },
   root: States,
   events: Machine.eventsFromSchemas(Increment, Reset, Corrupt)
 }).handle({
   initial: {
-    target: Machine.targets(States).root.counter,
+    target: "counter",
     decoded: true,
     data: new Counter({ count: 0 })
   },
@@ -28,12 +27,12 @@ const machine = Machine.make({
     counter: {
       on: {
         Increment: {
-          target: targets1.root.counter,
+          target: "counter",
           decoded: true,
           data: ({ state }) => (new Counter({ count: state.count + 1 }))
         },
-        Reset: { target: targets1.root.counter, decoded: true, data: () => (new Counter({ count: 0 })) },
-        Corrupt: { target: targets1.root.counter, decoded: true, data: () => (new Counter({ count: -1 })) }
+        Reset: { target: "counter", decoded: true, data: () => (new Counter({ count: 0 })) },
+        Corrupt: { target: "counter", decoded: true, data: () => (new Counter({ count: -1 })) }
       }
     }
   }
@@ -46,7 +45,7 @@ const branchMachine = Machine.make({
   events: Machine.eventsFromSchemas(Select)
 }).handle({
   initial: {
-    target: Machine.targets(States).root.counter,
+    target: "counter",
     decoded: true,
     data: new Counter({ count: 0 })
   },
@@ -369,7 +368,7 @@ describe("MachineTest bounded exploration", () => {
         input: Seed
       }).handle({
         initial: {
-          target: Machine.targets(InputStates).root.counter,
+          target: "counter",
           decoded: true,
           data: ({ root: { input: input } }) => new Counter({ count: input.count })
         },

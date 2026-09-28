@@ -32,13 +32,12 @@ const makeFlatMachine = () => {
       Done: { schema: Done, type: "final", output: Schema.Number }
     }
   })
-  const targets1 = Machine.targets(states)
   return Machine.make({
     root: states,
     events: Machine.eventsFromSchemas(Noop, Increment, Reenter, Finish)
   }).handle({
     initial: {
-      target: Machine.targets(states).root.Count,
+      target: "Count",
       decoded: true,
       data: new Count({ value: 0 })
     },
@@ -47,12 +46,12 @@ const makeFlatMachine = () => {
         on: {
           Noop: { none: true },
           Increment: {
-            target: targets1.root.Count,
+            target: "Count",
             decoded: true,
             data: ({ state }) => (new Count({ value: state.value + 1 }))
           },
           Reenter: { none: true, reenter: true, resolve: () => undefined },
-          Finish: { target: targets1.root.Done, decoded: true, data: ({ state }) => (new Done({ value: state.value })) }
+          Finish: { target: "Done", decoded: true, data: ({ state }) => (new Done({ value: state.value })) }
         }
       },
       Done: { output: ({ state }) => state.value }
@@ -92,7 +91,7 @@ describe("machine planner and runtime strategies", () => {
       events: Machine.eventsFromSchemas(Select)
     }).handle({
       initial: {
-        target: Machine.targets(states).root.Count,
+        target: "Count",
         decoded: true,
         data: new Count({ value: 0 })
       },
@@ -129,14 +128,13 @@ describe("machine planner and runtime strategies", () => {
   })
   it.effect("fails closed to generic planning for declinable transitions", () => {
     const states = Machine.state({ states: { Count } })
-    const targets3 = Machine.targets(states)
     const machine = Machine.make({
-      branches: { transition1: { destination: { target: targets3.root.Count } } },
+      branches: { transition1: { destination: { target: "Count" } } },
       root: states,
       events: Machine.eventsFromSchemas(Select)
     }).handle({
       initial: {
-        target: Machine.targets(states).root.Count,
+        target: "Count",
         decoded: true,
         data: new Count({ value: 0 })
       },
@@ -216,20 +214,19 @@ describe("machine planner and runtime strategies", () => {
         Outside
       }
     })
-    const targets4 = Machine.targets(states)
     const machine = Machine.make({
       root: states,
       events: Machine.eventsFromSchemas(UpdateRegions, Compete, ExitRoot, ReenterUpdate)
     }).handle({
       initial: {
-        target: Machine.targets(states).root.Root,
+        target: "Root",
         decoded: true,
         data: new Root({ revision: 0 })
       },
       states: {
         Root: {
           initial: {
-            target: Machine.targets(states).root.Root.Work,
+            target: "Root.Work",
             decoded: true,
             data: new Work({})
           },
@@ -244,26 +241,26 @@ describe("machine planner and runtime strategies", () => {
                   initial: {
                     decoded: true,
                     data: new Leaf({}),
-                    target: Machine.targets(states).root.Root.Work.Left.Leaf
+                    target: "Root.Work.Left.Leaf"
                   },
                   states: {
                     Leaf: {
                       on: {
                         UpdateRegions: {
-                          update: targets4.root.Root.Work.Left,
+                          update: "Root.Work.Left",
                           decoded: true,
                           data: (
                             { ancestors: { "Root.Work.Left": current } }
                           ) => (new Left({ value: current.value + 1 }))
                         },
-                        Compete: { update: targets4.root.Root, decoded: true, data: () => (new Root({ revision: 1 })) },
+                        Compete: { update: "Root", decoded: true, data: () => (new Root({ revision: 1 })) },
                         ExitRoot: {
-                          update: targets4.root.Root,
+                          update: "Root",
                           decoded: true,
                           data: () => (new Root({ revision: 3 }))
                         },
                         ReenterUpdate: {
-                          update: targets4.root.Root.Work.Left,
+                          update: "Root.Work.Left",
                           reenter: true,
                           decoded: true,
                           data: (
@@ -276,7 +273,7 @@ describe("machine planner and runtime strategies", () => {
                 },
                 Right: {
                   initial: {
-                    target: Machine.targets(states).root.Root.Work.Right.Leaf,
+                    target: "Root.Work.Right.Leaf",
                     decoded: true,
                     data: new Leaf({})
                   },
@@ -284,14 +281,14 @@ describe("machine planner and runtime strategies", () => {
                     Leaf: {
                       on: {
                         UpdateRegions: {
-                          update: targets4.root.Root.Work.Right,
+                          update: "Root.Work.Right",
                           decoded: true,
                           data: (
                             { ancestors: { "Root.Work.Right": current } }
                           ) => (new Right({ value: current.value + 2 }))
                         },
-                        Compete: { update: targets4.root.Root, decoded: true, data: () => (new Root({ revision: 2 })) },
-                        ExitRoot: { target: targets4.root.Outside, decoded: true, data: () => (new Outside({})) }
+                        Compete: { update: "Root", decoded: true, data: () => (new Root({ revision: 2 })) },
+                        ExitRoot: { target: "Outside", decoded: true, data: () => (new Outside({})) }
                       }
                     }
                   }
@@ -352,21 +349,20 @@ describe("machine planner and runtime strategies", () => {
         }
       }
     })
-    const targets5 = Machine.targets(states)
     const machine = Machine.make({
-      branches: { transition1: { destination: { target: targets5.root.Ready.Saving, update: targets5.root.Ready } } },
+      branches: { transition1: { destination: { target: "Ready.Saving", update: "Ready" } } },
       root: states,
       events: Machine.eventsFromSchemas(Save)
     }).handle({
       initial: {
-        target: Machine.targets(states).root.Ready,
+        target: "Ready",
         decoded: true,
         data: new Ready({ revision: 0 })
       },
       states: {
         Ready: {
           initial: {
-            target: Machine.targets(states).root.Ready.Idle,
+            target: "Ready.Idle",
             decoded: true,
             data: new Idle({})
           },
@@ -435,13 +431,12 @@ describe("machine planner and runtime strategies", () => {
           }
         }
       })
-      const targets6 = Machine.targets(states)
       const machine = Machine.make({
         root: states,
         events: Machine.eventsFromSchemas(Advance)
       }).handle({
         initial: {
-          target: Machine.targets(states).root.Root,
+          target: "Root",
           decoded: true,
           data: new Root({})
         },
@@ -455,7 +450,7 @@ describe("machine planner and runtime strategies", () => {
               Left: {
                 on: {
                   Advance: {
-                    target: targets6.root.Root.Left,
+                    target: "Root.Left",
                     decoded: true,
                     data: ({ state }) => (new Left({ value: state.value + 1 }))
                   }
@@ -464,7 +459,7 @@ describe("machine planner and runtime strategies", () => {
               Right: {
                 on: {
                   Advance: {
-                    target: targets6.root.Root.Right,
+                    target: "Root.Right",
                     decoded: true,
                     data: ({ state }) => (new Right({ value: state.value + 10 }))
                   }
@@ -500,25 +495,24 @@ describe("machine planner and runtime strategies", () => {
           }
         }
       })
-      const targets7 = Machine.targets(states)
       const machine = Machine.make({
         root: states,
         events: Machine.eventsFromSchemas(Enter)
       }).handle({
         initial: {
-          target: Machine.targets(states).root.Outside,
+          target: "Outside",
           decoded: true,
           data: new Outside({})
         },
         states: {
           Outside: {
             on: {
-              Enter: { target: targets7.root.Opened, decoded: true, data: () => (new Opened({})) }
+              Enter: { target: "Opened", decoded: true, data: () => (new Opened({})) }
             }
           },
           Opened: {
             initial: {
-              target: Machine.targets(states).root.Opened.Idle,
+              target: "Opened.Idle",
               data: ({}) => ({ value: 1 })
             },
             states: {
@@ -591,19 +585,18 @@ describe("machine planner and runtime strategies", () => {
       class Ready extends Schema.TaggedClass<Ready>("StrategyFallbackReady")("Ready", {}) {
       }
       const states = Machine.state({ states: { Idle, Ready } })
-      const targets8 = Machine.targets(states)
       const machine = Machine.make({
         root: states,
         events: Machine.eventsFromSchemas()
       }).handle({
         initial: {
-          target: Machine.targets(states).root.Idle,
+          target: "Idle",
           decoded: true,
           data: new Idle({})
         },
         states: {
           Idle: {
-            always: { target: targets8.root.Ready, decoded: true, data: () => (new Ready({})) }
+            always: { target: "Ready", decoded: true, data: () => (new Ready({})) }
           },
           Ready: {}
         }
@@ -624,7 +617,7 @@ describe("machine planner and runtime strategies", () => {
         events: Machine.eventsFromSchemas()
       }).handle({
         initial: {
-          target: Machine.targets(states).root.Idle
+          target: "Idle"
         },
         states: {
           Idle: {}
@@ -665,7 +658,7 @@ describe("machine planner and runtime strategies", () => {
         input: Input
       }).handle({
         initial: {
-          target: Machine.targets(states).root.Complete,
+          target: "Complete",
           decoded: true,
           data: ({ root: { input: input } }) => new Complete({ value: input.value })
         },
@@ -721,7 +714,6 @@ describe("machine planner and runtime strategies", () => {
         }
       })
       const seen: Array<number> = []
-      const targets9 = Machine.targets(states)
       const definition = Machine.make({
         streams: { source1: Stream.suspend(() => Stream.fromIterable([1, 2, 3])) },
         root: states,
@@ -729,7 +721,7 @@ describe("machine planner and runtime strategies", () => {
       })
       const machine = definition.handle({
         initial: {
-          target: Machine.targets(states).root.Streaming
+          target: "Streaming"
         },
         states: {
           Streaming: {
@@ -743,7 +735,7 @@ describe("machine planner and runtime strategies", () => {
                 }
               },
               onDone: {
-                target: targets9.root.StreamDone,
+                target: "StreamDone",
                 decoded: true,
                 data: () => (new StreamDone({ values: [...seen] }))
               }
@@ -763,7 +755,6 @@ describe("machine planner and runtime strategies", () => {
     Effect.gen(function*() {
       const Event = Schema.TaggedUnion({ Set: { value: Schema.NonEmptyString } })
       const states = Machine.state({ states: { Count } })
-      const targets10 = Machine.targets(states)
       const definition = Machine.make({
         root: states,
         events: Machine.eventsFromSchemas(Event)
@@ -771,7 +762,7 @@ describe("machine planner and runtime strategies", () => {
       const events = definition.events
       const machine = definition.handle({
         initial: {
-          target: Machine.targets(states).root.Count,
+          target: "Count",
           decoded: true,
           data: new Count({ value: 0 })
         },
@@ -779,7 +770,7 @@ describe("machine planner and runtime strategies", () => {
           Count: {
             on: {
               Set: {
-                target: targets10.root.Count,
+                target: "Count",
                 decoded: true,
                 data: ({ event }) => (new Count({ value: event.value.length }))
               }
@@ -829,7 +820,7 @@ describe("machine planner and runtime strategies", () => {
         emittedEvents: Emissions
       }).handle({
         initial: {
-          target: Machine.targets(states).root.Idle,
+          target: "Idle",
           decoded: true,
           data: new Idle({})
         },
@@ -882,7 +873,7 @@ describe("machine planner and runtime strategies", () => {
         emittedEvents: Emissions
       }).handle({
         initial: {
-          target: Machine.targets(states).root.Idle,
+          target: "Idle",
           decoded: true,
           data: new Idle({})
         },
@@ -1006,21 +997,20 @@ describe("machine planner and runtime strategies", () => {
           Success: { schema: Success, type: "final", output: Schema.String }
         }
       })
-      const targets12 = Machine.targets(states)
       const machine = Machine.make({
         effects: { source1: Effect.suspend(() => Effect.succeed(new Loaded({ value: "complete" }))) },
         root: states,
         events: Machine.eventsFromSchemas(Load, Loaded)
       }).handle({
         initial: {
-          target: Machine.targets(states).root.Idle,
+          target: "Idle",
           decoded: true,
           data: new Idle({})
         },
         states: {
           Idle: {
             on: {
-              Load: { target: targets12.root.Loading, decoded: true, data: () => (new Loading({})) }
+              Load: { target: "Loading", decoded: true, data: () => (new Loading({})) }
             }
           },
           Loading: {
@@ -1028,7 +1018,7 @@ describe("machine planner and runtime strategies", () => {
               src: "source1",
               id: "load",
               onDone: {
-                target: targets12.root.Success,
+                target: "Success",
                 decoded: true,
                 data: ({ output }) => (new Success({ value: output.value }))
               }
@@ -1091,12 +1081,11 @@ describe("machine planner and runtime strategies", () => {
       for (const strategy of ["generic", "compiled"] as const) {
         let membershipAttempts = 0
         let navigationRuns = 0
-        const targets13 = Machine.targets(states)
         const machine = Machine.make({
           branches: {
             transition1: {
-              authenticated: { target: targets13.root.Flow.Checking },
-              anonymous: { target: targets13.root.Flow.Plans }
+              authenticated: { target: "Flow.Checking" },
+              anonymous: { target: "Flow.Plans" }
             }
           },
           effects: {
@@ -1117,14 +1106,14 @@ describe("machine planner and runtime strategies", () => {
           input: Schema.Struct({ authenticated: Schema.Boolean })
         }).handle({
           initial: {
-            target: Machine.targets(states).root.Flow,
+            target: "Flow",
             data: ({ root: { input: input } }) => input
           },
           root: ({ input }) => ({ input }),
           states: {
             Flow: {
               initial: {
-                target: Machine.targets(states).root.Flow.Routing
+                target: "Flow.Routing"
               },
               states: {
                 Routing: {
@@ -1138,13 +1127,13 @@ describe("machine planner and runtime strategies", () => {
                   invoke: {
                     src: "source1",
                     id: "membership",
-                    onDone: { target: targets13.root.Flow.MemberNavigating },
-                    onFailure: { target: targets13.root.Flow.Failed }
+                    onDone: { target: "Flow.MemberNavigating" },
+                    onFailure: { target: "Flow.Failed" }
                   }
                 },
                 Failed: {
                   on: {
-                    StrategyChoiceRetry: { target: targets13.root.Flow.Checking }
+                    StrategyChoiceRetry: { target: "Flow.Checking" }
                   }
                 },
                 Plans: {},
@@ -1189,14 +1178,13 @@ describe("machine planner and runtime strategies", () => {
           Failed: { schema: Failed, type: "final", output: Schema.String }
         }
       })
-      const targets14 = Machine.targets(states)
       const machine = Machine.make({
         effects: { source1: Effect.suspend(() => Effect.fail("unavailable")) },
         root: states,
         events: Machine.eventsFromSchemas()
       }).handle({
         initial: {
-          target: Machine.targets(states).root.Loading,
+          target: "Loading",
           decoded: true,
           data: new Loading({})
         },
@@ -1205,7 +1193,7 @@ describe("machine planner and runtime strategies", () => {
             invoke: {
               src: "source1",
               id: "load",
-              onFailure: { target: targets14.root.Failed, decoded: true, data: ({ error }) => (new Failed({ error })) }
+              onFailure: { target: "Failed", decoded: true, data: ({ error }) => (new Failed({ error })) }
             }
           },
           Failed: { output: ({ state }) => state.error }
@@ -1266,7 +1254,7 @@ describe("machine planner and runtime strategies", () => {
         parent: Machine.parent(ParentEvents)
       }).handle({
         initial: {
-          target: Machine.targets(childStates).root.ChildIdle,
+          target: "ChildIdle",
           decoded: true,
           data: new ChildIdle({})
         },
@@ -1289,14 +1277,13 @@ describe("machine planner and runtime strategies", () => {
           ParentDone: { schema: ParentDone, type: "final", output: Schema.String }
         }
       })
-      const targets16 = Machine.targets(parentStates)
       const parentMachine = Machine.make({
         children: { source1: Child },
         root: parentStates,
         events: ParentEvents
       }).handle({
         initial: {
-          target: Machine.targets(parentStates).root.ParentWaiting,
+          target: "ParentWaiting",
           decoded: true,
           data: new ParentWaiting({})
         },
@@ -1304,7 +1291,7 @@ describe("machine planner and runtime strategies", () => {
           ParentWaiting: {
             invoke: { src: "source1", onFailure: { none: true } },
             on: {
-              ChildReady: { target: targets16.root.ParentDone, decoded: true, data: () => (new ParentDone({})) }
+              ChildReady: { target: "ParentDone", decoded: true, data: () => (new ParentDone({})) }
             }
           },
           ParentDone: { output: () => "received" }
@@ -1333,7 +1320,6 @@ describe("machine planner and runtime strategies", () => {
         const firstStarted = yield* Deferred.make<void>()
         let generation = 0
         const states = Machine.state({ states: { Loading, Failed } })
-        const targets17 = Machine.targets(states)
         const definition = Machine.make({
           logic: {
             worker: (_input: undefined) => {
@@ -1353,7 +1339,7 @@ describe("machine planner and runtime strategies", () => {
           },
           branches: {
             transition1: {
-              stale: { target: targets17.root.Failed, title: "Worker is stale" },
+              stale: { target: "Failed", title: "Worker is stale" },
               unchanged: { none: true }
             }
           },
@@ -1362,7 +1348,7 @@ describe("machine planner and runtime strategies", () => {
         })
         const machine = definition.handle({
           initial: {
-            target: Machine.targets(states).root.Loading,
+            target: "Loading",
             decoded: true,
             data: new Loading({ epoch: 0 })
           },
@@ -1384,12 +1370,12 @@ describe("machine planner and runtime strategies", () => {
               },
               on: {
                 Reenter: {
-                  target: targets17.root.Loading,
+                  target: "Loading",
                   reenter: true,
                   decoded: true,
                   data: ({ state }) => (new Loading({ epoch: state.epoch + 1 }))
                 },
-                Stale: { target: targets17.root.Failed, decoded: true, data: () => (new Failed({})) }
+                Stale: { target: "Failed", decoded: true, data: () => (new Failed({})) }
               }
             },
             Failed: {}
@@ -1428,7 +1414,7 @@ describe("machine planner and runtime strategies", () => {
         events: Machine.eventsFromSchemas()
       }).handle({
         initial: {
-          target: Machine.targets(InitialRoot1).root.ChildIdle,
+          target: "ChildIdle",
           decoded: true,
           data: new ChildIdle({})
         },
@@ -1444,7 +1430,6 @@ describe("machine planner and runtime strategies", () => {
       class Operating extends Schema.TaggedClass<Operating>("StrategyDynamicOperating")("Operating", {}) {
       }
       const root18 = Machine.state({ states: { Commissioning, Operating } })
-      const targets18 = Machine.targets(root18)
       const machine = Machine.make({
         effects: {
           source1: ({ children }: Machine.Machine.InvokeContext<
@@ -1470,7 +1455,7 @@ describe("machine planner and runtime strategies", () => {
         events: Machine.eventsFromSchemas()
       }).handle({
         initial: {
-          target: Machine.targets(root18).root.Commissioning,
+          target: "Commissioning",
           decoded: true,
           data: new Commissioning({})
         },
@@ -1480,7 +1465,7 @@ describe("machine planner and runtime strategies", () => {
               src: "source1",
               id: "commission",
               input: (context) => context,
-              onDone: { target: targets18.root.Operating },
+              onDone: { target: "Operating" },
               onFailure: { none: true }
             }
           },

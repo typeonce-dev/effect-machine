@@ -128,19 +128,18 @@ const defaultWorkspaceSnapshot = () => ({
     }
   }
 })
-const targets1 = Machine.targets(TransitionStates)
 export const transitionSemanticsMachine = Machine.make({
   branches: {
     transition4: {
-      draft: { target: targets1.root.Workspace.Draft, title: "Preferred route is draft" },
-      review: { target: targets1.root.Workspace.Review, title: "Preferred route is review" }
+      draft: { target: "Workspace.Draft", title: "Preferred route is draft" },
+      review: { target: "Workspace.Review", title: "Preferred route is review" }
     },
     transition7: {
-      review: { target: targets1.root.Workspace.Review, title: "Enter the review flow" },
-      publish: { target: targets1.root.Workspace.Finished, title: "Publish without review" }
+      review: { target: "Workspace.Review", title: "Enter the review flow" },
+      publish: { target: "Workspace.Finished", title: "Publish without review" }
     },
-    transition14: { destination: { history: targets1.root.Workspace.recent } },
-    transition15: { destination: { history: targets1.root.Workspace.exact } }
+    transition14: { destination: { history: "Workspace.recent" } },
+    transition15: { destination: { history: "Workspace.exact" } }
   },
   id: "transition-semantics",
   root: TransitionStates,
@@ -164,14 +163,14 @@ export const transitionSemanticsMachine = Machine.make({
   )
 }).handle({
   initial: {
-    target: Machine.targets(TransitionStates).root.Paused,
+    target: "Paused",
     decoded: true,
     data: new Paused({ reason: "not started" })
   },
   states: {
     Workspace: {
       initial: {
-        target: Machine.targets(TransitionStates).root.Workspace.Routing
+        target: "Workspace.Routing"
       },
       history: {
         recent: { default: defaultWorkspaceSnapshot },
@@ -179,12 +178,12 @@ export const transitionSemanticsMachine = Machine.make({
       },
       on: {
         Pause: {
-          target: targets1.root.Paused,
+          target: "Paused",
           decoded: true,
           data: ({ event }) => (new Paused({ reason: event.reason }))
         },
         BumpWorkspace: {
-          update: targets1.root.Workspace,
+          update: "Workspace",
           decoded: true,
           data: ({ state: current }) => (new Workspace({
             revision: current.revision + 1,
@@ -193,7 +192,7 @@ export const transitionSemanticsMachine = Machine.make({
         }
       },
       onDone: {
-        target: targets1.root.Published,
+        target: "Published",
         decoded: true,
         data: () => (new Published({ result: "workspace published" }))
       },
@@ -210,11 +209,11 @@ export const transitionSemanticsMachine = Machine.make({
         Draft: {
           on: {
             Edit: {
-              target: targets1.root.Workspace.Draft,
+              target: "Workspace.Draft",
               decoded: true,
               data: ({ event, state }) => (new Draft({ text: event.text, autosaves: state.autosaves }))
             },
-            Save: { target: targets1.root.Workspace.AutoSaving, decoded: true, data: () => (new AutoSaving({})) },
+            Save: { target: "Workspace.AutoSaving", decoded: true, data: () => (new AutoSaving({})) },
             Submit: {
               branches: "transition7",
               resolve: ({ event, select }) =>
@@ -233,19 +232,19 @@ export const transitionSemanticsMachine = Machine.make({
         },
         AutoSaving: {
           always: {
-            target: targets1.root.Workspace.Draft,
+            target: "Workspace.Draft",
             decoded: true,
             data: () => (new Draft({ text: "Autosaved draft", autosaves: 1 }))
           }
         },
         Review: {
           initial: {
-            target: Machine.targets(TransitionStates).root.Workspace.Review.Checking,
+            target: "Workspace.Review.Checking",
             decoded: true,
             data: ({}) => new Checking({ checks: ["types", "tests"] })
           },
           onDone: {
-            target: targets1.root.Workspace.Finished,
+            target: "Workspace.Finished",
             decoded: true,
             data: () => (new WorkspaceFinished({ result: "approved review" }))
           },
@@ -253,12 +252,12 @@ export const transitionSemanticsMachine = Machine.make({
             Checking: {
               on: {
                 Approve: {
-                  target: targets1.root.Workspace.Review.Approved,
+                  target: "Workspace.Review.Approved",
                   decoded: true,
                   data: ({ event }) => (new Approved({ reviewer: event.reviewer }))
                 },
                 Reject: {
-                  target: targets1.root.Workspace.Review.ChangesRequested,
+                  target: "Workspace.Review.ChangesRequested",
                   decoded: true,
                   data: ({ event }) => (new ChangesRequested({ reason: event.reason }))
                 }
@@ -267,7 +266,7 @@ export const transitionSemanticsMachine = Machine.make({
             ChangesRequested: {
               on: {
                 Revise: {
-                  target: targets1.root.Workspace.Draft,
+                  target: "Workspace.Draft",
                   decoded: true,
                   data: () => (new Draft({ text: "Revised draft", autosaves: 0 }))
                 }
@@ -282,14 +281,14 @@ export const transitionSemanticsMachine = Machine.make({
     Paused: {
       on: {
         Create: {
-          target: targets1.root.Workspace,
+          target: "Workspace",
           decoded: true,
           data: ({ event }) => (new Workspace({ revision: 0, preferredRoute: event.route }))
         },
         ResumeShallow: { branches: "transition14", resolve: ({ select: { destination: target } }) => target() },
         ResumeDeep: { branches: "transition15", resolve: ({ select: { destination: target } }) => target() },
         Restart: {
-          target: targets1.root.Workspace,
+          target: "Workspace",
           decoded: true,
           data: () => (new Workspace({ revision: 0, preferredRoute: "draft" }))
         }

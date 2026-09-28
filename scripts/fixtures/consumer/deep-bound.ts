@@ -53,7 +53,7 @@ const childMachine = Machine.make({
   input: Schema.Struct({ value: Schema.String })
 }).handle({
   initial: {
-    target: Machine.targets(ChildStates).root.Done,
+    target: "Done",
     decoded: true,
     data: ({ root: { input: input } }) => ChildState.cases.Done.make({ value: input.value })
   },
@@ -91,13 +91,12 @@ const States = Machine.state({
   }
 })
 const Emissions = Machine.emittedEventsFromSchemas(Emitted.cases.Notice)
-const targets = Machine.targets(States)
 const definition = Machine.make({
   effects: { load: Effect.asVoid(ExternalService) },
   children: { child: Child },
   branches: {
-    ready: { ready: { target: targets.root.Ready } },
-    notice: { saved: { target: targets.root.Ready.Editor.Saving } }
+    ready: { ready: { target: "Ready" } },
+    notice: { saved: { target: "Ready.Editor.Saving" } }
   },
   root: States,
   events: Machine.eventsFromSchemas(Event.cases.Begin, Event.cases.Save, ChildParentEvents),
@@ -107,7 +106,7 @@ const definition = Machine.make({
 })
 const machine = definition.handle({
   initial: {
-    target: Machine.targets(States).root.Idle,
+    target: "Idle",
     decoded: true,
     data: State.cases.Idle.make({})
   },
@@ -134,19 +133,19 @@ const machine = definition.handle({
     },
     Ready: {
       initial: {
-        target: Machine.targets(States).root.Ready.Editor
+        target: "Ready.Editor"
       },
       states: {
         Editor: {
           initial: {
-            target: Machine.targets(States).root.Ready.Editor.Editing,
+            target: "Ready.Editor.Editing",
             data: { value: "ready" }
           },
           states: {
             Editing: {
               on: {
                 Save: {
-                  target: targets.root.Ready.Editor.Saving,
+                  target: "Ready.Editor.Saving",
                   decoded: true,
                   data: ({ event }) => State.cases.Saving.make({ value: event.value })
                 },
@@ -164,7 +163,7 @@ const machine = definition.handle({
                   }
                 },
                 ChildCompleted: {
-                  target: targets.root.Done,
+                  target: "Done",
                   decoded: true,
                   data: ({ event }) => State.cases.Done.make({ value: event.value })
                 }
@@ -253,58 +252,52 @@ const packagedDeepMachine = Machine.make({
   root: PackagedDeepStates,
   events: Machine.eventsFromSchemas()
 }).handle({
-  initial: { target: Machine.targets(PackagedDeepStates).root.n0 },
+  initial: { target: "n0" },
   states: {
     n0: {
-      initial: { target: Machine.targets(PackagedDeepStates).root.n0.n1 },
+      initial: { target: "n0.n1" },
       states: {
         n1: {
-          initial: { target: Machine.targets(PackagedDeepStates).root.n0.n1.n2 },
+          initial: { target: "n0.n1.n2" },
           states: {
             n2: {
-              initial: { target: Machine.targets(PackagedDeepStates).root.n0.n1.n2.n3 },
+              initial: { target: "n0.n1.n2.n3" },
               states: {
                 n3: {
-                  initial: { target: Machine.targets(PackagedDeepStates).root.n0.n1.n2.n3.n4 },
+                  initial: { target: "n0.n1.n2.n3.n4" },
                   states: {
                     n4: {
-                      initial: { target: Machine.targets(PackagedDeepStates).root.n0.n1.n2.n3.n4.n5 },
+                      initial: { target: "n0.n1.n2.n3.n4.n5" },
                       states: {
                         n5: {
-                          initial: { target: Machine.targets(PackagedDeepStates).root.n0.n1.n2.n3.n4.n5.n6 },
+                          initial: { target: "n0.n1.n2.n3.n4.n5.n6" },
                           states: {
                             n6: {
-                              initial: { target: Machine.targets(PackagedDeepStates).root.n0.n1.n2.n3.n4.n5.n6.n7 },
+                              initial: { target: "n0.n1.n2.n3.n4.n5.n6.n7" },
                               states: {
                                 n7: {
                                   initial: {
-                                    target: Machine.targets(PackagedDeepStates).root.n0.n1.n2.n3.n4.n5.n6.n7.n8
+                                    target: "n0.n1.n2.n3.n4.n5.n6.n7.n8"
                                   },
                                   states: {
                                     n8: {
                                       initial: {
-                                        target: Machine.targets(PackagedDeepStates).root.n0.n1.n2.n3.n4.n5.n6.n7.n8.n9
+                                        target: "n0.n1.n2.n3.n4.n5.n6.n7.n8.n9"
                                       },
                                       states: {
                                         n9: {
                                           initial: {
-                                            target:
-                                              Machine.targets(PackagedDeepStates).root.n0.n1.n2.n3.n4.n5.n6.n7.n8.n9.n10
+                                            target: "n0.n1.n2.n3.n4.n5.n6.n7.n8.n9.n10"
                                           },
                                           states: {
                                             n10: {
                                               initial: {
-                                                target:
-                                                  Machine.targets(PackagedDeepStates).root.n0.n1.n2.n3.n4.n5.n6.n7.n8.n9
-                                                    .n10.n11
+                                                target: "n0.n1.n2.n3.n4.n5.n6.n7.n8.n9.n10.n11"
                                               },
                                               states: {
                                                 n11: {
                                                   initial: {
-                                                    target:
-                                                      Machine.targets(PackagedDeepStates).root.n0.n1.n2.n3.n4.n5.n6.n7
-                                                        .n8.n9.n10.n11
-                                                        .n12
+                                                    target: "n0.n1.n2.n3.n4.n5.n6.n7.n8.n9.n10.n11.n12"
                                                   },
                                                   states: {
                                                     n12: {

@@ -29,7 +29,7 @@ describe("dynamic child machines", () => {
     parent: Machine.parent(ParentEvents)
   }).handle({
     initial: {
-      target: Machine.targets(root1).root.ChildIdle,
+      target: "ChildIdle",
       decoded: true,
       data: ({ root: { input: input } }) => new ChildIdle({ id: input.id })
     },
@@ -43,7 +43,7 @@ describe("dynamic child machines", () => {
     events: Machine.eventsFromSchemas()
   }).handle({
     initial: {
-      target: Machine.targets(InitialRoot1).root.ChildIdle,
+      target: "ChildIdle",
       decoded: true,
       data: new ChildIdle({ id: "void" })
     },
@@ -105,7 +105,7 @@ describe("dynamic child machines", () => {
       events: Machine.eventsFromSchemas(ParentNotice, OtherEvent)
     }).handle({
       initial: {
-        target: Machine.targets(root2).root.ParentIdle,
+        target: "ParentIdle",
         decoded: true,
         data: new ParentIdle({})
       },
@@ -155,7 +155,7 @@ describe("dynamic child machines", () => {
       events: Machine.eventsFromSchemas(OtherEvent)
     }).handle({
       initial: {
-        target: Machine.targets(root3).root.ParentIdle,
+        target: "ParentIdle",
         decoded: true,
         data: new ParentIdle({})
       },

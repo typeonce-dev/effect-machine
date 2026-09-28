@@ -470,15 +470,15 @@ describe("MachineTest finite models", () => {
         MachineTest.compileModel({
           roots: [{
             _tag: "Compound",
-            key: "root",
+            key: "main",
             value: 0,
             initial: "recent",
             states: [
               { _tag: "Atomic", key: "idle", value: 1 },
-              { _tag: "History", key: "recent", history: "deep", fallback: "root.idle" }
+              { _tag: "History", key: "recent", history: "deep", fallback: "main.idle" }
             ]
           }],
-          initial: "root",
+          initial: "main",
           events: ["Go"],
           transitions: []
         }),
@@ -503,15 +503,15 @@ describe("MachineTest finite models", () => {
         MachineTest.compileModel({
           roots: [{
             _tag: "Compound",
-            key: "root",
+            key: "main",
             value: 0,
             initial: "idle",
             states: [{ _tag: "Atomic", key: "idle", value: 1 }]
           }],
-          initial: "root",
+          initial: "main",
           events: ["Unused"],
           transitions: [{
-            source: "root",
+            source: "main",
             trigger: { type: "done" },
             reenter: false
           }]
@@ -523,15 +523,15 @@ describe("MachineTest finite models", () => {
   it("rejects forged history scenarios that cannot replay their promised witness", () => {
     const witnessModel = (
       historyType: "shallow" | "deep",
-      mutationSource: "root.work.phase.idle" | "root.work.other"
+      mutationSource: "main.work.phase.idle" | "main.work.other"
     ): MachineTest.FiniteModel => {
-      const history = "root.work.recent"
+      const history = "main.work.recent"
       const scenario: MachineTest.FiniteHistoryScenario = {
         history,
-        owner: "root.work",
+        owner: "main.work",
         historyType,
         mutation: { source: mutationSource, event: "Mutate", target: mutationSource, value: 100 },
-        leave: { source: "root.work.phase.idle", event: "Leave", target: "outside" },
+        leave: { source: "main.work.phase.idle", event: "Leave", target: "outside" },
         resume: { source: "outside", event: "Leave", target: history },
         events: ["Mutate", "Leave", "Leave"]
       }
@@ -539,7 +539,7 @@ describe("MachineTest finite models", () => {
         roots: [
           {
             _tag: "Compound",
-            key: "root",
+            key: "main",
             value: 0,
             initial: "work",
             states: [{
@@ -556,13 +556,13 @@ describe("MachineTest finite models", () => {
                   states: [{ _tag: "Atomic", key: "idle", value: 3 }]
                 },
                 { _tag: "Atomic", key: "other", value: 4 },
-                { _tag: "History", key: "recent", history: historyType, fallback: "root.work.phase" }
+                { _tag: "History", key: "recent", history: historyType, fallback: "main.work.phase" }
               ]
             }]
           },
           { _tag: "Atomic", key: "outside", value: 5 }
         ],
-        initial: "root",
+        initial: "main",
         events: ["Mutate", "Leave"],
         transitions: [
           {
@@ -573,7 +573,7 @@ describe("MachineTest finite models", () => {
             reenter: false
           },
           {
-            source: "root.work.phase.idle",
+            source: "main.work.phase.idle",
             trigger: { type: "event", event: "Leave" },
             target: "outside",
             reenter: false
@@ -584,14 +584,14 @@ describe("MachineTest finite models", () => {
       }
     }
 
-    const valid = witnessModel("deep", "root.work.phase.idle")
+    const valid = witnessModel("deep", "main.work.phase.idle")
     assert.doesNotThrow(() => MachineTest.compileModel(valid))
     assert.throws(
-      () => MachineTest.compileModel(witnessModel("shallow", "root.work.phase.idle")),
+      () => MachineTest.compileModel(witnessModel("shallow", "main.work.phase.idle")),
       /invalid history mutation/
     )
     assert.throws(
-      () => MachineTest.compileModel(witnessModel("deep", "root.work.other")),
+      () => MachineTest.compileModel(witnessModel("deep", "main.work.other")),
       /invalid history mutation/
     )
     assert.throws(

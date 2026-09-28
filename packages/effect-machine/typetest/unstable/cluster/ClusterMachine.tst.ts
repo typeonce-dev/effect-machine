@@ -77,14 +77,13 @@ describe("ClusterMachine", () => {
   const states = Machine.state({
     states: { Count }
   })
-  const targets1 = Machine.targets(states)
   const machine = Machine.make({
     id: "Counter",
     root: states,
     events: Machine.eventsFromSchemas(Increment, Reset)
   }).handle({
     initial: {
-      target: Machine.targets(states).root.Count,
+      target: "Count",
       decoded: true,
       data: new Count({ value: 0 })
     },
@@ -92,11 +91,11 @@ describe("ClusterMachine", () => {
       Count: {
         on: {
           Increment: {
-            target: targets1.root.Count,
+            target: "Count",
             decoded: true,
             data: ({ event, state }) => (new Count({ value: state.value + event.by }))
           },
-          Reset: { target: targets1.root.Count, decoded: true, data: () => (new Count({ value: 0 })) }
+          Reset: { target: "Count", decoded: true, data: () => (new Count({ value: 0 })) }
         }
       }
     }
@@ -112,7 +111,7 @@ describe("ClusterMachine", () => {
       internalEvents: Machine.internalEventsFromSchemas(Reset)
     }).handle({
       initial: {
-        target: Machine.targets(states).root.Count,
+        target: "Count",
         decoded: true,
         data: new Count({ value: 0 })
       },
@@ -139,7 +138,7 @@ describe("ClusterMachine", () => {
       input: Input
     }).handle({
       initial: {
-        target: Machine.targets(inputStates).root.Count,
+        target: "Count",
         decoded: true,
         data: ({ root: { input: input } }) => new Count({ value: input.value })
       },
@@ -167,7 +166,7 @@ describe("ClusterMachine", () => {
       events: Machine.eventsFromSchemas(ResourceEvent)
     }).handle({
       initial: {
-        target: Machine.targets(resourceStates).root.ResourceState,
+        target: "ResourceState",
         decoded: true,
         data: new ResourceState({ resource: { close() {} } })
       },
@@ -179,7 +178,7 @@ describe("ClusterMachine", () => {
       events: Machine.eventsFromSchemas(UnknownEvent)
     }).handle({
       initial: {
-        target: Machine.targets(states).root.Count,
+        target: "Count",
         decoded: true,
         data: new Count({ value: 0 })
       },
@@ -196,7 +195,7 @@ describe("ClusterMachine", () => {
       events: Machine.eventsFromSchemas(Reset)
     }).handle({
       initial: {
-        target: Machine.targets(anyOutputStates).root.Done,
+        target: "Done",
         decoded: true,
         data: new Done({ value: "done" })
       },
@@ -213,7 +212,7 @@ describe("ClusterMachine", () => {
       events: Machine.eventsFromSchemas(Reset)
     }).handle({
       initial: {
-        target: Machine.targets(neverOutputStates).root.Done,
+        target: "Done",
         decoded: true,
         data: new Done({ value: "done" })
       },
@@ -234,7 +233,7 @@ describe("ClusterMachine", () => {
       events: Machine.eventsFromSchemas(Reset)
     }).handle({
       initial: {
-        target: Machine.targets(scheduledStates).root.Scheduled,
+        target: "Scheduled",
         decoded: true,
         data: new Scheduled({ at: new Date("2026-08-19") })
       },
@@ -247,7 +246,7 @@ describe("ClusterMachine", () => {
       internalEvents: Machine.internalEventsFromSchemas(ResourceEvent)
     }).handle({
       initial: {
-        target: Machine.targets(states).root.Count,
+        target: "Count",
         decoded: true,
         data: new Count({ value: 0 })
       },
@@ -274,7 +273,7 @@ describe("ClusterMachine", () => {
     expect(ClusterMachine.make).type.not.toBeCallableWith("Incomplete", incomplete, { version: "1" })
     const complete = incomplete.handle({
       initial: {
-        target: Machine.targets(outputStates).root.Done,
+        target: "Done",
         decoded: true,
         data: new Done({ value: "done" })
       },
@@ -303,7 +302,7 @@ describe("ClusterMachine", () => {
       events: Machine.eventsFromSchemas(Reset)
     }).handle({
       initial: {
-        target: Machine.targets(contextualStates).root.ContextualCount,
+        target: "ContextualCount",
         decoded: true,
         data: new ContextualCount({ value: 0 })
       },

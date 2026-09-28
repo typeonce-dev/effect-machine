@@ -35,26 +35,25 @@ const States = Machine.state({
   }
 })
 const makeMachine = () => {
-  const targets1 = Machine.targets(States)
   return Machine.make({
     root: States,
     events: Machine.eventsFromSchemas(Open, OpenInvalid)
   }).handle({
     initial: {
-      target: Machine.targets(States).root.closed,
+      target: "closed",
       decoded: true,
       data: new Closed({})
     },
     states: {
       closed: {
         on: {
-          Open: { target: targets1.root.opened, data: () => ({ id: "team-1" }) },
-          OpenInvalid: { target: targets1.root.opened, data: () => ({ id: "" }) }
+          Open: { target: "opened", data: () => ({ id: "team-1" }) },
+          OpenInvalid: { target: "opened", data: () => ({ id: "" }) }
         }
       },
       opened: {
         initial: {
-          target: Machine.targets(States).root.opened.idle,
+          target: "opened.idle",
           data: ({}) => ({ count: 1 })
         },
         states: {
@@ -82,20 +81,19 @@ const ParallelStates = Machine.state({
   }
 })
 const makeParallelMachine = () => {
-  const targets2 = Machine.targets(ParallelStates)
   return Machine.make({
     root: ParallelStates,
     events: Machine.eventsFromSchemas(EnterDashboard)
   }).handle({
     initial: {
-      target: Machine.targets(ParallelStates).root.outside,
+      target: "outside",
       decoded: true,
       data: new Outside({})
     },
     states: {
       outside: {
         on: {
-          EnterDashboard: { target: targets2.root.dashboard, decoded: true, data: () => (new Dashboard({})) }
+          EnterDashboard: { target: "dashboard", decoded: true, data: () => (new Dashboard({})) }
         }
       },
       dashboard: {
@@ -103,7 +101,7 @@ const makeParallelMachine = () => {
         states: {
           filters: {
             initial: {
-              target: Machine.targets(ParallelStates).root.dashboard.filters.ready,
+              target: "dashboard.filters.ready",
               data: ({}) => ({ enabled: true })
             },
             states: {
@@ -129,29 +127,28 @@ const ChoiceStates = Machine.state({
   }
 })
 const makeChoiceMachine = () => {
-  const targets3 = Machine.targets(ChoiceStates)
   return Machine.make({
     root: ChoiceStates,
     events: Machine.eventsFromSchemas(EnterFlow)
   }).handle({
     initial: {
-      target: Machine.targets(ChoiceStates).root.outside,
+      target: "outside",
       decoded: true,
       data: new Outside({})
     },
     states: {
       outside: {
         on: {
-          EnterFlow: { target: targets3.root.flow, decoded: true, data: () => (new Flow({})) }
+          EnterFlow: { target: "flow", decoded: true, data: () => (new Flow({})) }
         }
       },
       flow: {
         initial: {
-          target: Machine.targets(ChoiceStates).root.flow.routing
+          target: "flow.routing"
         },
         states: {
           routing: {
-            choice: { target: targets3.root.flow.approved, decoded: true, data: () => (new Approved({})) }
+            choice: { target: "flow.approved", decoded: true, data: () => (new Approved({})) }
           },
           approved: {}
         }
@@ -168,25 +165,24 @@ const StructuralStates = Machine.state({
   }
 })
 const makeStructuralMachine = () => {
-  const targets4 = Machine.targets(StructuralStates)
   return Machine.make({
     root: StructuralStates,
     events: Machine.eventsFromSchemas(EnterFlow)
   }).handle({
     initial: {
-      target: Machine.targets(StructuralStates).root.outside,
+      target: "outside",
       decoded: true,
       data: new Outside({})
     },
     states: {
       outside: {
         on: {
-          EnterFlow: { target: targets4.root.group }
+          EnterFlow: { target: "group" }
         }
       },
       group: {
         initial: {
-          target: Machine.targets(StructuralStates).root.group.idle
+          target: "group.idle"
         },
         states: {
           idle: {}
@@ -197,7 +193,7 @@ const makeStructuralMachine = () => {
 }
 const NestedStates = Machine.state({
   states: {
-    root: {
+    main: {
       states: {
         closed: Closed,
         opened: {
@@ -209,31 +205,30 @@ const NestedStates = Machine.state({
   }
 })
 const makeNestedMachine = () => {
-  const targets5 = Machine.targets(NestedStates)
   return Machine.make({
     root: NestedStates,
     events: Machine.eventsFromSchemas(OpenLocal, OpenBranch)
   }).handle({
     initial: {
-      target: Machine.targets(NestedStates).root.root
+      target: "main"
     },
     states: {
-      root: {
+      main: {
         initial: {
-          target: Machine.targets(NestedStates).root.root.closed,
+          target: "main.closed",
           decoded: true,
           data: new Closed({})
         },
         states: {
           closed: {
             on: {
-              OpenLocal: { target: targets5.root.root.opened, data: () => ({ id: "local" }) },
-              OpenBranch: { target: targets5.root.root.opened, data: () => ({ id: "branch" }) }
+              OpenLocal: { target: "main.opened", data: () => ({ id: "local" }) },
+              OpenBranch: { target: "main.opened", data: () => ({ id: "branch" }) }
             }
           },
           opened: {
             initial: {
-              target: Machine.targets(NestedStates).root.root.opened.idle,
+              target: "main.opened.idle",
               data: ({}) => ({ count: 3 })
             },
             states: {
@@ -251,7 +246,7 @@ describe("declared initial entry", () => {
     Effect.gen(function*() {
       let resolves = 0
       const root = Machine.state({ states: { closed: Closed } })
-      const target = Machine.targets(root).root.closed
+      const target = "closed"
       const machine = Machine.make({ root, events: Machine.eventsFromSchemas() }).handle({
         initial: {
           target,
@@ -276,7 +271,7 @@ describe("declared initial entry", () => {
         events: Machine.eventsFromSchemas()
       }).handle({
         initial: {
-          target: Machine.targets(InitialRoot2).root.closed
+          target: "closed"
         },
         states: {
           closed: {}
@@ -372,12 +367,12 @@ describe("declared initial entry", () => {
       const branch = yield* Machine.plan(machine, initial.state, new OpenBranch({}))
       for (const [planned, id] of [[local, "local"], [branch, "branch"]] as const) {
         assert.deepStrictEqual(planned.next.state, {
-          path: "root" as const,
+          path: "main" as const,
           value: undefined,
           state: {
-            path: "root.opened" as const,
+            path: "main.opened" as const,
             value: new Opened({ id }),
-            state: { path: "root.opened.idle" as const, value: new Idle({ count: 3 }) }
+            state: { path: "main.opened.idle" as const, value: new Idle({ count: 3 }) }
           }
         })
       }

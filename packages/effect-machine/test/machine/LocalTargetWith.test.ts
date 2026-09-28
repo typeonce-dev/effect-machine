@@ -24,20 +24,19 @@ describe("local compound target selection", () => {
           }
         }
       })
-      const targets1 = Machine.targets(states)
       const machine = Machine.make({
-        branches: { transition1: { destination: { target: targets1.root.search } } },
+        branches: { transition1: { destination: { target: "search" } } },
         root: states,
         events: Machine.eventsFromSchemas(Events)
       }).handle({
         initial: {
-          target: Machine.targets(states).root.search,
+          target: "search",
           data: { query: "" }
         },
         states: {
           search: {
             initial: {
-              target: Machine.targets(states).root.search.Idle
+              target: "search.Idle"
             },
             on: {
               UpdateQuery: {
@@ -51,7 +50,7 @@ describe("local compound target selection", () => {
               Idle: {},
               Updated: {
                 on: {
-                  Reset: { target: targets1.root.search.Idle }
+                  Reset: { target: "search.Idle" }
                 }
               }
             }
@@ -121,21 +120,20 @@ describe("local compound target selection", () => {
           }
         }
       })
-      const targets2 = Machine.targets(states)
       const machine = Machine.make({
-        branches: { transition1: { destination: { target: targets2.root.search } } },
+        branches: { transition1: { destination: { target: "search" } } },
         effects: { source1: Effect.suspend(() => Effect.succeed("resolved")) },
         root: states,
         events: Machine.eventsFromSchemas()
       }).handle({
         initial: {
-          target: Machine.targets(states).root.search,
+          target: "search",
           data: { query: "pending" }
         },
         states: {
           search: {
             initial: {
-              target: Machine.targets(states).root.search.Searching
+              target: "search.Searching"
             },
             states: {
               Searching: {
@@ -193,24 +191,23 @@ describe("local compound target selection", () => {
         }
       }
     })
-    const targets3 = Machine.targets(states)
-    assert.notProperty(targets3.root.flow, "with")
+    assert.notProperty("flow", "with")
     Machine.make({
       root: states,
       events: Machine.eventsFromSchemas(Event)
     }).handle({
       initial: {
-        target: Machine.targets(states).root.flow
+        target: "flow"
       },
       states: {
         flow: {
           initial: {
-            target: Machine.targets(states).root.flow.Idle
+            target: "flow.Idle"
           },
           states: {
             Idle: {
               on: {
-                Advance: { target: targets3.root.flow.Updated }
+                Advance: { target: "flow.Updated" }
               }
             },
             Updated: {}

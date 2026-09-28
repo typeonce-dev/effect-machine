@@ -128,16 +128,16 @@ describe("Interactive text visualization", () => {
 
     assert.deepStrictEqual(
       begin?.branches.map((branch) => branchTargetApi(branch)),
-      ["{ target: targets.root.Working }", "{ target: targets.root.Working }"]
+      ["{ target: \"Working\" }", "{ target: \"Working\" }"]
     )
 
     assert.strictEqual(
       start === undefined ? undefined : branchTargetApi(start.branches[0]!),
-      "{ target: targets.root.application.workflow.running, update: targets.root.application.workflow }"
+      "{ target: \"application.workflow.running\", update: \"application.workflow\" }"
     )
     assert.strictEqual(
       refresh === undefined ? undefined : branchTargetApi(refresh.branches[0]!),
-      "{ update: targets.root.application.workflow }"
+      "{ update: \"application.workflow\" }"
     )
     assert.strictEqual(
       api("application.workflow.running.editing", {
@@ -145,7 +145,7 @@ describe("Interactive text visualization", () => {
         kind: "state",
         scope: "branch"
       }),
-      "{ target: targets.root.application.workflow.running }"
+      "{ target: \"application.workflow.running\" }"
     )
     assert.strictEqual(
       api("application.workflow.idle", {
@@ -153,7 +153,7 @@ describe("Interactive text visualization", () => {
         kind: "initial",
         scope: "branch"
       }),
-      "{ initial: targets.root.application.workflow.running }"
+      "{ initial: \"application.workflow.running\" }"
     )
     assert.strictEqual(
       api("application.workflow.idle", {
@@ -161,7 +161,7 @@ describe("Interactive text visualization", () => {
         kind: "update",
         scope: "branch"
       }),
-      "{ update: targets.root.application.workflow }"
+      "{ update: \"application.workflow\" }"
     )
     assert.strictEqual(
       api("application.workflow.idle", {
@@ -169,7 +169,15 @@ describe("Interactive text visualization", () => {
         kind: "history",
         scope: "full"
       }),
-      "{ history: targets.root.application.workflow.recent }"
+      "{ history: \"application.workflow.recent\" }"
+    )
+    assert.strictEqual(
+      api("application.workflow.idle", { path: "", kind: "state", scope: "branch" }),
+      "{ initialize: … }"
+    )
+    assert.strictEqual(
+      api("application.workflow.idle", { path: "", kind: "update", scope: "branch" }),
+      "{ update: \"root\" }"
     )
     assert.strictEqual(
       api("application.workflow.idle", {

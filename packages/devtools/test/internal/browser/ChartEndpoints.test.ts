@@ -21,7 +21,6 @@ const copyButtonModel = (): ChartModel => {
       Failed: { fields: { message: Schema.String } }
     }
   })
-  const targets = Machine.targets(root)
   const machine = Machine.make({
     id: "CopyButton",
     root,
@@ -29,36 +28,36 @@ const copyButtonModel = (): ChartModel => {
     effects: { copy: (text: string) => text.length > 0 ? Effect.void : Effect.fail({ message: "failure" }) },
     timers: { clicked: "120 millis", confirmation: "2 seconds", errorFeedback: "1 second" }
   }).handle({
-    initial: { target: targets.root.Idle },
+    initial: { target: "Idle" },
     states: {
       Idle: {
         on: {
           Copy: {
-            target: targets.root.Working,
+            target: "Working",
             guard: ({ event }) => event.text.length > 0,
             data: ({ event }) => ({ text: event.text })
           }
         }
       },
       Working: {
-        initial: { target: targets.root.Working.Clicked },
+        initial: { target: "Working.Clicked" },
         invoke: {
           src: "copy",
           input: ({ state }) => state.text,
-          onDone: { target: targets.root.Copied },
-          onFailure: { target: targets.root.Failed, data: ({ error }) => ({ message: error.message }) }
+          onDone: { target: "Copied" },
+          onFailure: { target: "Failed", data: ({ error }) => ({ message: error.message }) }
         },
         states: {
-          Clicked: { invoke: { src: "clicked", onDone: { target: targets.root.Working.Copying } } },
+          Clicked: { invoke: { src: "clicked", onDone: { target: "Working.Copying" } } },
           Copying: {}
         }
       },
-      Copied: { invoke: { src: "confirmation", onDone: { target: targets.root.Idle } } },
+      Copied: { invoke: { src: "confirmation", onDone: { target: "Idle" } } },
       Failed: {
-        invoke: { src: "errorFeedback", onDone: { target: targets.root.Idle } },
+        invoke: { src: "errorFeedback", onDone: { target: "Idle" } },
         on: {
           Copy: {
-            target: targets.root.Working,
+            target: "Working",
             guard: ({ event }) => event.text.length > 0,
             data: ({ event }) => ({ text: event.text })
           }

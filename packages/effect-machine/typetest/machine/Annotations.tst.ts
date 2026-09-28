@@ -38,14 +38,14 @@ const machine = Machine.make({
   events: Machine.eventsFromSchemas()
 }).handle({
   initial: {
-    target: Machine.targets(States).root.Workflow,
+    target: "Workflow",
     decoded: true,
     data: new Workflow({})
   },
   states: {
     Workflow: {
       initial: {
-        target: Machine.targets(States).root.Workflow.Idle,
+        target: "Workflow.Idle",
         decoded: true,
         data: new Idle({})
       },

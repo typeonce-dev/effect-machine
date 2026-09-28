@@ -109,12 +109,11 @@ const States = Machine.state({
     Finished: { schema: Finished, type: "final", output: Schema.String }
   }
 })
-const targets1 = Machine.targets(States)
 export const plannerMachine = Machine.make({
   branches: {
     transition1: {
-      urgent: { target: targets1.root.Working, title: "Finish immediately" },
-      normal: { target: targets1.root.Working, title: "Wait in working" }
+      urgent: { target: "Working", title: "Finish immediately" },
+      normal: { target: "Working", title: "Wait in working" }
     }
   },
   effects: { source1: Effect.suspend(() => Effect.never) },
@@ -155,7 +154,7 @@ export const plannerMachine = Machine.make({
   })
 }).handle({
   initial: {
-    target: Machine.targets(States).root.Idle,
+    target: "Idle",
     decoded: true,
     data: ({ root: { input: input } }) => new Idle({ owner: input.owner })
   },
@@ -183,12 +182,12 @@ export const plannerMachine = Machine.make({
       invoke: { src: "source1", id: "monitor-job" },
       on: {
         AutoFinish: {
-          target: targets1.root.Finished,
+          target: "Finished",
           decoded: true,
           data: ({ state }) => (new Finished({ job: state.job }))
         },
         Cancel: {
-          target: targets1.root.Idle,
+          target: "Idle",
           decoded: true,
           data: ({ event, state }) => (new Idle({ owner: `${state.owner} · ${event.reason}` }))
         }

@@ -126,7 +126,7 @@ describe("Machine", () => {
     })
     const handlingPing = definition.handle({
       initial: {
-        target: Machine.targets(states).root.Stable,
+        target: "Stable",
         decoded: true,
         data: new Stable({})
       },
@@ -136,7 +136,7 @@ describe("Machine", () => {
     })
     const ignoringPing = definition.handle({
       initial: {
-        target: Machine.targets(states).root.Stable,
+        target: "Stable",
         decoded: true,
         data: new Stable({})
       },
@@ -176,7 +176,7 @@ describe("Machine", () => {
         events: Machine.eventsFromSchemas(Ping)
       }).handle({
         initial: {
-          target: Machine.targets(states).root.Stable,
+          target: "Stable",
           decoded: true,
           data: new Stable({})
         },
@@ -220,16 +220,15 @@ describe("Machine", () => {
       class Finish extends Schema.TaggedClass<Finish>("BareTargetFinish")("Finish", {}) {
       }
       const root3 = Machine.state({ states: { Idle, Done } })
-      const targets3 = Machine.targets(root3)
       const machine = Machine.make({
         root: root3,
         events: Machine.eventsFromSchemas(Finish)
       }).handle({
         initial: {
-          target: Machine.targets(root3).root.Idle
+          target: "Idle"
         },
         states: {
-          Idle: { on: { Finish: { target: targets3.root.Done } } },
+          Idle: { on: { Finish: { target: "Done" } } },
           Done: {}
         }
       })
@@ -251,7 +250,7 @@ describe("Machine", () => {
         events: Machine.eventsFromSchemas(Restart)
       }).handle({
         initial: {
-          target: Machine.targets(root4).root.Stable
+          target: "Stable"
         },
         states: {
           Stable: { on: { Restart: { none: true, reenter: true } } }
@@ -271,10 +270,9 @@ describe("Machine", () => {
       class Ping extends Schema.TaggedClass<Ping>("NamedBranchPing")("Ping", { route: Schema.Boolean }) {
       }
       const states = Machine.state({ states: { Stable } })
-      const targets5 = Machine.targets(states)
       const declarations = {
         unchanged: { none: true as const },
-        refresh: { title: "Refresh stable state", target: targets5.root.Stable }
+        refresh: { title: "Refresh stable state", target: "Stable" as const }
       }
       const definition = Machine.make({
         branches: { refresh: declarations },
@@ -283,7 +281,7 @@ describe("Machine", () => {
       })
       const machine = definition.handle({
         initial: {
-          target: Machine.targets(states).root.Stable,
+          target: "Stable",
           decoded: true,
           data: new Stable({})
         },
@@ -342,7 +340,7 @@ describe("Machine", () => {
         events: Machine.eventsFromSchemas(Ping),
         branches: { invalid: group } as any
       }).handle({
-        initial: { decoded: true, data: new Stable({}), target: Machine.targets(InvalidBranchRoot).root.Stable },
+        initial: { decoded: true, data: new Stable({}), target: "Stable" },
         states: {
           Stable: { on: { Ping: { branches: "invalid", resolve: () => undefined } as any } }
         }
@@ -371,7 +369,7 @@ describe("Machine", () => {
         events: Machine.eventsFromSchemas(Capture, Reuse)
       }).handle({
         initial: {
-          target: Machine.targets(root6).root.Stable,
+          target: "Stable",
           decoded: true,
           data: new Stable({})
         },
@@ -570,7 +568,7 @@ describe("Machine", () => {
         input: Input
       }).handle({
         initial: {
-          target: Machine.targets(states).root.Idle,
+          target: "Idle",
           decoded: true,
           data: ({ root: { input: input } }) => new Idle({ userId: input.userId })
         },
@@ -590,7 +588,7 @@ describe("Machine", () => {
       events: Machine.eventsFromSchemas()
     }).handle({
       initial: {
-        target: Machine.targets(states).root.Idle,
+        target: "Idle",
         decoded: true,
         data: new Idle({ userId: "user-1" })
       },
@@ -606,15 +604,14 @@ describe("Machine", () => {
       class Convert extends Schema.TaggedClass<Convert>("Convert")("Convert", {}) {
       }
       const states = Machine.state({ states: { Submit, RequestSucceeded } })
-      const targets7 = Machine.targets(states)
       const definition = Machine.make({
-        branches: { transition1: { destination: { target: targets7.root.RequestSucceeded } } },
+        branches: { transition1: { destination: { target: "RequestSucceeded" } } },
         root: states,
         events: Machine.eventsFromSchemas(Convert)
       })
       const machine = definition.handle({
         initial: {
-          target: Machine.targets(states).root.Submit,
+          target: "Submit",
           decoded: true,
           data: new Submit({ value: "loaded" })
         },
@@ -648,7 +645,6 @@ describe("Machine", () => {
       },
       states: { Idle, Loading }
     })
-    const targets8 = Machine.targets(states)
     const machine = Machine.make({
       id: "UserMachine",
       root: states,
@@ -656,7 +652,7 @@ describe("Machine", () => {
       input: Input
     }).handle({
       initial: {
-        target: Machine.targets(states).root.Idle,
+        target: "Idle",
         decoded: true,
         data: ({ root: { input: input } }) => new Idle({ userId: input.userId })
       },
@@ -665,7 +661,7 @@ describe("Machine", () => {
         Idle: {
           on: {
             Submit: {
-              target: targets8.root.Loading,
+              target: "Loading",
               decoded: true,
               data: () => (new Loading({ requestId: "request-1" }))
             }
@@ -689,7 +685,7 @@ describe("Machine", () => {
         events: Machine.eventsFromSchemas(Submit)
       }).handle({
         initial: {
-          target: Machine.targets(defined).root.idle,
+          target: "idle",
           decoded: true,
           data: new Idle({ userId: "user-1" })
         },
@@ -813,14 +809,14 @@ describe("Machine", () => {
         events: Machine.eventsFromSchemas(Authorize)
       }).handle({
         initial: {
-          target: Machine.targets(states).root.payment,
+          target: "payment",
           decoded: true,
           data: payment
         },
         states: {
           payment: {
             initial: {
-              target: Machine.targets(states).root.payment.entering,
+              target: "payment.entering",
               decoded: true,
               data: entering
             },
@@ -873,7 +869,7 @@ describe("Machine", () => {
         events: Machine.eventsFromSchemas(ReserveInventory)
       }).handle({
         initial: {
-          target: Machine.targets(states).root.fulfillment,
+          target: "fulfillment",
           decoded: true,
           data: fulfillment
         },
@@ -883,7 +879,7 @@ describe("Machine", () => {
             states: {
               inventory: {
                 initial: {
-                  target: Machine.targets(states).root.fulfillment.inventory.checking,
+                  target: "fulfillment.inventory.checking",
                   decoded: true,
                   data: checking
                 },
@@ -894,7 +890,7 @@ describe("Machine", () => {
               },
               shipping: {
                 initial: {
-                  target: Machine.targets(states).root.fulfillment.shipping.quoting,
+                  target: "fulfillment.shipping.quoting",
                   decoded: true,
                   data: quoting
                 },
@@ -951,7 +947,6 @@ describe("Machine", () => {
         const states = Machine.state({ states: { Active: State } })
         const events = Machine.eventsFromSchemas(PublicEvent, Defaulted, FiniteEvent)
         const internalEvents = Machine.internalEventsFromSchemas(InternalEvent)
-        const targets9 = Machine.targets(states)
         const definition = Machine.make({
           root: states,
           events,
@@ -959,13 +954,13 @@ describe("Machine", () => {
         })
         const machine = definition.handle({
           initial: {
-            target: Machine.targets(states).root.Active,
+            target: "Active",
             data: { value: "initial" }
           },
           states: {
             Active: {
               on: {
-                SetValue: { target: targets9.root.Active, data: ({ event }) => ({ value: event.value }) },
+                SetValue: { target: "Active", data: ({ event }) => ({ value: event.value }) },
                 Reset: {
                   none: true,
                   resolve: (_, enqueue) => {
@@ -974,13 +969,13 @@ describe("Machine", () => {
                   }
                 },
                 Defaulted: {
-                  target: targets9.root.Active,
+                  target: "Active",
                   data: ({ event }) => ({ value: event.label ?? "default-label" })
                 },
-                Loaded: { target: targets9.root.Active, data: ({ event }) => ({ value: event.value }) },
-                TimedOut: { target: targets9.root.Active, data: () => ({ value: "timed-out" }) },
-                Alpha: { target: targets9.root.Active, data: ({ event }) => ({ value: event.value }) },
-                Beta: { target: targets9.root.Active, data: ({ event }) => ({ value: event.value }) }
+                Loaded: { target: "Active", data: ({ event }) => ({ value: event.value }) },
+                TimedOut: { target: "Active", data: () => ({ value: "timed-out" }) },
+                Alpha: { target: "Active", data: ({ event }) => ({ value: event.value }) },
+                Beta: { target: "Active", data: ({ event }) => ({ value: event.value }) }
               }
             }
           }
@@ -1035,7 +1030,7 @@ describe("Machine", () => {
         const events = definition.events
         const machine = definition.handle({
           initial: {
-            target: Machine.targets(states).root.Idle
+            target: "Idle"
           },
           states: {
             Idle: {
@@ -1073,7 +1068,6 @@ describe("Machine", () => {
         const release = yield* Deferred.make<void>()
         const InternalEvent = Schema.TaggedUnion({ Loaded: {}, TimedOut: {} })
         const states = Machine.state({ states: { Loading: {}, Waiting: {}, Done: {} } })
-        const targets11 = Machine.targets(states)
         const definition = Machine.make({
           effects: { source1: Effect.suspend(() => Deferred.await(release)) },
           timers: { source2: "1 second" },
@@ -1083,14 +1077,14 @@ describe("Machine", () => {
         })
         const machine = definition.handle({
           initial: {
-            target: Machine.targets(states).root.Loading
+            target: "Loading"
           },
           states: {
             Loading: {
-              invoke: { src: "source1", id: "load", onDone: { target: targets11.root.Waiting } }
+              invoke: { src: "source1", id: "load", onDone: { target: "Waiting" } }
             },
             Waiting: {
-              invoke: { src: "source2", id: "timeout", onDone: { target: targets11.root.Done } }
+              invoke: { src: "source2", id: "timeout", onDone: { target: "Done" } }
             },
             Done: {}
           }
@@ -1116,7 +1110,7 @@ describe("Machine", () => {
           events: Machine.eventsFromSchemas(FirstEvent)
         }).handle({
           initial: {
-            target: Machine.targets(states).root.Idle
+            target: "Idle"
           },
           states: {
             Idle: {}
@@ -1127,7 +1121,7 @@ describe("Machine", () => {
           events: Machine.eventsFromSchemas(SecondEvent)
         }).handle({
           initial: {
-            target: Machine.targets(states).root.Idle
+            target: "Idle"
           },
           states: {
             Idle: {
@@ -1156,7 +1150,7 @@ describe("Machine", () => {
           events: Machine.eventsFromSchemas()
         }).handle({
           initial: {
-            target: Machine.targets(states).root.idle,
+            target: "idle",
             data: { id: "idle-1" }
           },
           states: {
@@ -1185,18 +1179,17 @@ describe("Machine", () => {
             }
           }
         })
-        const targets13 = Machine.targets(states)
         const machine = Machine.make({
           root: states,
           events: Machine.eventsFromSchemas(Event)
         }).handle({
           initial: {
-            target: Machine.targets(states).root.Idle
+            target: "Idle"
           },
           states: {
             Idle: {
               on: {
-                Submit: { target: targets13.root.Done, data: ({ event }) => ({ requestId: event.requestId }) }
+                Submit: { target: "Done", data: ({ event }) => ({ requestId: event.requestId }) }
               }
             },
             Done: {}
@@ -1221,7 +1214,7 @@ describe("Machine", () => {
           events: Machine.eventsFromSchemas()
         }).handle({
           initial: {
-            target: Machine.targets(states).root.DefaultOnly
+            target: "DefaultOnly"
           },
           states: {
             DefaultOnly: {}
@@ -1269,11 +1262,10 @@ describe("Machine", () => {
             }
           }
         })
-        const targets14 = Machine.targets(states)
         const machine = Machine.make({
           branches: {
-            transition3: { destination: { target: targets14.root.Flow.Nested } },
-            transition4: { destination: { target: targets14.root.Flow } }
+            transition3: { destination: { target: "Flow.Nested" } },
+            transition4: { destination: { target: "Flow" } }
           },
           id: "from-empty-targets",
           root: states,
@@ -1286,18 +1278,18 @@ describe("Machine", () => {
           )
         }).handle({
           initial: {
-            target: Machine.targets(states).root.Flow
+            target: "Flow"
           },
           states: {
             Flow: {
               initial: {
-                target: Machine.targets(states).root.Flow.Idle
+                target: "Flow.Idle"
               },
               states: {
                 Idle: {
                   on: {
-                    Local: { target: targets14.root.Flow.Running },
-                    LocalWith: { target: targets14.root.Flow.Running },
+                    Local: { target: "Flow.Running" },
+                    LocalWith: { target: "Flow.Running" },
                     Branch: {
                       branches: "transition3",
                       resolve: ({ select: { destination: target } }) => target({ states: { NestedIdle: {} } })
@@ -1307,13 +1299,13 @@ describe("Machine", () => {
                       resolve: ({ select: { destination: target } }) =>
                         target({ states: { Nested: { states: { NestedIdle: {} } } } })
                     },
-                    Finish: { target: targets14.root.Flow.Done }
+                    Finish: { target: "Flow.Done" }
                   }
                 },
                 Running: {},
                 Nested: {
                   initial: {
-                    target: Machine.targets(states).root.Flow.Nested.NestedIdle
+                    target: "Flow.Nested.NestedIdle"
                   },
                   states: {
                     NestedIdle: {}
@@ -1377,14 +1369,14 @@ describe("Machine", () => {
           events: Machine.eventsFromSchemas()
         }).handle({
           initial: {
-            target: Machine.targets(states).root.Parallel
+            target: "Parallel"
           },
           states: {
             Parallel: {
               states: {
                 left: {
                   initial: {
-                    target: Machine.targets(states).root.Parallel.left.LeftIdle
+                    target: "Parallel.left.LeftIdle"
                   },
                   states: {
                     LeftIdle: {}
@@ -1392,7 +1384,7 @@ describe("Machine", () => {
                 },
                 right: {
                   initial: {
-                    target: Machine.targets(states).root.Parallel.right.RightIdle
+                    target: "Parallel.right.RightIdle"
                   },
                   states: {
                     RightIdle: {}
@@ -1420,7 +1412,7 @@ describe("Machine", () => {
           events: Machine.eventsFromSchemas()
         }).handle({
           initial: {
-            target: Machine.targets(states).root.Blocked
+            target: "Blocked"
           },
           states: {
             Blocked: {}
@@ -1439,7 +1431,7 @@ describe("Machine", () => {
           events: Machine.eventsFromSchemas()
         }).handle({
           initial: {
-            target: Machine.targets(states).root.NonEmptyIdle,
+            target: "NonEmptyIdle",
             data: { userId: "" }
           },
           states: {
@@ -1453,20 +1445,19 @@ describe("Machine", () => {
     it.effect("fails invalid transition construction in the typed machine error channel", () =>
       Effect.gen(function*() {
         const states = Machine.state({ states: { NonEmptyIdle, NonEmptyLoading } })
-        const targets15 = Machine.targets(states)
         const machine = Machine.make({
           id: "from-transition-refinement",
           root: states,
           events: Machine.eventsFromSchemas(NonEmptySubmit)
         }).handle({
           initial: {
-            target: Machine.targets(states).root.NonEmptyIdle,
+            target: "NonEmptyIdle",
             data: { userId: "user-1" }
           },
           states: {
             NonEmptyIdle: {
               on: {
-                NonEmptySubmit: { target: targets15.root.NonEmptyLoading, data: () => ({ requestId: "" }) }
+                NonEmptySubmit: { target: "NonEmptyLoading", data: () => ({ requestId: "" }) }
               }
             },
             NonEmptyLoading: {}
@@ -1506,14 +1497,13 @@ describe("Machine", () => {
             }
           }
         })
-        const targets16 = Machine.targets(states)
         const machine = Machine.make({
-          branches: { transition1: { destination: { target: targets16.root.fulfillment } } },
+          branches: { transition1: { destination: { target: "fulfillment" } } },
           root: states,
           events: Machine.eventsFromSchemas(Submit)
         }).handle({
           initial: {
-            target: Machine.targets(states).root.idle,
+            target: "idle",
             data: { userId: "user-1" }
           },
           states: {
@@ -1543,7 +1533,7 @@ describe("Machine", () => {
               states: {
                 inventory: {
                   initial: {
-                    target: Machine.targets(states).root.fulfillment.inventory.checking,
+                    target: "fulfillment.inventory.checking",
                     data: { sku: "sku-1" }
                   },
                   states: {
@@ -1553,7 +1543,7 @@ describe("Machine", () => {
                 },
                 shipping: {
                   initial: {
-                    target: Machine.targets(states).root.fulfillment.shipping.quoting,
+                    target: "fulfillment.shipping.quoting",
                     data: { postalCode: "12345" }
                   },
                   states: {
@@ -1599,20 +1589,19 @@ describe("Machine", () => {
             }
           }
         })
-        const targets17 = Machine.targets(states)
         const machine = Machine.make({
-          branches: { transition1: { destination: { target: targets17.root.payment } } },
+          branches: { transition1: { destination: { target: "payment" } } },
           root: states,
           events: Machine.eventsFromSchemas(Submit)
         }).handle({
           initial: {
-            target: Machine.targets(states).root.payment,
+            target: "payment",
             data: { id: "payment-1" }
           },
           states: {
             payment: {
               initial: {
-                target: Machine.targets(states).root.payment.entering,
+                target: "payment.entering",
                 data: { amount: 1 }
               },
               states: {
@@ -1655,20 +1644,19 @@ describe("Machine", () => {
             }
           }
         })
-        const targets18 = Machine.targets(states)
         const machine = Machine.make({
-          branches: { transition1: { destination: { target: targets18.root.workflow } } },
+          branches: { transition1: { destination: { target: "workflow" } } },
           root: states,
           events: Machine.eventsFromSchemas(Submit)
         }).handle({
           initial: {
-            target: Machine.targets(states).root.workflow,
+            target: "workflow",
             data: { id: "workflow-1" }
           },
           states: {
             workflow: {
               initial: {
-                target: Machine.targets(states).root.workflow.idle,
+                target: "workflow.idle",
                 data: { userId: "user-1" }
               },
               states: {
@@ -1691,7 +1679,7 @@ describe("Machine", () => {
                 },
                 checkout: {
                   initial: {
-                    target: Machine.targets(states).root.workflow.checkout.quoted,
+                    target: "workflow.checkout.quoted",
                     data: { quoteId: "initial" }
                   },
                   states: {
@@ -1729,7 +1717,7 @@ describe("Machine", () => {
           input: NonEmptyInput
         }).handle({
           initial: {
-            target: Machine.targets(states).root.NonEmptyIdle,
+            target: "NonEmptyIdle",
             decoded: true,
             data: ({ root: { input: input } }) => new NonEmptyIdle({ userId: input.userId })
           },
@@ -1749,7 +1737,7 @@ describe("Machine", () => {
           events: Machine.eventsFromSchemas(NonEmptySubmit)
         }).handle({
           initial: {
-            target: Machine.targets(states).root.NonEmptyIdle,
+            target: "NonEmptyIdle",
             decoded: true,
             data: unsafeTagged({ _tag: "NonEmptyIdle", userId: "" })
           },
@@ -1763,20 +1751,19 @@ describe("Machine", () => {
     it.effect("decodes incoming events before handler selection", () =>
       Effect.gen(function*() {
         const states = Machine.state({ states: { NonEmptyIdle } })
-        const targets19 = Machine.targets(states)
         const machine = Machine.make({
           root: states,
           events: Machine.eventsFromSchemas(NonEmptySubmit)
         }).handle({
           initial: {
-            target: Machine.targets(states).root.NonEmptyIdle,
+            target: "NonEmptyIdle",
             decoded: true,
             data: new NonEmptyIdle({ userId: "user-1" })
           },
           states: {
             NonEmptyIdle: {
               on: {
-                NonEmptySubmit: { target: targets19.root.NonEmptyIdle, decoded: true, data: ({ state }) => state }
+                NonEmptySubmit: { target: "NonEmptyIdle", decoded: true, data: ({ state }) => state }
               }
             }
           }
@@ -1797,20 +1784,19 @@ describe("Machine", () => {
     it.effect("surfaces sent event decode failures through the machine lifecycle", () =>
       Effect.gen(function*() {
         const states = Machine.state({ states: { NonEmptyIdle } })
-        const targets20 = Machine.targets(states)
         const machine = Machine.make({
           root: states,
           events: Machine.eventsFromSchemas(NonEmptySubmit)
         }).handle({
           initial: {
-            target: Machine.targets(states).root.NonEmptyIdle,
+            target: "NonEmptyIdle",
             decoded: true,
             data: new NonEmptyIdle({ userId: "user-1" })
           },
           states: {
             NonEmptyIdle: {
               on: {
-                NonEmptySubmit: { target: targets20.root.NonEmptyIdle, decoded: true, data: ({ state }) => state }
+                NonEmptySubmit: { target: "NonEmptyIdle", decoded: true, data: ({ state }) => state }
               }
             }
           }
@@ -1836,13 +1822,12 @@ describe("Machine", () => {
     it.effect("decodes transition target values before accepting them", () =>
       Effect.gen(function*() {
         const states = Machine.state({ states: { NonEmptyIdle, NonEmptyLoading } })
-        const targets21 = Machine.targets(states)
         const machine = Machine.make({
           root: states,
           events: Machine.eventsFromSchemas(NonEmptySubmit)
         }).handle({
           initial: {
-            target: Machine.targets(states).root.NonEmptyIdle,
+            target: "NonEmptyIdle",
             decoded: true,
             data: new NonEmptyIdle({ userId: "user-1" })
           },
@@ -1850,7 +1835,7 @@ describe("Machine", () => {
             NonEmptyIdle: {
               on: {
                 NonEmptySubmit: {
-                  target: targets21.root.NonEmptyLoading,
+                  target: "NonEmptyLoading",
                   decoded: true,
                   data: () => (unsafeTagged({ _tag: "NonEmptyLoading", requestId: "" }))
                 }
@@ -1869,13 +1854,12 @@ describe("Machine", () => {
     it.effect("decodes same-state atomic snapshot targets in the compiled runtime", () =>
       Effect.gen(function*() {
         const states = Machine.state({ states: { NonEmptyIdle } })
-        const targets22 = Machine.targets(states)
         const machine = Machine.make({
           root: states,
           events: Machine.eventsFromSchemas(NonEmptySubmit)
         }).handle({
           initial: {
-            target: Machine.targets(states).root.NonEmptyIdle,
+            target: "NonEmptyIdle",
             decoded: true,
             data: new NonEmptyIdle({ userId: "user-1" })
           },
@@ -1883,7 +1867,7 @@ describe("Machine", () => {
             NonEmptyIdle: {
               on: {
                 NonEmptySubmit: {
-                  target: targets22.root.NonEmptyIdle,
+                  target: "NonEmptyIdle",
                   decoded: true,
                   data: () => (unsafeTagged({ _tag: "NonEmptyIdle", userId: "" }))
                 }
@@ -1910,13 +1894,12 @@ describe("Machine", () => {
             }
           }
         })
-        const targets23 = Machine.targets(states)
         const machine = Machine.make({
           root: states,
           events: Machine.eventsFromSchemas(NonEmptySubmit)
         }).handle({
           initial: {
-            target: Machine.targets(states).root.NonEmptyIdle,
+            target: "NonEmptyIdle",
             decoded: true,
             data: new NonEmptyIdle({ userId: "user-1" })
           },
@@ -1924,7 +1907,7 @@ describe("Machine", () => {
             NonEmptyIdle: {
               on: {
                 NonEmptySubmit: {
-                  target: targets23.root.done,
+                  target: "done",
                   decoded: true,
                   data: ({ event }) => (new NonEmptyDone({ requestId: event.value }))
                 }
@@ -1968,7 +1951,7 @@ describe("Machine", () => {
           events: Machine.eventsFromSchemas()
         }).handle({
           initial: {
-            target: Machine.targets(states).root.all,
+            target: "all",
             decoded: true,
             data: new ParallelRoot({ id: "all" })
           },
@@ -1997,7 +1980,7 @@ describe("Machine", () => {
           events: Machine.eventsFromSchemas(NonEmptySubmit)
         }).handle({
           initial: {
-            target: Machine.targets(states).root.NonEmptyIdle,
+            target: "NonEmptyIdle",
             decoded: true,
             data: new NonEmptyIdle({ userId: "user-1" })
           },
@@ -2026,7 +2009,7 @@ describe("Machine", () => {
           events: Machine.eventsFromSchemas()
         }).handle({
           initial: {
-            target: Machine.targets(states).root.count,
+            target: "count",
             decoded: true,
             data: new EncodedCount({ count: 1 })
           },
@@ -2079,7 +2062,7 @@ describe("Machine", () => {
           events: Machine.eventsFromSchemas()
         }).handle({
           initial: {
-            target: Machine.targets(states).root.fulfillment,
+            target: "fulfillment",
             decoded: true,
             data: new Fulfillment({ id: "fulfillment-1" })
           },
@@ -2092,7 +2075,7 @@ describe("Machine", () => {
               states: {
                 inventory: {
                   initial: {
-                    target: Machine.targets(states).root.fulfillment.inventory.checking,
+                    target: "fulfillment.inventory.checking",
                     decoded: true,
                     data: new CheckingInventory({ sku: "sku-1" })
                   },
@@ -2103,7 +2086,7 @@ describe("Machine", () => {
                 },
                 shipping: {
                   initial: {
-                    target: Machine.targets(states).root.fulfillment.shipping.quoting,
+                    target: "fulfillment.shipping.quoting",
                     decoded: true,
                     data: new QuotingShipping({ postalCode: "12345" })
                   },
@@ -2152,7 +2135,7 @@ describe("Machine", () => {
           events: Machine.eventsFromSchemas()
         }).handle({
           initial: {
-            target: Machine.targets(states).root.all,
+            target: "all",
             decoded: true,
             data: new ParallelRoot({ id: "all" })
           },
@@ -2199,7 +2182,7 @@ describe("Machine", () => {
           events: Machine.eventsFromSchemas()
         }).handle({
           initial: {
-            target: Machine.targets(states).root.all,
+            target: "all",
             decoded: true,
             data: new ParallelRoot({ id: "all" })
           },
@@ -2238,7 +2221,7 @@ describe("Machine", () => {
           events: Machine.eventsFromSchemas()
         }).handle({
           initial: {
-            target: Machine.targets(states).root.done,
+            target: "done",
             decoded: true,
             data: new ParallelLeftDone({ id: "done" })
           },
@@ -2266,7 +2249,7 @@ describe("Machine", () => {
           events: Machine.eventsFromSchemas()
         }).handle({
           initial: {
-            target: Machine.targets(states).root.NonEmptyIdle,
+            target: "NonEmptyIdle",
             decoded: true,
             data: new NonEmptyIdle({ userId: "user-1" })
           },
@@ -2292,7 +2275,7 @@ describe("Machine", () => {
           events: Machine.eventsFromSchemas()
         }).handle({
           initial: {
-            target: Machine.targets(states).root.NonEmptyIdle,
+            target: "NonEmptyIdle",
             decoded: true,
             data: new NonEmptyIdle({ userId: "user-1" })
           },
@@ -2319,7 +2302,7 @@ describe("Machine", () => {
           events: Machine.eventsFromSchemas()
         }).handle({
           initial: {
-            target: Machine.targets(states).root.NonEmptyIdle,
+            target: "NonEmptyIdle",
             decoded: true,
             data: new NonEmptyIdle({ userId: "user-1" })
           },
@@ -2355,14 +2338,14 @@ describe("Machine", () => {
           events: Machine.eventsFromSchemas()
         }).handle({
           initial: {
-            target: Machine.targets(states).root.payment,
+            target: "payment",
             decoded: true,
             data: new Payment({ id: "payment-1" })
           },
           states: {
             payment: {
               initial: {
-                target: Machine.targets(states).root.payment.entering,
+                target: "payment.entering",
                 decoded: true,
                 data: new EnteringPayment({ amount: 1 })
               },
@@ -2396,14 +2379,13 @@ describe("Machine", () => {
           loading: Loading
         }
       })
-      const targets24 = Machine.targets(root24)
       const machine = Machine.make({
         root: root24,
         events: Machine.eventsFromSchemas(Submit),
         input: Input
       }).handle({
         initial: {
-          target: Machine.targets(root24).root.idle,
+          target: "idle",
           decoded: true,
           data: ({ root: { input: input } }) => new Idle({ userId: input.userId })
         },
@@ -2412,7 +2394,7 @@ describe("Machine", () => {
           idle: {
             on: {
               Submit: {
-                target: targets24.root.loading,
+                target: "loading",
                 decoded: true,
                 data: ({ event, state }) => (new Loading({ requestId: `${state.userId}:${event.value}` }))
               }
@@ -2447,13 +2429,12 @@ describe("Machine", () => {
           b: Duplicate
         }
       })
-      const targets25 = Machine.targets(root25)
       const machine = Machine.make({
         root: root25,
         events: Machine.eventsFromSchemas(Submit, Reset)
       }).handle({
         initial: {
-          target: Machine.targets(root25).root.a,
+          target: "a",
           decoded: true,
           data: new Duplicate({ value: "a" })
         },
@@ -2461,7 +2442,7 @@ describe("Machine", () => {
           a: {
             on: {
               Submit: {
-                target: targets25.root.b,
+                target: "b",
                 decoded: true,
                 data: ({ event }) => (new Duplicate({ value: event.value }))
               }
@@ -2469,7 +2450,7 @@ describe("Machine", () => {
           },
           b: {
             on: {
-              Reset: { target: targets25.root.a, decoded: true, data: () => (new Duplicate({ value: "reset" })) }
+              Reset: { target: "a", decoded: true, data: () => (new Duplicate({ value: "reset" })) }
             }
           }
         }
@@ -2501,13 +2482,12 @@ describe("Machine", () => {
           b: Duplicate
         }
       })
-      const targets26 = Machine.targets(root26)
       const machine = Machine.make({
         root: root26,
         events: Machine.eventsFromSchemas(Submit)
       }).handle({
         initial: {
-          target: Machine.targets(root26).root.a,
+          target: "a",
           decoded: true,
           data: new Duplicate({ value: "a" })
         },
@@ -2515,7 +2495,7 @@ describe("Machine", () => {
           a: {
             on: {
               Submit: {
-                target: targets26.root.b,
+                target: "b",
                 decoded: true,
                 data: ({ event }) => (new Duplicate({ value: event.value }))
               }
@@ -2542,13 +2522,12 @@ describe("Machine", () => {
           }
         }
       })
-      const targets27 = Machine.targets(root27)
       const machine = Machine.make({
         root: root27,
         events: Machine.eventsFromSchemas(Submit)
       }).handle({
         initial: {
-          target: Machine.targets(root27).root.idle,
+          target: "idle",
           decoded: true,
           data: new Idle({ userId: "user-1" })
         },
@@ -2556,7 +2535,7 @@ describe("Machine", () => {
           idle: {
             on: {
               Submit: {
-                target: targets27.root.success,
+                target: "success",
                 decoded: true,
                 data: ({ event }) => (new Success({ requestId: event.value }))
               }
@@ -2591,27 +2570,26 @@ describe("Machine", () => {
           failed: Failed
         }
       })
-      const targets28 = Machine.targets(root28)
       const machine = Machine.make({
-        branches: { transition2: { destination: { target: targets28.root.payment.authorized } } },
+        branches: { transition2: { destination: { target: "payment.authorized" } } },
         root: root28,
         events: Machine.eventsFromSchemas(Authorize)
       }).handle({
         initial: {
-          target: Machine.targets(root28).root.payment,
+          target: "payment",
           decoded: true,
           data: payment
         },
         states: {
           payment: {
             initial: {
-              target: Machine.targets(root28).root.payment.entering,
+              target: "payment.entering",
               decoded: true,
               data: entering
             },
             on: {
               Authorize: {
-                target: targets28.root.failed,
+                target: "failed",
                 decoded: true,
                 data: () => (new Failed({ message: "parent" }))
               }
@@ -2670,15 +2648,14 @@ describe("Machine", () => {
       let declinableResolverCalls = 0
       let raisedResolverCalls = 0
       let lifecycleCalls = 0
-      const targets29 = Machine.targets(states)
       const machine = Machine.make({
-        branches: { transition1: { destination: { target: targets29.root.Done } } },
+        branches: { transition1: { destination: { target: "Done" } } },
         root: states,
         events: Machine.eventsFromSchemas(Check, Consume, Finish, Ignore),
         internalEvents: Machine.internalEventsFromSchemas(Raised)
       }).handle({
         initial: {
-          target: Machine.targets(states).root.Idle,
+          target: "Idle",
           decoded: true,
           data: new Idle({})
         },
@@ -2767,30 +2744,29 @@ describe("Machine", () => {
           failed: Failed
         }
       })
-      const targets30 = Machine.targets(root30)
       const machine = Machine.make({
         branches: {
-          transition2: { authorize: { target: targets30.root.payment.authorized }, consume: { none: true } }
+          transition2: { authorize: { target: "payment.authorized" }, consume: { none: true } }
         },
         root: root30,
         events: Machine.eventsFromSchemas(Authorize),
         emittedEvents: Machine.emittedEventsFromSchemas(Notice)
       }).handle({
         initial: {
-          target: Machine.targets(root30).root.payment,
+          target: "payment",
           decoded: true,
           data: payment
         },
         states: {
           payment: {
             initial: {
-              target: Machine.targets(root30).root.payment.entering,
+              target: "payment.entering",
               decoded: true,
               data: entering
             },
             on: {
               Authorize: {
-                target: targets30.root.failed,
+                target: "failed",
                 decoded: true,
                 data: () => (new Failed({ message: "parent" }))
               }
@@ -2862,24 +2838,23 @@ describe("Machine", () => {
           finished: Finished
         }
       })
-      const targets31 = Machine.targets(states)
       const machine = Machine.make({
         root: states,
         events: Machine.eventsFromSchemas()
       }).handle({
         initial: {
-          target: Machine.targets(states).root.workflow,
+          target: "workflow",
           decoded: true,
           data: new Workflow({})
         },
         states: {
           workflow: {
             initial: {
-              target: Machine.targets(states).root.workflow.waiting,
+              target: "workflow.waiting",
               decoded: true,
               data: new Waiting({ ready: false })
             },
-            always: { target: targets31.root.finished, decoded: true, data: () => (new Finished({})) },
+            always: { target: "finished", decoded: true, data: () => (new Finished({})) },
             states: {
               waiting: {
                 always: {
@@ -2909,7 +2884,7 @@ describe("Machine", () => {
         events: Machine.eventsFromSchemas(Ping)
       }).handle({
         initial: {
-          target: Machine.targets(states).root.Stable,
+          target: "Stable",
           decoded: true,
           data: new Stable({})
         },
@@ -2947,21 +2922,20 @@ describe("Machine", () => {
           finished: Finished
         }
       })
-      const targets33 = Machine.targets(states)
       const machine = Machine.make({
-        branches: { transition1: { destination: { target: targets33.root.finished } } },
+        branches: { transition1: { destination: { target: "finished" } } },
         root: states,
         events: Machine.eventsFromSchemas()
       }).handle({
         initial: {
-          target: Machine.targets(states).root.workflow,
+          target: "workflow",
           decoded: true,
           data: new Workflow({})
         },
         states: {
           workflow: {
             initial: {
-              target: Machine.targets(states).root.workflow.complete,
+              target: "workflow.complete",
               decoded: true,
               data: new Complete({})
             },
@@ -2996,7 +2970,7 @@ describe("Machine", () => {
       }
       const states = Machine.state({
         states: {
-          root: {
+          main: {
             schema: Root,
             type: "parallel",
             states: { left: Left, right: Right }
@@ -3005,19 +2979,18 @@ describe("Machine", () => {
         }
       })
       let parentCalls = 0
-      const targets34 = Machine.targets(states)
       const machine = Machine.make({
-        branches: { transition1: { destination: { target: targets34.root.finished } } },
+        branches: { transition1: { destination: { target: "finished" } } },
         root: states,
         events: Machine.eventsFromSchemas(Ping)
       }).handle({
         initial: {
-          target: Machine.targets(states).root.root,
+          target: "main",
           decoded: true,
           data: new Root({})
         },
         states: {
-          root: {
+          main: {
             initial: { left: { decoded: true, data: new Left({}) }, right: { decoded: true, data: new Right({}) } },
             on: {
               Ping: {
@@ -3054,12 +3027,12 @@ describe("Machine", () => {
       assert.isTrue(yield* Machine.can(machine, initial.state, new Ping({ handleRight: false })))
       assert.strictEqual(parentCalls, 0)
       const descendant = yield* Machine.plan(machine, initial.state, new Ping({ handleRight: true }))
-      assert.strictEqual(descendant.next.state.path, "root")
-      assert.deepStrictEqual(descendant.microsteps[0]?.transitions.map(({ source }) => source), ["root.right"])
+      assert.strictEqual(descendant.next.state.path, "main")
+      assert.deepStrictEqual(descendant.microsteps[0]?.transitions.map(({ source }) => source), ["main.right"])
       assert.strictEqual(parentCalls, 0)
       const ancestor = yield* Machine.plan(machine, initial.state, new Ping({ handleRight: false }))
       assert.strictEqual(ancestor.next.state.path, "finished")
-      assert.deepStrictEqual(ancestor.microsteps[0]?.transitions.map(({ source }) => source), ["root"])
+      assert.deepStrictEqual(ancestor.microsteps[0]?.transitions.map(({ source }) => source), ["main"])
       assert.strictEqual(parentCalls, 1)
     }))
   it.effect("handles parent config and nested states in the same object", () =>
@@ -3082,31 +3055,30 @@ describe("Machine", () => {
           failed: Failed
         }
       })
-      const targets35 = Machine.targets(root35)
       const machine = Machine.make({
         root: root35,
         events: Machine.eventsFromSchemas(Authorize, Reset)
       }).handle({
         initial: {
-          target: Machine.targets(root35).root.payment,
+          target: "payment",
           decoded: true,
           data: payment
         },
         states: {
           payment: {
             initial: {
-              target: Machine.targets(root35).root.payment.entering,
+              target: "payment.entering",
               decoded: true,
               data: entering
             },
             on: {
-              Reset: { target: targets35.root.failed, decoded: true, data: () => (new Failed({ message: "reset" })) }
+              Reset: { target: "failed", decoded: true, data: () => (new Failed({ message: "reset" })) }
             },
             states: {
               entering: {
                 on: {
                   Authorize: {
-                    target: targets35.root.payment.authorized,
+                    target: "payment.authorized",
                     decoded: true,
                     data: ({ event }) => (new AuthorizedPayment({ code: event.code }))
                   }
@@ -3151,13 +3123,12 @@ describe("Machine", () => {
           }
         }
       })
-      const targets36 = Machine.targets(root36)
       const machine = Machine.make({
         root: root36,
         events: Machine.eventsFromSchemas(Reset)
       }).handle({
         initial: {
-          target: Machine.targets(root36).root.payment,
+          target: "payment",
           decoded: true,
           data: payment
         },
@@ -3165,12 +3136,12 @@ describe("Machine", () => {
           idle: {},
           payment: {
             initial: {
-              target: Machine.targets(root36).root.payment.entering,
+              target: "payment.entering",
               decoded: true,
               data: entering
             },
             on: {
-              Reset: { target: targets36.root.idle, decoded: true, data: () => (new Idle({ userId: "user-1" })) }
+              Reset: { target: "idle", decoded: true, data: () => (new Idle({ userId: "user-1" })) }
             },
             states: {
               entering: {},
@@ -3217,14 +3188,13 @@ describe("Machine", () => {
           }
         }
       })
-      const targets37 = Machine.targets(states)
       const machine = Machine.make({
-        branches: { transition1: { destination: { target: targets37.root.fulfillment } } },
+        branches: { transition1: { destination: { target: "fulfillment" } } },
         root: states,
         events: Machine.eventsFromSchemas(Submit)
       }).handle({
         initial: {
-          target: Machine.targets(states).root.idle,
+          target: "idle",
           decoded: true,
           data: new Idle({ userId: "user-1" })
         },
@@ -3260,7 +3230,7 @@ describe("Machine", () => {
             states: {
               inventory: {
                 initial: {
-                  target: Machine.targets(states).root.fulfillment.inventory.checking,
+                  target: "fulfillment.inventory.checking",
                   data: { sku: "sku-1" }
                 },
                 states: {
@@ -3270,7 +3240,7 @@ describe("Machine", () => {
               },
               shipping: {
                 initial: {
-                  target: Machine.targets(states).root.fulfillment.shipping.quoting,
+                  target: "fulfillment.shipping.quoting",
                   data: { postalCode: "12345" }
                 },
                 states: {
@@ -3346,21 +3316,20 @@ describe("Machine", () => {
           }
         }
       })
-      const targets38 = Machine.targets(states)
       const machine = Machine.make({
-        branches: { transition1: { destination: { target: targets38.root.workflow.fulfillment } } },
+        branches: { transition1: { destination: { target: "workflow.fulfillment" } } },
         root: states,
         events: Machine.eventsFromSchemas(Submit)
       }).handle({
         initial: {
-          target: Machine.targets(states).root.workflow,
+          target: "workflow",
           decoded: true,
           data: workflow
         },
         states: {
           workflow: {
             initial: {
-              target: Machine.targets(states).root.workflow.idle,
+              target: "workflow.idle",
               decoded: true,
               data: new Idle({ userId: "user-1" })
             },
@@ -3396,7 +3365,7 @@ describe("Machine", () => {
                 states: {
                   inventory: {
                     initial: {
-                      target: Machine.targets(states).root.workflow.fulfillment.inventory.checking,
+                      target: "workflow.fulfillment.inventory.checking",
                       data: { sku: "sku-1" }
                     },
                     states: {
@@ -3406,7 +3375,7 @@ describe("Machine", () => {
                   },
                   shipping: {
                     initial: {
-                      target: Machine.targets(states).root.workflow.fulfillment.shipping.quoting,
+                      target: "workflow.fulfillment.shipping.quoting",
                       data: { postalCode: "12345" }
                     },
                     states: {
@@ -3505,14 +3474,13 @@ describe("Machine", () => {
           }
         }
       }
-      const targets39 = Machine.targets(states)
       const machine = Machine.make({
-        branches: { transition1: { destination: { target: targets39.root.app.flow.fulfillment } } },
+        branches: { transition1: { destination: { target: "app.flow.fulfillment" } } },
         root: states,
         events: Machine.eventsFromSchemas(Submit)
       }).handle({
         initial: {
-          target: Machine.targets(states).root.app,
+          target: "app",
           decoded: true,
           data: app
         },
@@ -3522,7 +3490,7 @@ describe("Machine", () => {
             states: {
               flow: {
                 initial: {
-                  target: Machine.targets(states).root.app.flow.idle,
+                  target: "app.flow.idle",
                   decoded: true,
                   data: new Idle({ userId: "user-1" })
                 },
@@ -3613,13 +3581,12 @@ describe("Machine", () => {
       const inventory = new Inventory({ warehouse: "warehouse-1" })
       const shipping = new Shipping({ address: "Main Street" })
       const quoting = new QuotingShipping({ postalCode: "12345" })
-      const targets40 = Machine.targets(states)
       const machine = Machine.make({
         root: states,
         events: Machine.eventsFromSchemas(ReserveInventory)
       }).handle({
         initial: {
-          target: Machine.targets(states).root.fulfillment,
+          target: "fulfillment",
           decoded: true,
           data: fulfillment
         },
@@ -3631,13 +3598,13 @@ describe("Machine", () => {
                 initial: {
                   decoded: true,
                   data: new CheckingInventory({ sku: "sku-1" }),
-                  target: Machine.targets(states).root.fulfillment.inventory.checking
+                  target: "fulfillment.inventory.checking"
                 },
                 states: {
                   checking: {
                     on: {
                       ReserveInventory: {
-                        target: targets40.root.fulfillment.inventory.reserved,
+                        target: "fulfillment.inventory.reserved",
                         decoded: true,
                         data: ({ event }) => (new InventoryReserved({ reservationId: event.reservationId }))
                       }
@@ -3648,7 +3615,7 @@ describe("Machine", () => {
               },
               shipping: {
                 initial: {
-                  target: Machine.targets(states).root.fulfillment.shipping.quoting,
+                  target: "fulfillment.shipping.quoting",
                   decoded: true,
                   data: quoting
                 },
@@ -3712,14 +3679,13 @@ describe("Machine", () => {
       const shipping = new Shipping({ address: "Main Street" })
       const quoting = new QuotingShipping({ postalCode: "12345" })
       const nextInventory = new Inventory({ warehouse: "warehouse-2" })
-      const targets41 = Machine.targets(states)
       const machine = Machine.make({
-        branches: { transition1: { destination: { target: targets41.root.fulfillment.inventory } } },
+        branches: { transition1: { destination: { target: "fulfillment.inventory" } } },
         root: states,
         events: Machine.eventsFromSchemas(ReserveInventory)
       }).handle({
         initial: {
-          target: Machine.targets(states).root.fulfillment,
+          target: "fulfillment",
           decoded: true,
           data: fulfillment
         },
@@ -3734,7 +3700,7 @@ describe("Machine", () => {
                 initial: {
                   decoded: true,
                   data: new CheckingInventory({ sku: "sku-1" }),
-                  target: Machine.targets(states).root.fulfillment.inventory.checking
+                  target: "fulfillment.inventory.checking"
                 },
                 states: {
                   checking: {
@@ -3760,7 +3726,7 @@ describe("Machine", () => {
               },
               shipping: {
                 initial: {
-                  target: Machine.targets(states).root.fulfillment.shipping.quoting,
+                  target: "fulfillment.shipping.quoting",
                   decoded: true,
                   data: quoting
                 },
@@ -3825,14 +3791,13 @@ describe("Machine", () => {
       const shipping = new Shipping({ address: "Main Street" })
       const quoting = new QuotingShipping({ postalCode: "12345" })
       const nextInventory = new Inventory({ warehouse: "warehouse-2" })
-      const targets42 = Machine.targets(states)
       const machine = Machine.make({
-        branches: { transition1: { destination: { target: targets42.root.fulfillment.inventory } } },
+        branches: { transition1: { destination: { target: "fulfillment.inventory" } } },
         root: states,
         events: Machine.eventsFromSchemas(ReserveInventory)
       }).handle({
         initial: {
-          target: Machine.targets(states).root.fulfillment,
+          target: "fulfillment",
           decoded: true,
           data: fulfillment
         },
@@ -3844,7 +3809,7 @@ describe("Machine", () => {
                 initial: {
                   decoded: true,
                   data: new CheckingInventory({ sku: "sku-1" }),
-                  target: Machine.targets(states).root.fulfillment.inventory.checking
+                  target: "fulfillment.inventory.checking"
                 },
                 states: {
                   checking: {
@@ -3870,7 +3835,7 @@ describe("Machine", () => {
               },
               shipping: {
                 initial: {
-                  target: Machine.targets(states).root.fulfillment.shipping.quoting,
+                  target: "fulfillment.shipping.quoting",
                   decoded: true,
                   data: quoting
                 },
@@ -3936,14 +3901,13 @@ describe("Machine", () => {
       const nextInventory = new Inventory({ warehouse: "warehouse-2" })
       const shipping = new Shipping({ address: "Main Street" })
       const quoting = new QuotingShipping({ postalCode: "12345" })
-      const targets43 = Machine.targets(states)
       const machine = Machine.make({
-        branches: { transition1: { destination: { target: targets43.root.fulfillment } } },
+        branches: { transition1: { destination: { target: "fulfillment" } } },
         root: states,
         events: Machine.eventsFromSchemas(ReserveInventory)
       }).handle({
         initial: {
-          target: Machine.targets(states).root.fulfillment,
+          target: "fulfillment",
           decoded: true,
           data: fulfillment
         },
@@ -3955,7 +3919,7 @@ describe("Machine", () => {
                 initial: {
                   decoded: true,
                   data: new CheckingInventory({ sku: "sku-1" }),
-                  target: Machine.targets(states).root.fulfillment.inventory.checking
+                  target: "fulfillment.inventory.checking"
                 },
                 states: {
                   checking: {
@@ -3987,7 +3951,7 @@ describe("Machine", () => {
               },
               shipping: {
                 initial: {
-                  target: Machine.targets(states).root.fulfillment.shipping.quoting,
+                  target: "fulfillment.shipping.quoting",
                   decoded: true,
                   data: quoting
                 },
@@ -4049,28 +4013,27 @@ describe("Machine", () => {
       const payment = new Payment({ id: "payment-1" })
       const inventory = new Inventory({ warehouse: "warehouse-1" })
       const shipping = new Shipping({ address: "Main Street" })
-      const targets44 = Machine.targets(states)
       const machine = Machine.make({
-        branches: { transition1: { destination: { target: targets44.root.payment.shipping } } },
+        branches: { transition1: { destination: { target: "payment.shipping" } } },
         root: states,
         events: Machine.eventsFromSchemas(ReserveInventory)
       }).handle({
         initial: {
-          target: Machine.targets(states).root.payment,
+          target: "payment",
           decoded: true,
           data: payment
         },
         states: {
           payment: {
             initial: {
-              target: Machine.targets(states).root.payment.inventory,
+              target: "payment.inventory",
               decoded: true,
               data: inventory
             },
             states: {
               inventory: {
                 initial: {
-                  target: Machine.targets(states).root.payment.inventory.checking,
+                  target: "payment.inventory.checking",
                   decoded: true,
                   data: new CheckingInventory({ sku: "sku-1" })
                 },
@@ -4095,7 +4058,7 @@ describe("Machine", () => {
               },
               shipping: {
                 initial: {
-                  target: Machine.targets(states).root.payment.shipping.quoting,
+                  target: "payment.shipping.quoting",
                   data: { postalCode: "12345" }
                 },
                 states: {
@@ -4136,26 +4099,25 @@ describe("Machine", () => {
           }
         }
       })
-      const targets45 = Machine.targets(root45)
       const machine = Machine.make({
         root: root45,
         events: Machine.eventsFromSchemas(Authorize, Reset)
       }).handle({
         initial: {
-          target: Machine.targets(root45).root.payment,
+          target: "payment",
           decoded: true,
           data: payment
         },
         states: {
           payment: {
             initial: {
-              target: Machine.targets(root45).root.payment.entering,
+              target: "payment.entering",
               decoded: true,
               data: new EnteringPayment({ amount: 100 })
             },
             on: {
               Reset: {
-                target: targets45.root.payment.entering,
+                target: "payment.entering",
                 decoded: true,
                 data: () => (new EnteringPayment({ amount: 0 }))
               }
@@ -4164,7 +4126,7 @@ describe("Machine", () => {
               entering: {
                 on: {
                   Authorize: {
-                    target: targets45.root.payment.authorized,
+                    target: "payment.authorized",
                     decoded: true,
                     data: ({ event }) => (new AuthorizedPayment({ code: event.code }))
                   }
@@ -4210,14 +4172,14 @@ describe("Machine", () => {
         events: Machine.eventsFromSchemas(Reset)
       }).handle({
         initial: {
-          target: Machine.targets(InitialRoot1).root.payment,
+          target: "payment",
           decoded: true,
           data: payment
         },
         states: {
           payment: {
             initial: {
-              target: Machine.targets(InitialRoot1).root.payment.authorized,
+              target: "payment.authorized",
               decoded: true,
               data: authorized
             },
@@ -4257,13 +4219,12 @@ describe("Machine", () => {
           }
         }
       })
-      const targets46 = Machine.targets(root46)
       const machine = Machine.make({
         root: root46,
         events: Machine.eventsFromSchemas(Authorize, Reset)
       }).handle({
         initial: {
-          target: Machine.targets(root46).root.payment,
+          target: "payment",
           decoded: true,
           data: payment
         },
@@ -4271,18 +4232,18 @@ describe("Machine", () => {
           idle: {},
           payment: {
             initial: {
-              target: Machine.targets(root46).root.payment.entering,
+              target: "payment.entering",
               decoded: true,
               data: new EnteringPayment({ amount: 100 })
             },
             on: {
-              Reset: { target: targets46.root.idle, decoded: true, data: () => (new Idle({ userId: "user-1" })) }
+              Reset: { target: "idle", decoded: true, data: () => (new Idle({ userId: "user-1" })) }
             },
             states: {
               entering: {
                 on: {
                   Authorize: {
-                    target: targets46.root.payment.authorized,
+                    target: "payment.authorized",
                     decoded: true,
                     data: ({ event }) => (new AuthorizedPayment({ code: event.code }))
                   }
@@ -4347,35 +4308,34 @@ describe("Machine", () => {
           failed: Failed
         }
       })
-      const targets47 = Machine.targets(root47)
       const machine = Machine.make({
         root: root47,
         events: Machine.eventsFromSchemas(ReserveInventory, Reset)
       }).handle({
         initial: {
-          target: Machine.targets(root47).root.checkout,
+          target: "checkout",
           decoded: true,
           data: checkout
         },
         states: {
           checkout: {
             initial: {
-              target: Machine.targets(root47).root.checkout.inventory,
+              target: "checkout.inventory",
               decoded: true,
               data: inventory
             },
             on: {
-              Reset: { target: targets47.root.failed, decoded: true, data: () => (new Failed({ message: "reset" })) }
+              Reset: { target: "failed", decoded: true, data: () => (new Failed({ message: "reset" })) }
             },
             states: {
               inventory: {
                 initial: {
-                  target: Machine.targets(root47).root.checkout.inventory.checking,
+                  target: "checkout.inventory.checking",
                   decoded: true,
                   data: new CheckingInventory({ sku: "sku-1" })
                 },
                 onDone: {
-                  target: targets47.root.checkout.shipped,
+                  target: "checkout.shipped",
                   decoded: true,
                   data: ({ output }) => (new ShippingQuoted({ quoteId: String(output) }))
                 },
@@ -4383,7 +4343,7 @@ describe("Machine", () => {
                   checking: {
                     on: {
                       ReserveInventory: {
-                        target: targets47.root.checkout.inventory.reserved,
+                        target: "checkout.inventory.reserved",
                         decoded: true,
                         data: ({ event }) => (new InventoryReserved({ reservationId: event.reservationId }))
                       }
@@ -4447,13 +4407,12 @@ describe("Machine", () => {
           }
         }
       })
-      const targets48 = Machine.targets(root48)
       const machine = Machine.make({
         root: root48,
         events: Machine.eventsFromSchemas(ReserveInventory)
       }).handle({
         initial: {
-          target: Machine.targets(root48).root.fulfillment,
+          target: "fulfillment",
           decoded: true,
           data: fulfillment
         },
@@ -4463,7 +4422,7 @@ describe("Machine", () => {
             states: {
               inventory: {
                 initial: {
-                  target: Machine.targets(root48).root.fulfillment.inventory.checking,
+                  target: "fulfillment.inventory.checking",
                   decoded: true,
                   data: new CheckingInventory({ sku: "sku-1" })
                 },
@@ -4471,7 +4430,7 @@ describe("Machine", () => {
                   checking: {
                     on: {
                       ReserveInventory: {
-                        target: targets48.root.fulfillment.inventory.reserved,
+                        target: "fulfillment.inventory.reserved",
                         decoded: true,
                         data: ({ event }) => (new InventoryReserved({ reservationId: event.reservationId }))
                       }
@@ -4482,7 +4441,7 @@ describe("Machine", () => {
               },
               shipping: {
                 initial: {
-                  target: Machine.targets(root48).root.fulfillment.shipping.quoting,
+                  target: "fulfillment.shipping.quoting",
                   decoded: true,
                   data: quoting
                 },
@@ -4562,13 +4521,12 @@ describe("Machine", () => {
           }
         }
       })
-      const targets49 = Machine.targets(root49)
       const machine = Machine.make({
         root: root49,
         events: Machine.eventsFromSchemas(ReserveInventory)
       }).handle({
         initial: {
-          target: Machine.targets(root49).root.fulfillment,
+          target: "fulfillment",
           decoded: true,
           data: fulfillment
         },
@@ -4582,7 +4540,7 @@ describe("Machine", () => {
             states: {
               inventory: {
                 initial: {
-                  target: Machine.targets(root49).root.fulfillment.inventory.checking,
+                  target: "fulfillment.inventory.checking",
                   decoded: true,
                   data: checking
                 },
@@ -4590,7 +4548,7 @@ describe("Machine", () => {
                   checking: {
                     on: {
                       ReserveInventory: {
-                        target: targets49.root.fulfillment.inventory.reserved,
+                        target: "fulfillment.inventory.reserved",
                         decoded: true,
                         data: ({ event }) => (new InventoryReserved({ reservationId: event.reservationId }))
                       }
@@ -4603,7 +4561,7 @@ describe("Machine", () => {
               },
               shipping: {
                 initial: {
-                  target: Machine.targets(root49).root.fulfillment.shipping.quoting,
+                  target: "fulfillment.shipping.quoting",
                   decoded: true,
                   data: quoting
                 },
@@ -4611,7 +4569,7 @@ describe("Machine", () => {
                   quoting: {
                     on: {
                       ReserveInventory: {
-                        target: targets49.root.fulfillment.shipping.quoted,
+                        target: "fulfillment.shipping.quoted",
                         decoded: true,
                         data: ({ event }) => (new ShippingQuoted({ quoteId: event.reservationId }))
                       }
@@ -4701,13 +4659,12 @@ describe("Machine", () => {
           }
         }
       })
-      const targets50 = Machine.targets(root50)
       const machine = Machine.make({
         root: root50,
         events: Machine.eventsFromSchemas(ReserveInventory, Resolve)
       }).handle({
         initial: {
-          target: Machine.targets(root50).root.fulfillment,
+          target: "fulfillment",
           decoded: true,
           data: fulfillment
         },
@@ -4718,7 +4675,7 @@ describe("Machine", () => {
             states: {
               inventory: {
                 initial: {
-                  target: Machine.targets(root50).root.fulfillment.inventory.checking,
+                  target: "fulfillment.inventory.checking",
                   decoded: true,
                   data: new CheckingInventory({ sku: "sku-1" })
                 },
@@ -4726,7 +4683,7 @@ describe("Machine", () => {
                   checking: {
                     on: {
                       ReserveInventory: {
-                        target: targets50.root.fulfillment.inventory.reserved,
+                        target: "fulfillment.inventory.reserved",
                         decoded: true,
                         data: ({ event }) => (new InventoryReserved({ reservationId: event.reservationId }))
                       }
@@ -4739,7 +4696,7 @@ describe("Machine", () => {
               },
               shipping: {
                 initial: {
-                  target: Machine.targets(root50).root.fulfillment.shipping.quoting,
+                  target: "fulfillment.shipping.quoting",
                   decoded: true,
                   data: quoting
                 },
@@ -4747,7 +4704,7 @@ describe("Machine", () => {
                   quoting: {
                     on: {
                       Resolve: {
-                        target: targets50.root.fulfillment.shipping.quoted,
+                        target: "fulfillment.shipping.quoted",
                         decoded: true,
                         data: () => (new ShippingQuoted({ quoteId: "quote-1" }))
                       }
@@ -4816,13 +4773,12 @@ describe("Machine", () => {
           }
         }
       })
-      const targets51 = Machine.targets(root51)
       const machine = Machine.make({
         root: root51,
         events: Machine.eventsFromSchemas(ReserveInventory)
       }).handle({
         initial: {
-          target: Machine.targets(root51).root.fulfillment,
+          target: "fulfillment",
           decoded: true,
           data: fulfillment
         },
@@ -4832,7 +4788,7 @@ describe("Machine", () => {
             states: {
               inventory: {
                 initial: {
-                  target: Machine.targets(root51).root.fulfillment.inventory.checking,
+                  target: "fulfillment.inventory.checking",
                   decoded: true,
                   data: checking
                 },
@@ -4840,7 +4796,7 @@ describe("Machine", () => {
                   checking: {
                     on: {
                       ReserveInventory: {
-                        target: targets51.root.fulfillment.inventory.reserved,
+                        target: "fulfillment.inventory.reserved",
                         decoded: true,
                         data: ({ event }) => (new InventoryReserved({ reservationId: event.reservationId }))
                       }
@@ -4851,7 +4807,7 @@ describe("Machine", () => {
               },
               shipping: {
                 initial: {
-                  target: Machine.targets(root51).root.fulfillment.shipping.quoting,
+                  target: "fulfillment.shipping.quoting",
                   decoded: true,
                   data: quoting
                 },
@@ -4859,7 +4815,7 @@ describe("Machine", () => {
                   quoting: {
                     on: {
                       ReserveInventory: {
-                        target: targets51.root.fulfillment.shipping.quoted,
+                        target: "fulfillment.shipping.quoted",
                         decoded: true,
                         data: ({ event }) => (new ShippingQuoted({ quoteId: event.reservationId }))
                       }
@@ -4924,14 +4880,13 @@ describe("Machine", () => {
           }
         }
       })
-      const targets52 = Machine.targets(root52)
       const machine = Machine.make({
-        branches: { transition1: { destination: { target: targets52.root.fulfillment.inventory.reserved } } },
+        branches: { transition1: { destination: { target: "fulfillment.inventory.reserved" } } },
         root: root52,
         events: Machine.eventsFromSchemas(ReserveInventory, Resolve)
       }).handle({
         initial: {
-          target: Machine.targets(root52).root.fulfillment,
+          target: "fulfillment",
           decoded: true,
           data: fulfillment
         },
@@ -4941,7 +4896,7 @@ describe("Machine", () => {
             states: {
               inventory: {
                 initial: {
-                  target: Machine.targets(root52).root.fulfillment.inventory.checking,
+                  target: "fulfillment.inventory.checking",
                   decoded: true,
                   data: checking
                 },
@@ -4967,7 +4922,7 @@ describe("Machine", () => {
               },
               shipping: {
                 initial: {
-                  target: Machine.targets(root52).root.fulfillment.shipping.quoting,
+                  target: "fulfillment.shipping.quoting",
                   decoded: true,
                   data: quoting
                 },
@@ -4975,7 +4930,7 @@ describe("Machine", () => {
                   quoting: {
                     on: {
                       Resolve: {
-                        target: targets52.root.fulfillment.shipping.quoted,
+                        target: "fulfillment.shipping.quoted",
                         decoded: true,
                         data: () => (new ShippingQuoted({ quoteId: "raised" }))
                       }
@@ -5018,7 +4973,7 @@ describe("Machine", () => {
         events: Machine.eventsFromSchemas(Submit)
       }).handle({
         initial: {
-          target: Machine.targets(InitialRoot2).root.Idle,
+          target: "Idle",
           decoded: true,
           data: new Idle({ userId: "user-1" })
         },
@@ -5037,14 +4992,13 @@ describe("Machine", () => {
         },
         states: { Idle, Loading }
       })
-      const targets53 = Machine.targets(root53)
       const machine = Machine.make({
         root: root53,
         events: Machine.eventsFromSchemas(Submit),
         input: Input
       }).handle({
         initial: {
-          target: Machine.targets(root53).root.Idle,
+          target: "Idle",
           decoded: true,
           data: ({ root: { input: input } }) => new Idle({ userId: input.userId })
         },
@@ -5053,7 +5007,7 @@ describe("Machine", () => {
           Idle: {
             on: {
               Submit: {
-                target: targets53.root.Loading,
+                target: "Loading",
                 decoded: true,
                 data: () => (new Loading({ requestId: "request-1" }))
               }
@@ -5081,14 +5035,13 @@ describe("Machine", () => {
       },
       states: { Idle, Loading }
     })
-    const targets54 = Machine.targets(root54)
     const machine = Machine.make({
       root: root54,
       events: Machine.eventsFromSchemas(Submit, Reset),
       input: Input
     }).handle({
       initial: {
-        target: Machine.targets(root54).root.Idle,
+        target: "Idle",
         decoded: true,
         data: ({ root: { input: input } }) => new Idle({ userId: input.userId })
       },
@@ -5097,7 +5050,7 @@ describe("Machine", () => {
         Idle: {
           on: {
             Submit: {
-              target: targets54.root.Loading,
+              target: "Loading",
               decoded: true,
               data: () => (new Loading({ requestId: "request-1" }))
             }
@@ -5105,7 +5058,7 @@ describe("Machine", () => {
         },
         Loading: {
           on: {
-            Reset: { target: targets54.root.Idle, decoded: true, data: () => (new Idle({ userId: "user-1" })) }
+            Reset: { target: "Idle", decoded: true, data: () => (new Idle({ userId: "user-1" })) }
           }
         }
       }
@@ -5137,14 +5090,13 @@ describe("Machine", () => {
         Success: { schema: Success, type: "final" }
       }
     })
-    const targets55 = Machine.targets(root55)
     const machine = Machine.make({
       root: root55,
       events: Machine.eventsFromSchemas(Submit),
       input: Input
     }).handle({
       initial: {
-        target: Machine.targets(root55).root.Idle,
+        target: "Idle",
         decoded: true,
         data: ({ root: { input: input } }) => new Idle({ userId: input.userId })
       },
@@ -5153,7 +5105,7 @@ describe("Machine", () => {
         Idle: {
           on: {
             Submit: {
-              target: targets55.root.Success,
+              target: "Success",
               decoded: true,
               data: () => (new Success({ requestId: "request-1" }))
             }
@@ -5179,14 +5131,13 @@ describe("Machine", () => {
         },
         states: { Idle, Success: SuccessOutput }
       })
-      const targets56 = Machine.targets(root56)
       const machine = Machine.make({
         root: root56,
         events: Machine.eventsFromSchemas(Submit),
         input: Input
       }).handle({
         initial: {
-          target: Machine.targets(root56).root.Idle,
+          target: "Idle",
           decoded: true,
           data: ({ root: { input: input } }) => new Idle({ userId: input.userId })
         },
@@ -5195,7 +5146,7 @@ describe("Machine", () => {
           Idle: {
             on: {
               Submit: {
-                target: targets56.root.Success,
+                target: "Success",
                 decoded: true,
                 data: () => (new Success({ requestId: "request-1" }))
               }
@@ -5226,14 +5177,13 @@ describe("Machine", () => {
         },
         states: { Idle, Success: SuccessOutput }
       })
-      const targets57 = Machine.targets(root57)
       const machine = Machine.make({
         root: root57,
         events: Machine.eventsFromSchemas(Submit),
         input: Input
       }).handle({
         initial: {
-          target: Machine.targets(root57).root.Idle,
+          target: "Idle",
           decoded: true,
           data: ({ root: { input: input } }) => new Idle({ userId: input.userId })
         },
@@ -5242,7 +5192,7 @@ describe("Machine", () => {
           Idle: {
             on: {
               Submit: {
-                target: targets57.root.Success,
+                target: "Success",
                 decoded: true,
                 data: () => (new Success({ requestId: "request-1" }))
               }
@@ -5269,7 +5219,7 @@ describe("Machine", () => {
         events: Machine.eventsFromSchemas(Submit)
       }).handle({
         initial: {
-          target: Machine.targets(InitialRoot3).root.Success,
+          target: "Success",
           decoded: true,
           data: new Success({ requestId: "request-1" })
         },
@@ -5311,7 +5261,7 @@ describe("Machine", () => {
         events: Machine.eventsFromSchemas(Submit)
       }).handle({
         initial: {
-          target: Machine.targets(InitialRoot4).root.Success,
+          target: "Success",
           decoded: true,
           data: new Success({ requestId: "request-1" })
         },
@@ -5347,14 +5297,13 @@ describe("Machine", () => {
           Success: { schema: Success, type: "final" }
         }
       })
-      const targets58 = Machine.targets(root58)
       const machine = Machine.make({
         root: root58,
         events: Machine.eventsFromSchemas(Submit),
         input: Input
       }).handle({
         initial: {
-          target: Machine.targets(root58).root.Idle,
+          target: "Idle",
           decoded: true,
           data: ({ root: { input: input } }) => new Idle({ userId: input.userId })
         },
@@ -5363,7 +5312,7 @@ describe("Machine", () => {
           Idle: {
             on: {
               Submit: {
-                target: targets58.root.Success,
+                target: "Success",
                 decoded: true,
                 data: () => (new Success({ requestId: "request-1" }))
               }
@@ -5400,14 +5349,13 @@ describe("Machine", () => {
           Success: { schema: Success, type: "final" }
         }
       })
-      const targets59 = Machine.targets(root59)
       const machine = Machine.make({
         root: root59,
         events: Machine.eventsFromSchemas(Submit, Reset),
         input: Input
       }).handle({
         initial: {
-          target: Machine.targets(root59).root.Idle,
+          target: "Idle",
           decoded: true,
           data: ({ root: { input: input } }) => new Idle({ userId: input.userId })
         },
@@ -5416,11 +5364,11 @@ describe("Machine", () => {
           Idle: {
             on: {
               Submit: {
-                target: targets59.root.Success,
+                target: "Success",
                 decoded: true,
                 data: () => (new Success({ requestId: "request-1" }))
               },
-              Reset: { target: targets59.root.Idle, decoded: true, data: () => (new Idle({ userId: "user-2" })) }
+              Reset: { target: "Idle", decoded: true, data: () => (new Idle({ userId: "user-2" })) }
             }
           },
           Success: {}
@@ -5447,13 +5395,12 @@ describe("Machine", () => {
   it.effect("start keeps the machine alive after the starting fiber completes", () =>
     Effect.gen(function*() {
       const root60 = Machine.state({ states: { Idle, Loading } })
-      const targets60 = Machine.targets(root60)
       const machine = Machine.make({
         root: root60,
         events: Machine.eventsFromSchemas(Submit)
       }).handle({
         initial: {
-          target: Machine.targets(root60).root.Idle,
+          target: "Idle",
           decoded: true,
           data: new Idle({ userId: "user-1" })
         },
@@ -5461,7 +5408,7 @@ describe("Machine", () => {
           Idle: {
             on: {
               Submit: {
-                target: targets60.root.Loading,
+                target: "Loading",
                 decoded: true,
                 data: () => (new Loading({ requestId: "request-1" }))
               }
@@ -5486,14 +5433,13 @@ describe("Machine", () => {
         },
         states: { Idle, Loading }
       })
-      const targets61 = Machine.targets(root61)
       const machine = Machine.make({
         root: root61,
         events: Machine.eventsFromSchemas(Submit),
         input: Input
       }).handle({
         initial: {
-          target: Machine.targets(root61).root.Idle,
+          target: "Idle",
           decoded: true,
           data: ({ root: { input: input } }) => new Idle({ userId: input.userId })
         },
@@ -5502,7 +5448,7 @@ describe("Machine", () => {
           Idle: {
             on: {
               Submit: {
-                target: targets61.root.Loading,
+                target: "Loading",
                 decoded: true,
                 data: () => (new Loading({ requestId: "request-1" }))
               }
@@ -5540,7 +5486,7 @@ describe("Machine", () => {
         input: Input
       }).handle({
         initial: {
-          target: Machine.targets(InitialRoot5).root.Idle,
+          target: "Idle",
           decoded: true,
           data: ({ root: { input: input } }) => new Idle({ userId: input.userId })
         },
@@ -5574,7 +5520,7 @@ describe("Machine", () => {
         input: Input
       }).handle({
         initial: {
-          target: Machine.targets(root62).root.Idle,
+          target: "Idle",
           decoded: true,
           data: ({ root: { input: input } }) => new Idle({ userId: input.userId })
         },
@@ -5601,14 +5547,13 @@ describe("Machine", () => {
         },
         states: { Idle, Loading }
       })
-      const targets63 = Machine.targets(root63)
       const machine = Machine.make({
         root: root63,
         events: Machine.eventsFromSchemas(Submit),
         input: Input
       }).handle({
         initial: {
-          target: Machine.targets(root63).root.Idle,
+          target: "Idle",
           decoded: true,
           data: ({ root: { input: input } }) => new Idle({ userId: input.userId })
         },
@@ -5617,7 +5562,7 @@ describe("Machine", () => {
           Idle: {
             on: {
               Submit: {
-                target: targets63.root.Loading,
+                target: "Loading",
                 decoded: true,
                 data: () => (new Loading({ requestId: "request-1" }))
               }
@@ -5670,14 +5615,13 @@ describe("Machine", () => {
         },
         states: { Idle, Success: SuccessOutput }
       })
-      const targets64 = Machine.targets(root64)
       const machine = Machine.make({
         root: root64,
         events: Machine.eventsFromSchemas(Submit),
         input: Input
       }).handle({
         initial: {
-          target: Machine.targets(root64).root.Idle,
+          target: "Idle",
           decoded: true,
           data: ({ root: { input: input } }) => new Idle({ userId: input.userId })
         },
@@ -5686,7 +5630,7 @@ describe("Machine", () => {
           Idle: {
             on: {
               Submit: {
-                target: targets64.root.Success,
+                target: "Success",
                 decoded: true,
                 data: () => (new Success({ requestId: "request-1" }))
               }
@@ -5722,7 +5666,6 @@ describe("Machine", () => {
         },
         states: { Idle, Loading }
       })
-      const targets65 = Machine.targets(root65)
       const machine = Machine.make({
         id: "UserMachine",
         root: root65,
@@ -5730,7 +5673,7 @@ describe("Machine", () => {
         input: Input
       }).handle({
         initial: {
-          target: Machine.targets(root65).root.Idle,
+          target: "Idle",
           decoded: true,
           data: ({ root: { input: input } }) => new Idle({ userId: input.userId })
         },
@@ -5739,7 +5682,7 @@ describe("Machine", () => {
           Idle: {
             on: {
               Submit: {
-                target: targets65.root.Loading,
+                target: "Loading",
                 decoded: true,
                 data: () => (new Loading({ requestId: "request-1" }))
               }
@@ -5767,7 +5710,6 @@ describe("Machine", () => {
         },
         states: { Idle, Loading, Success: SuccessOutput }
       })
-      const targets66 = Machine.targets(root66)
       const definition = Machine.make({
         effects: { source1: Effect.suspend(() => Effect.succeed("done:request-1")) },
         root: root66,
@@ -5776,7 +5718,7 @@ describe("Machine", () => {
       })
       const machine = definition.handle({
         initial: {
-          target: Machine.targets(root66).root.Idle,
+          target: "Idle",
           decoded: true,
           data: ({ root: { input: input } }) => new Idle({ userId: input.userId })
         },
@@ -5785,7 +5727,7 @@ describe("Machine", () => {
           Idle: {
             on: {
               Submit: {
-                target: targets66.root.Loading,
+                target: "Loading",
                 decoded: true,
                 data: () => (new Loading({ requestId: "request-1" }))
               }
@@ -5796,7 +5738,7 @@ describe("Machine", () => {
               src: "source1",
               id: "request",
               onDone: {
-                target: targets66.root.Success,
+                target: "Success",
                 decoded: true,
                 data: ({ output }) => (new Success({ requestId: output }))
               }
@@ -5835,7 +5777,6 @@ describe("Machine", () => {
         },
         states: { Idle, Loading, Success: SuccessOutput }
       })
-      const targets67 = Machine.targets(root67)
       const definition = Machine.make({
         effects: { source1: Effect.suspend(() => Effect.succeed("done:request-1")) },
         root: root67,
@@ -5844,7 +5785,7 @@ describe("Machine", () => {
       })
       const machine = definition.handle({
         initial: {
-          target: Machine.targets(root67).root.Idle,
+          target: "Idle",
           decoded: true,
           data: ({ root: { input: input } }) => new Idle({ userId: input.userId })
         },
@@ -5853,7 +5794,7 @@ describe("Machine", () => {
           Idle: {
             on: {
               Submit: {
-                target: targets67.root.Loading,
+                target: "Loading",
                 decoded: true,
                 data: () => (new Loading({ requestId: "request-1" }))
               }
@@ -5864,7 +5805,7 @@ describe("Machine", () => {
               src: "source1",
               id: "request",
               onDone: {
-                target: targets67.root.Success,
+                target: "Success",
                 decoded: true,
                 data: ({ output }) => (new Success({ requestId: output }))
               }
@@ -5903,7 +5844,7 @@ describe("Machine", () => {
         events: Machine.eventsFromSchemas()
       }).handle({
         initial: {
-          target: Machine.targets(childStates).root.Idle,
+          target: "Idle",
           decoded: true,
           data: new Idle({ userId: "child" })
         },
@@ -5919,7 +5860,7 @@ describe("Machine", () => {
         events: Machine.eventsFromSchemas()
       }).handle({
         initial: {
-          target: Machine.targets(parentStates).root.Loading,
+          target: "Loading",
           decoded: true,
           data: new Loading({ requestId: "parent" })
         },
@@ -5972,7 +5913,7 @@ describe("Machine", () => {
         events: Machine.eventsFromSchemas()
       }).handle({
         initial: {
-          target: Machine.targets(childStates).root.Idle,
+          target: "Idle",
           decoded: true,
           data: new Idle({ userId: "child" })
         },
@@ -5988,7 +5929,7 @@ describe("Machine", () => {
         events: Machine.eventsFromSchemas()
       }).handle({
         initial: {
-          target: Machine.targets(parentStates).root.Loading,
+          target: "Loading",
           decoded: true,
           data: new Loading({ requestId: "parent" })
         },
@@ -6027,7 +5968,7 @@ describe("Machine", () => {
       }).handle({
         root: ({ input }) => ({ input }),
         initial: {
-          target: Machine.targets(childStates).root.Idle,
+          target: "Idle",
           decoded: true,
           data: ({ root: { input: input } }) => {
             starts += 1
@@ -6046,7 +5987,7 @@ describe("Machine", () => {
         events: Machine.eventsFromSchemas()
       }).handle({
         initial: {
-          target: Machine.targets(parentStates).root.Loading,
+          target: "Loading",
           decoded: true,
           data: new Loading({ requestId: "parent" })
         },
@@ -6086,7 +6027,7 @@ describe("Machine", () => {
         events: Machine.eventsFromSchemas()
       }).handle({
         initial: {
-          target: Machine.targets(childStates).root.Success,
+          target: "Success",
           decoded: true,
           data: new Success({ requestId: "child-output" })
         },
@@ -6101,14 +6042,13 @@ describe("Machine", () => {
           Success: { schema: Success, type: "final", output: Schema.String }
         }
       })
-      const targets71 = Machine.targets(parentStates)
       const parentMachine = Machine.make({
         children: { source1: Child },
         root: parentStates,
         events: Machine.eventsFromSchemas(ChildFinished)
       }).handle({
         initial: {
-          target: Machine.targets(parentStates).root.Loading,
+          target: "Loading",
           decoded: true,
           data: new Loading({ requestId: "parent" })
         },
@@ -6117,7 +6057,7 @@ describe("Machine", () => {
             invoke: {
               src: "source1",
               onDone: {
-                target: targets71.root.Success,
+                target: "Success",
                 decoded: true,
                 data: ({ output }) => (new Success({ requestId: output }))
               }
@@ -6143,7 +6083,7 @@ describe("Machine", () => {
         input: Input
       }).handle({
         initial: {
-          target: Machine.targets(states).root.Idle,
+          target: "Idle",
           decoded: true,
           data: ({ root: { input: input } }) => new Idle({ userId: input.userId })
         },
@@ -6174,7 +6114,7 @@ describe("Machine", () => {
         events: Machine.eventsFromSchemas()
       }).handle({
         initial: {
-          target: Machine.targets(childStates).root.Idle,
+          target: "Idle",
           decoded: true,
           data: new Idle({ userId: "child" })
         },
@@ -6190,7 +6130,7 @@ describe("Machine", () => {
         events: Machine.eventsFromSchemas()
       }).handle({
         initial: {
-          target: Machine.targets(parentStates).root.Loading,
+          target: "Loading",
           decoded: true,
           data: new Loading({ requestId: "request-1" })
         },
@@ -6220,7 +6160,7 @@ describe("Machine", () => {
         events: Machine.eventsFromSchemas()
       }).handle({
         initial: {
-          target: Machine.targets(parentStates).root.Loading,
+          target: "Loading",
           decoded: true,
           data: new Loading({ requestId: "request-1" })
         },
@@ -6250,7 +6190,6 @@ describe("Machine", () => {
         },
         states: { Idle, Loading, Failed: FailedOutput }
       })
-      const targets74 = Machine.targets(root74)
       const machine = Machine.make({
         effects: { source1: Effect.suspend(() => Effect.fail(error)) },
         root: root74,
@@ -6258,7 +6197,7 @@ describe("Machine", () => {
         input: Input
       }).handle({
         initial: {
-          target: Machine.targets(root74).root.Idle,
+          target: "Idle",
           decoded: true,
           data: ({ root: { input: input } }) => new Idle({ userId: input.userId })
         },
@@ -6267,7 +6206,7 @@ describe("Machine", () => {
           Idle: {
             on: {
               Submit: {
-                target: targets74.root.Loading,
+                target: "Loading",
                 decoded: true,
                 data: () => (new Loading({ requestId: "request-1" }))
               }
@@ -6278,7 +6217,7 @@ describe("Machine", () => {
               src: "source1",
               id: "request",
               onFailure: {
-                target: targets74.root.Failed,
+                target: "Failed",
                 decoded: true,
                 data: ({ error }) => (new Failed({ message: error.message }))
               }
@@ -6309,7 +6248,6 @@ describe("Machine", () => {
   it.effect("start delivers internal invoke events without exposing them through send", () =>
     Effect.gen(function*() {
       const root75 = Machine.state({ states: { Idle, Loading, Success: SuccessOutput } })
-      const targets75 = Machine.targets(root75)
       const machine = Machine.make({
         effects: { source1: Effect.suspend(() => Effect.succeed("loaded")) },
         root: root75,
@@ -6317,7 +6255,7 @@ describe("Machine", () => {
         internalEvents: Machine.internalEventsFromSchemas(RequestSucceeded)
       }).handle({
         initial: {
-          target: Machine.targets(root75).root.Idle,
+          target: "Idle",
           decoded: true,
           data: new Idle({ userId: "user-1" })
         },
@@ -6325,7 +6263,7 @@ describe("Machine", () => {
           Idle: {
             on: {
               Submit: {
-                target: targets75.root.Loading,
+                target: "Loading",
                 decoded: true,
                 data: () => (new Loading({ requestId: "request-1" }))
               }
@@ -6336,7 +6274,7 @@ describe("Machine", () => {
               src: "source1",
               id: "request",
               onDone: {
-                target: targets75.root.Success,
+                target: "Success",
                 decoded: true,
                 data: ({ output }) => (new Success({ requestId: output }))
               }
@@ -6355,7 +6293,6 @@ describe("Machine", () => {
     Effect.gen(function*() {
       const childStarted = yield* Deferred.make<void>()
       const root76 = Machine.state({ states: { Loading, Success: SuccessOutput } })
-      const targets76 = Machine.targets(root76)
       const machine = Machine.make({
         logic: {
           source1: Machine.logic({
@@ -6373,7 +6310,7 @@ describe("Machine", () => {
         events: Machine.eventsFromSchemas(RequestSucceeded)
       }).handle({
         initial: {
-          target: Machine.targets(root76).root.Loading,
+          target: "Loading",
           decoded: true,
           data: new Loading({ requestId: "request-1" })
         },
@@ -6387,7 +6324,7 @@ describe("Machine", () => {
             },
             on: {
               RequestSucceeded: {
-                target: targets76.root.Success,
+                target: "Success",
                 decoded: true,
                 data: ({ event }) => (new Success({ requestId: event.value }))
               }
@@ -6406,7 +6343,6 @@ describe("Machine", () => {
     Effect.gen(function*() {
       const childStarted = yield* Deferred.make<void>()
       const root77 = Machine.state({ states: { Idle, Loading, Success: SuccessOutput } })
-      const targets77 = Machine.targets(root77)
       const machine = Machine.make({
         logic: {
           source1: Machine.logic({
@@ -6424,7 +6360,7 @@ describe("Machine", () => {
         events: Machine.eventsFromSchemas(Resolve, RequestSucceeded)
       }).handle({
         initial: {
-          target: Machine.targets(root77).root.Loading,
+          target: "Loading",
           decoded: true,
           data: new Loading({ requestId: "request-1" })
         },
@@ -6432,7 +6368,7 @@ describe("Machine", () => {
           Idle: {
             on: {
               RequestSucceeded: {
-                target: targets77.root.Success,
+                target: "Success",
                 decoded: true,
                 data: ({ event }) => (new Success({ requestId: event.value }))
               }
@@ -6446,7 +6382,7 @@ describe("Machine", () => {
               onFailure: { none: true }
             },
             on: {
-              Resolve: { target: targets77.root.Idle, decoded: true, data: () => (new Idle({ userId: "resolved" })) }
+              Resolve: { target: "Idle", decoded: true, data: () => (new Idle({ userId: "resolved" })) }
             }
           },
           Success: {
@@ -6473,7 +6409,6 @@ describe("Machine", () => {
     Effect.gen(function*() {
       const failure = new InvokeError({ message: "unavailable" })
       const root78 = Machine.state({ states: { Loading, Failed: FailedOutput } })
-      const targets78 = Machine.targets(root78)
       const machine = Machine.make({
         effects: { source1: Effect.suspend(() => Effect.fail(failure)) },
         root: root78,
@@ -6481,7 +6416,7 @@ describe("Machine", () => {
         internalEvents: Machine.internalEventsFromSchemas(RequestSucceeded, RequestFailed)
       }).handle({
         initial: {
-          target: Machine.targets(root78).root.Loading,
+          target: "Loading",
           decoded: true,
           data: new Loading({ requestId: "request-1" })
         },
@@ -6491,7 +6426,7 @@ describe("Machine", () => {
               src: "source1",
               id: "request",
               onFailure: {
-                target: targets78.root.Failed,
+                target: "Failed",
                 decoded: true,
                 data: ({ error }) => (new Failed({ message: error.message }))
               }
@@ -6511,7 +6446,6 @@ describe("Machine", () => {
         return (yield* InitialRequirement).initialMessage
       })
       const root79 = Machine.state({ states: { Loading, Success: SuccessOutput } })
-      const targets79 = Machine.targets(root79)
       const machine = Machine.make({
         effects: { source1: Effect.suspend(() => requiredMessage) },
         root: root79,
@@ -6519,7 +6453,7 @@ describe("Machine", () => {
         internalEvents: Machine.internalEventsFromSchemas(RequestSucceeded)
       }).handle({
         initial: {
-          target: Machine.targets(root79).root.Loading,
+          target: "Loading",
           decoded: true,
           data: new Loading({ requestId: "request-1" })
         },
@@ -6529,7 +6463,7 @@ describe("Machine", () => {
               src: "source1",
               id: "request",
               onDone: {
-                target: targets79.root.Success,
+                target: "Success",
                 decoded: true,
                 data: ({ output }) => (new Success({ requestId: output }))
               }
@@ -6548,7 +6482,6 @@ describe("Machine", () => {
   it.effect("after emits a state-scoped internal event", () =>
     Effect.gen(function*() {
       const root80 = Machine.state({ states: { Loading, Success: SuccessOutput } })
-      const targets80 = Machine.targets(root80)
       const machine = Machine.make({
         timers: { source1: "1 hour" },
         root: root80,
@@ -6556,7 +6489,7 @@ describe("Machine", () => {
         internalEvents: Machine.internalEventsFromSchemas(RequestSucceeded)
       }).handle({
         initial: {
-          target: Machine.targets(root80).root.Loading,
+          target: "Loading",
           decoded: true,
           data: new Loading({ requestId: "request-1" })
         },
@@ -6566,7 +6499,7 @@ describe("Machine", () => {
               src: "source1",
               id: "timeout",
               onDone: {
-                target: targets80.root.Success,
+                target: "Success",
                 decoded: true,
                 data: () => (new Success({ requestId: "timeout" }))
               }
@@ -6590,7 +6523,6 @@ describe("Machine", () => {
         },
         states: { Idle, Loading, Success: SuccessOutput }
       })
-      const targets81 = Machine.targets(root81)
       const definition = Machine.make({
         logic: { progress: Machine.logic({ initial: "pending", run: () => Effect.never }) },
         root: root81,
@@ -6599,7 +6531,7 @@ describe("Machine", () => {
       })
       const machine = definition.handle({
         initial: {
-          target: Machine.targets(root81).root.Idle,
+          target: "Idle",
           decoded: true,
           data: ({ root: { input: input } }) => new Idle({ userId: input.userId })
         },
@@ -6608,7 +6540,7 @@ describe("Machine", () => {
           Idle: {
             on: {
               Submit: {
-                target: targets81.root.Loading,
+                target: "Loading",
                 decoded: true,
                 data: () => (new Loading({ requestId: "request-1" }))
               }
@@ -6620,7 +6552,7 @@ describe("Machine", () => {
               id: "request",
               address: Machine.childAddress("progress-request"),
               onSnapshot: {
-                target: targets81.root.Success,
+                target: "Success",
                 decoded: true,
                 data: ({ id, snapshot }) => new Success({ requestId: `${id}:${snapshot.state}` })
               }
@@ -6660,7 +6592,6 @@ describe("Machine", () => {
         },
         states: { Idle, Loading }
       })
-      const targets82 = Machine.targets(root82)
       const machine = Machine.make({
         effects: { source1: Effect.suspend(() => Effect.die(error)) },
         root: root82,
@@ -6668,7 +6599,7 @@ describe("Machine", () => {
         input: Input
       }).handle({
         initial: {
-          target: Machine.targets(root82).root.Idle,
+          target: "Idle",
           decoded: true,
           data: ({ root: { input: input } }) => new Idle({ userId: input.userId })
         },
@@ -6677,7 +6608,7 @@ describe("Machine", () => {
           Idle: {
             on: {
               Submit: {
-                target: targets82.root.Loading,
+                target: "Loading",
                 decoded: true,
                 data: () => (new Loading({ requestId: "request-1" }))
               }
@@ -6711,7 +6642,6 @@ describe("Machine", () => {
         },
         states: { Idle, Loading, Success: SuccessOutput }
       })
-      const targets83 = Machine.targets(root83)
       const definition = Machine.make({
         logic: {
           progress: Machine.logic({
@@ -6725,7 +6655,7 @@ describe("Machine", () => {
           })
         },
         branches: {
-          snapshots: { ready: { target: targets83.root.Success, title: "Request is ready" }, unchanged: { none: true } }
+          snapshots: { ready: { target: "Success", title: "Request is ready" }, unchanged: { none: true } }
         },
         root: root83,
         events: Machine.eventsFromSchemas(Submit, RequestProgress),
@@ -6733,7 +6663,7 @@ describe("Machine", () => {
       })
       const machine = definition.handle({
         initial: {
-          target: Machine.targets(root83).root.Idle,
+          target: "Idle",
           decoded: true,
           data: ({ root: { input: input } }) => new Idle({ userId: input.userId })
         },
@@ -6742,7 +6672,7 @@ describe("Machine", () => {
           Idle: {
             on: {
               Submit: {
-                target: targets83.root.Loading,
+                target: "Loading",
                 decoded: true,
                 data: () => (new Loading({ requestId: "request-1" }))
               }
@@ -6803,7 +6733,6 @@ describe("Machine", () => {
         },
         states: { Idle, Loading }
       })
-      const targets84 = Machine.targets(root84)
       const machine = Machine.make({
         logic: {
           source1: Machine.logic({
@@ -6816,7 +6745,7 @@ describe("Machine", () => {
         input: Input
       }).handle({
         initial: {
-          target: Machine.targets(root84).root.Idle,
+          target: "Idle",
           decoded: true,
           data: ({ root: { input: input } }) => new Idle({ userId: input.userId })
         },
@@ -6825,7 +6754,7 @@ describe("Machine", () => {
           Idle: {
             on: {
               Submit: {
-                target: targets84.root.Loading,
+                target: "Loading",
                 decoded: true,
                 data: () => (new Loading({ requestId: "request-1" }))
               }
@@ -6876,7 +6805,6 @@ describe("Machine", () => {
         },
         states: { Idle, Loading, Success: SuccessOutput }
       })
-      const targets85 = Machine.targets(root85)
       const machine = Machine.make({
         logic: { source1: childLogic },
         root: root85,
@@ -6884,7 +6812,7 @@ describe("Machine", () => {
         input: Input
       }).handle({
         initial: {
-          target: Machine.targets(root85).root.Idle,
+          target: "Idle",
           decoded: true,
           data: ({ root: { input: input } }) => new Idle({ userId: input.userId })
         },
@@ -6893,7 +6821,7 @@ describe("Machine", () => {
           Idle: {
             on: {
               Submit: {
-                target: targets85.root.Loading,
+                target: "Loading",
                 decoded: true,
                 data: () => (new Loading({ requestId: "request-1" }))
               }
@@ -6903,12 +6831,12 @@ describe("Machine", () => {
             invoke: { src: "source1", id: "request", address: Machine.childAddress("stopping-request") },
             on: {
               Resolve: {
-                target: targets85.root.Success,
+                target: "Success",
                 decoded: true,
                 data: () => (new Success({ requestId: "request-1" }))
               },
               RequestSucceeded: {
-                target: targets85.root.Success,
+                target: "Success",
                 decoded: true,
                 data: ({ event }) => (new Success({ requestId: event.value }))
               }
@@ -6978,7 +6906,6 @@ describe("Machine", () => {
           }
         }
       })
-      const targets86 = Machine.targets(root86)
       const machine = Machine.make({
         logic: {
           source1: makeInvokeLogic("parent", parentStarted),
@@ -6989,14 +6916,14 @@ describe("Machine", () => {
         events: Machine.eventsFromSchemas(Authorize)
       }).handle({
         initial: {
-          target: Machine.targets(root86).root.payment,
+          target: "payment",
           decoded: true,
           data: payment
         },
         states: {
           payment: {
             initial: {
-              target: Machine.targets(root86).root.payment.entering,
+              target: "payment.entering",
               decoded: true,
               data: entering
             },
@@ -7010,7 +6937,7 @@ describe("Machine", () => {
                 invoke: { src: "source2", id: "request", address: Machine.childAddress("payment-entering") },
                 on: {
                   Authorize: {
-                    target: targets86.root.payment.authorized,
+                    target: "payment.authorized",
                     decoded: true,
                     data: ({ event }) => (new AuthorizedPayment({ code: event.code }))
                   }
@@ -7087,7 +7014,6 @@ describe("Machine", () => {
           }
         }
       })
-      const targets87 = Machine.targets(root87)
       const machine = Machine.make({
         logic: {
           source1: makeInvokeLogic(parentStarted, parentStopping),
@@ -7098,7 +7024,7 @@ describe("Machine", () => {
         events: Machine.eventsFromSchemas(ReserveInventory)
       }).handle({
         initial: {
-          target: Machine.targets(root87).root.fulfillment,
+          target: "fulfillment",
           decoded: true,
           data: fulfillment
         },
@@ -7109,7 +7035,7 @@ describe("Machine", () => {
             states: {
               inventory: {
                 initial: {
-                  target: Machine.targets(root87).root.fulfillment.inventory.checking,
+                  target: "fulfillment.inventory.checking",
                   decoded: true,
                   data: new CheckingInventory({ sku: "sku-1" })
                 },
@@ -7118,7 +7044,7 @@ describe("Machine", () => {
                   checking: {
                     on: {
                       ReserveInventory: {
-                        target: targets87.root.success,
+                        target: "success",
                         decoded: true,
                         data: () => (new Success({ requestId: "done" }))
                       }
@@ -7128,7 +7054,7 @@ describe("Machine", () => {
               },
               shipping: {
                 initial: {
-                  target: Machine.targets(root87).root.fulfillment.shipping.quoting,
+                  target: "fulfillment.shipping.quoting",
                   decoded: true,
                   data: new QuotingShipping({ postalCode: "12345" })
                 },
@@ -7167,7 +7093,7 @@ describe("Machine", () => {
         events: Machine.eventsFromSchemas()
       }).handle({
         initial: {
-          target: Machine.targets(InitialRoot6).root.Idle,
+          target: "Idle",
           data: () => {
             throw defect
           }
@@ -7183,12 +7109,11 @@ describe("Machine", () => {
       assert.instanceOf(startupError, Machine.StartupError)
       assert(Cause.hasDies(startupError.cause))
     }))
-  it("rejects a foreign initial target while capturing the definition", () => {
+  it("rejects an undeclared initial target while capturing the definition", () => {
     const root = Machine.state({ states: { Idle: {} } })
-    const foreign = Machine.state({ states: { Other: {} } })
     const definition = Machine.make({ root, events: Machine.eventsFromSchemas() })
     assert.throws(
-      () => definition.handle({ initial: { target: Machine.targets(foreign).root.Other } } as never),
+      () => definition.handle({ initial: { target: "Other" } } as never),
       /direct child/
     )
   })
@@ -7200,7 +7125,6 @@ describe("Machine", () => {
         },
         states: { Idle, Loading }
       })
-      const targets88 = Machine.targets(root88)
       const machine = Machine.make({
         id: "LoopMachine",
         root: root88,
@@ -7208,7 +7132,7 @@ describe("Machine", () => {
         input: Input
       }).handle({
         initial: {
-          target: Machine.targets(root88).root.Idle,
+          target: "Idle",
           decoded: true,
           data: ({ root: { input: input } }) => new Idle({ userId: input.userId })
         },
@@ -7216,20 +7140,20 @@ describe("Machine", () => {
         states: {
           Idle: {
             always: {
-              target: targets88.root.Loading,
+              target: "Loading",
               decoded: true,
               data: () => (new Loading({ requestId: "request-1" }))
             },
             on: {
               Submit: {
-                target: targets88.root.Loading,
+                target: "Loading",
                 decoded: true,
                 data: () => (new Loading({ requestId: "request-1" }))
               }
             }
           },
           Loading: {
-            always: { target: targets88.root.Idle, decoded: true, data: () => (new Idle({ userId: "user-1" })) }
+            always: { target: "Idle", decoded: true, data: () => (new Idle({ userId: "user-1" })) }
           }
         }
       })
@@ -7246,27 +7170,26 @@ describe("Machine", () => {
   it.effect("fails initial planning and startup when always transitions do not stabilize", () =>
     Effect.gen(function*() {
       const root89 = Machine.state({ states: { Idle, Loading } })
-      const targets89 = Machine.targets(root89)
       const machine = Machine.make({
         id: "InitialLoopMachine",
         root: root89,
         events: Machine.eventsFromSchemas()
       }).handle({
         initial: {
-          target: Machine.targets(root89).root.Idle,
+          target: "Idle",
           decoded: true,
           data: new Idle({ userId: "user-1" })
         },
         states: {
           Idle: {
             always: {
-              target: targets89.root.Loading,
+              target: "Loading",
               decoded: true,
               data: () => (new Loading({ requestId: "request-1" }))
             }
           },
           Loading: {
-            always: { target: targets89.root.Idle, decoded: true, data: () => (new Idle({ userId: "user-1" })) }
+            always: { target: "Idle", decoded: true, data: () => (new Idle({ userId: "user-1" })) }
           }
         }
       })
@@ -7295,18 +7218,17 @@ describe("Machine", () => {
           }
         }
       })
-      const targets90 = Machine.targets(states)
       const machine = Machine.make({
         branches: {
-          transition1: { destination: { target: targets90.root.flow } },
-          transition2: { destination: { target: targets90.root.flow } }
+          transition1: { destination: { target: "flow" } },
+          transition2: { destination: { target: "flow" } }
         },
         id: "CompletionLoopMachine",
         root: states,
         events: Machine.eventsFromSchemas(Submit)
       }).handle({
         initial: {
-          target: Machine.targets(states).root.idle,
+          target: "idle",
           decoded: true,
           data: new Idle({ userId: "user-1" })
         },
@@ -7326,7 +7248,7 @@ describe("Machine", () => {
           },
           flow: {
             initial: {
-              target: Machine.targets(states).root.flow.done,
+              target: "flow.done",
               data: { requestId: "initial" }
             },
             onDone: {
@@ -7382,13 +7304,12 @@ describe("Machine", () => {
     }
   })
   const makeParallelCounterMachine = () => {
-    const targets91 = Machine.targets(ParallelCounterStates)
     return Machine.make({
       root: ParallelCounterStates,
       events: Machine.eventsFromSchemas(AdvanceCounters)
     }).handle({
       initial: {
-        target: Machine.targets(ParallelCounterStates).root.running,
+        target: "running",
         decoded: true,
         data: new CounterRunning({})
       },
@@ -7402,7 +7323,7 @@ describe("Machine", () => {
             left: {
               on: {
                 AdvanceCounters: {
-                  target: targets91.root.running.left,
+                  target: "running.left",
                   decoded: true,
                   data: ({ state }) => (new LeftCounter({ value: state.value + 1 }))
                 }
@@ -7411,7 +7332,7 @@ describe("Machine", () => {
             right: {
               on: {
                 AdvanceCounters: {
-                  target: targets91.root.running.right,
+                  target: "running.right",
                   decoded: true,
                   data: ({ state }) => (new RightCounter({ value: state.value + 1 }))
                 }
@@ -7429,7 +7350,7 @@ describe("Machine", () => {
       events: Machine.eventsFromSchemas(ConcurrentPing)
     }).handle({
       initial: {
-        target: Machine.targets(states).root.ConcurrentIdle,
+        target: "ConcurrentIdle",
         decoded: true,
         data: new ConcurrentIdle({})
       },

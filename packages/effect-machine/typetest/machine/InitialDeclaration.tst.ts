@@ -14,24 +14,23 @@ describe("handler-owned initial declarations", () => {
         Idle: {}
       }
     })
-    const targets = Machine.targets(root)
     const definition = Machine.make({ root, input: Schema.Number, events: Machine.events({ Reset: {} }) })
-    const nested = { initial: { target: targets.root.Session.Empty } }
+    const nested = { initial: { target: "Session.Empty" } }
     expect(definition.handle).type.not.toBeCallableWith({ root: { seed: 0 }, states: { Session: nested } })
     expect(definition.handle).type.not.toBeCallableWith({
       root: { seed: 0 },
-      initial: { target: targets.root.Session.Ready, data: { label: "" } },
+      initial: { target: "Session.Ready", data: { label: "" } },
       states: { Session: nested }
     })
     expect(definition.handle).type.not.toBeCallableWith({
       root: { seed: 0 },
-      initial: { target: targets.root.Idle, data: {} },
+      initial: { target: "Idle", data: {} },
       states: { Session: nested }
     })
     const machine = definition.handle({
       root: ({ input }) => ({ seed: input }),
       initial: {
-        target: targets.root.Session,
+        target: "Session",
         data: ({ root, state }) => {
           expect(root.seed).type.toBe<number>()
           expect(state.seed).type.toBe<number>()
@@ -41,7 +40,7 @@ describe("handler-owned initial declarations", () => {
       states: {
         Session: {
           initial: {
-            target: targets.root.Session.Ready,
+            target: "Session.Ready",
             data: (context) => {
               expect(context.state.count).type.toBe<number>()
               expect(context.root.seed).type.toBe<number>()
@@ -94,16 +93,15 @@ describe("handler-owned initial declarations", () => {
         }
       }
     })
-    const targets = Machine.targets(root)
     const definition = Machine.make({ root, events: Machine.events({}) })
-    const left = { initial: { target: targets.root.Session.Work.Left.Ready, data: { label: "ready" } } }
+    const left = { initial: { target: "Session.Work.Left.Ready" as const, data: { label: "ready" } } }
     const work = { initial: { Left: { count: 0 } }, states: { Left: left } }
-    const session = { initial: { target: targets.root.Session.Work }, states: { Work: work } }
-    const baseline = { initial: { target: targets.root.Idle }, states: { Session: session } }
+    const session = { initial: { target: "Session.Work" as const }, states: { Work: work } }
+    const baseline = { initial: { target: "Idle" as const }, states: { Session: session } }
     expect(definition.handle).type.toBeCallableWith(baseline)
     expect(definition.handle).type.not.toBeCallableWith({
       ...baseline,
-      initial: { target: targets.root.Idle, resolve: () => ({}) }
+      initial: { target: "Idle", resolve: () => ({}) }
     })
     expect(definition.handle).type.not.toBeCallableWith({ target: baseline.initial })
     expect(definition.handle).type.not.toBeCallableWith({ ...baseline, states: { Session: {} } })
@@ -116,7 +114,7 @@ describe("handler-owned initial declarations", () => {
       states: {
         Session: {
           ...session,
-          states: { Work: { ...work, states: { Left: { initial: { target: targets.root.Session.Work.Left.Ready } } } } }
+          states: { Work: { ...work, states: { Left: { initial: { target: "Session.Work.Left.Ready" } } } } }
         }
       }
     })
@@ -125,17 +123,16 @@ describe("handler-owned initial declarations", () => {
 
   test("constructors cannot perform asynchronous work", () => {
     const root = Machine.state({ states: { Ready: { fields: { count: Schema.Number } } } })
-    const targets = Machine.targets(root)
     const definition = Machine.make({ root, events: Machine.events({}) })
-    expect(definition.handle).type.toBeCallableWith({ initial: { target: targets.root.Ready, data: { count: 0 } } })
+    expect(definition.handle).type.toBeCallableWith({ initial: { target: "Ready", data: { count: 0 } } })
     expect(definition.handle).type.not.toBeCallableWith({
-      initial: { target: targets.root.Ready, data: () => Effect.succeed({ count: 0 }) }
+      initial: { target: "Ready", data: () => Effect.succeed({ count: 0 }) }
     })
     expect(definition.handle).type.not.toBeCallableWith({
-      initial: { target: targets.root.Ready, data: async () => ({ count: 0 }) }
+      initial: { target: "Ready", data: async () => ({ count: 0 }) }
     })
     expect(definition.handle).type.not.toBeCallableWith({
-      initial: { target: targets.root.Ready, data: { count: 0 } },
+      initial: { target: "Ready", data: { count: 0 } },
       initialize: () => ({})
     })
   })

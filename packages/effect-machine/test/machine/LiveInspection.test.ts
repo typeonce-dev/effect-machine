@@ -11,16 +11,15 @@ class Notice extends Schema.TaggedClass<Notice>("LiveInspectionNotice")("Notice"
 const states = Machine.state({ states: { Idle } })
 const Events = Machine.eventsFromSchemas(Increment)
 const Emissions = Machine.emittedEventsFromSchemas(Notice)
-const targets1 = Machine.targets(states)
 const machine = Machine.make({
-  branches: { transition1: { destination: { target: targets1.root.Idle } } },
+  branches: { transition1: { destination: { target: "Idle" } } },
   id: "counter",
   root: states,
   events: Events,
   emittedEvents: Emissions
 }).handle({
   initial: {
-    target: Machine.targets(states).root.Idle,
+    target: "Idle",
     decoded: true,
     data: new Idle({})
   },
@@ -105,7 +104,7 @@ describe("Machine live inspection", () => {
         events: Machine.eventsFromSchemas()
       }).handle({
         initial: {
-          target: Machine.targets(states).root.Idle,
+          target: "Idle",
           data: () => {
             throw new Error("boom")
           }
@@ -134,7 +133,7 @@ describe("Machine live inspection", () => {
         events: Machine.eventsFromSchemas()
       }).handle({
         initial: {
-          target: Machine.targets(states).root.Idle,
+          target: "Idle",
           decoded: true,
           data: new Idle({})
         },
@@ -190,7 +189,7 @@ describe("Machine live inspection", () => {
         events: Machine.eventsFromSchemas()
       }).handle({
         initial: {
-          target: Machine.targets(states).root.Idle,
+          target: "Idle",
           decoded: true,
           data: new Idle({})
         },
@@ -240,7 +239,7 @@ describe("Machine live inspection", () => {
         parent: Machine.parent(ParentEvents)
       }).handle({
         initial: {
-          target: Machine.targets(childStates).root.ChildIdle,
+          target: "ChildIdle",
           decoded: true,
           data: new ChildIdle({})
         },
@@ -265,7 +264,6 @@ describe("Machine live inspection", () => {
           ParentDone: { schema: ParentDone, type: "final" }
         }
       })
-      const targets5 = Machine.targets(parentStates)
       const parentMachine = Machine.make({
         children: { source1: Child },
         id: "parent-machine",
@@ -273,7 +271,7 @@ describe("Machine live inspection", () => {
         events: Machine.eventsFromSchemas(ParentEvents)
       }).handle({
         initial: {
-          target: Machine.targets(parentStates).root.ParentIdle,
+          target: "ParentIdle",
           decoded: true,
           data: new ParentIdle({})
         },
@@ -281,7 +279,7 @@ describe("Machine live inspection", () => {
           ParentIdle: {
             invoke: { src: "source1" },
             on: {
-              ChildReady: { target: targets5.root.ParentDone, decoded: true, data: () => (new ParentDone({})) }
+              ChildReady: { target: "ParentDone", decoded: true, data: () => (new ParentDone({})) }
             }
           },
           ParentDone: {}

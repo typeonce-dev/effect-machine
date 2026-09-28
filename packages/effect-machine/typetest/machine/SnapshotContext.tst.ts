@@ -31,17 +31,16 @@ const States = Machine.state({
 })
 describe("Machine transition snapshot context", () => {
   it("infers the complete machine snapshot for event, always, and onDone handlers", () => {
-    const targets1 = Machine.targets(States)
     Machine.make({
       branches: {
-        transition1: { destination: { target: targets1.root.Root.Left.LeftIdle } },
-        transition2: { destination: { target: targets1.root.Root.Left.LeftDone } }
+        transition1: { destination: { target: "Root.Left.LeftIdle" } },
+        transition2: { destination: { target: "Root.Left.LeftDone" } }
       },
       root: States,
       events: Machine.eventsFromSchemas(Advance)
     }).handle({
       initial: {
-        target: Machine.targets(States).root.Root,
+        target: "Root",
         decoded: true,
         data: new Root({})
       },
@@ -53,7 +52,7 @@ describe("Machine transition snapshot context", () => {
               initial: {
                 decoded: true,
                 data: new LeftIdle({}),
-                target: Machine.targets(States).root.Root.Left.LeftIdle
+                target: "Root.Left.LeftIdle"
               },
               onDone: {
                 branches: "transition1",
@@ -90,7 +89,7 @@ describe("Machine transition snapshot context", () => {
             },
             Right: {
               initial: {
-                target: Machine.targets(States).root.Root.Right.RightIdle,
+                target: "Root.Right.RightIdle",
                 decoded: true,
                 data: new RightIdle({})
               },
@@ -117,21 +116,20 @@ describe("Machine transition snapshot context", () => {
         }
       }
     })
-    const targets2 = Machine.targets(choiceStates)
     Machine.make({
-      branches: { transition1: { destination: { target: targets2.root.Flow.Active } } },
+      branches: { transition1: { destination: { target: "Flow.Active" } } },
       root: choiceStates,
       events: Machine.eventsFromSchemas()
     }).handle({
       initial: {
-        target: Machine.targets(choiceStates).root.Flow,
+        target: "Flow",
         decoded: true,
         data: new Flow({})
       },
       states: {
         Flow: {
           initial: {
-            target: Machine.targets(choiceStates).root.Flow.Routing
+            target: "Flow.Routing"
           },
           entry: (context) => {
             expect(context).type.not.toHaveProperty("snapshot")

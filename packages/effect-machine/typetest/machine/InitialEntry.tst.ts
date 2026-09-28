@@ -15,11 +15,10 @@ const States = Machine.state({
     }
   }
 })
-const targets1 = Machine.targets(States)
 const base = Machine.make({
   branches: {
-    transition3: { destination: { target: targets1.root.opened } },
-    transition4: { destination: { target: targets1.root.opened } }
+    transition3: { destination: { target: "opened" } },
+    transition4: { destination: { target: "opened" } }
   },
   root: States,
   events: Machine.eventsFromSchemas(Open)
@@ -27,24 +26,24 @@ const base = Machine.make({
 describe("declared initial entry types", () => {
   it("requires data for non-defaultable initial children", () => {
     expect(base.handle).type.not.toBeCallableWith({
-      initial: { target: targets1.root.closed },
-      states: { opened: { initial: { target: targets1.root.opened.idle } } }
+      initial: { target: "closed" },
+      states: { opened: { initial: { target: "opened.idle" } } }
     })
     base.handle({
       initial: {
-        target: Machine.targets(States).root.closed,
+        target: "closed",
         decoded: true,
         data: new Closed({})
       },
       states: {
         closed: {
           on: {
-            Open: { target: targets1.root.opened, decoded: true, data: () => (new Opened({ id: "team-1" })) }
+            Open: { target: "opened", decoded: true, data: () => (new Opened({ id: "team-1" })) }
           }
         },
         opened: {
           initial: {
-            target: Machine.targets(States).root.opened.idle,
+            target: "opened.idle",
             data: { count: 0 }
           },
           states: {
@@ -56,19 +55,19 @@ describe("declared initial entry types", () => {
     })
     base.handle({
       initial: {
-        target: Machine.targets(States).root.closed,
+        target: "closed",
         decoded: true,
         data: new Closed({})
       },
       states: {
         closed: {
           on: {
-            Open: { target: targets1.root.opened, data: () => ({ id: "team-1" }) }
+            Open: { target: "opened", data: () => ({ id: "team-1" }) }
           }
         },
         opened: {
           initial: {
-            target: Machine.targets(States).root.opened.idle,
+            target: "opened.idle",
             data: ({}) => ({ count: 0 })
           },
           states: {
@@ -80,7 +79,7 @@ describe("declared initial entry types", () => {
     })
     base.handle({
       initial: {
-        target: Machine.targets(States).root.closed,
+        target: "closed",
         decoded: true,
         data: new Closed({})
       },
@@ -100,7 +99,7 @@ describe("declared initial entry types", () => {
         },
         opened: {
           initial: {
-            target: Machine.targets(States).root.opened.idle,
+            target: "opened.idle",
             data: { count: 0 }
           },
           states: {
@@ -114,7 +113,7 @@ describe("declared initial entry types", () => {
   it("only exposes initial on compound and parallel state builders", () => {
     base.handle({
       initial: {
-        target: Machine.targets(States).root.closed,
+        target: "closed",
         decoded: true,
         data: new Closed({})
       },
@@ -140,7 +139,7 @@ describe("declared initial entry types", () => {
         },
         opened: {
           initial: {
-            target: Machine.targets(States).root.opened.idle,
+            target: "opened.idle",
             data: { count: 0 }
           },
           states: {

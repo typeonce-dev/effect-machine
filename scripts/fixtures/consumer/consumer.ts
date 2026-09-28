@@ -17,16 +17,15 @@ const InternalEvent = Schema.TaggedUnion({
 const States = Machine.state({ states: State.cases })
 const PublicEvents = Machine.eventsFromSchemas(PublicEvent)
 const InternalEvents = Machine.internalEventsFromSchemas(InternalEvent)
-const targets = Machine.targets(States)
 const machine = Machine.make({
   effects: { load: Effect.succeed("ready") },
   timers: { delay: "1 second" },
   branches: {
     start: {
-      cached: { target: targets.root.Loading },
+      cached: { target: "Loading" },
       measured: { none: true },
-      named: { target: targets.root.Done },
-      confirmed: { target: targets.root.Idle }
+      named: { target: "Done" },
+      confirmed: { target: "Idle" }
     }
   },
   id: "Consumer",
@@ -34,7 +33,7 @@ const machine = Machine.make({
   events: PublicEvents,
   internalEvents: InternalEvents
 }).handle({
-  initial: { target: targets.root.Idle },
+  initial: { target: "Idle" },
   states: {
     Idle: {
       on: {
@@ -52,7 +51,7 @@ const machine = Machine.make({
       }],
       on: {
         Loaded: {
-          target: targets.root.Done,
+          target: "Done",
           decoded: true,
           data: ({ event }) => State.cases.Done.make({ value: event.value })
         }

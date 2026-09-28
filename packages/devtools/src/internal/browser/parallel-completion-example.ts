@@ -104,7 +104,6 @@ const ParallelStates = Machine.state({
     Cancelled: OrderCancelled
   }
 })
-const targets1 = Machine.targets(ParallelStates)
 export const parallelCompletionMachine = Machine.make({
   timers: { source1: "5 seconds" },
   id: "parallel-completion",
@@ -122,7 +121,7 @@ export const parallelCompletionMachine = Machine.make({
   internalEvents: ParallelInternalEvents
 }).handle({
   initial: {
-    target: Machine.targets(ParallelStates).root.Cart,
+    target: "Cart",
     decoded: true,
     data: new Cart({ items: 2 })
   },
@@ -130,7 +129,7 @@ export const parallelCompletionMachine = Machine.make({
     Cart: {
       on: {
         Checkout: {
-          target: targets1.root.Order,
+          target: "Order",
           decoded: true,
           data: ({ event }) => (new Order({ orderId: event.orderId, total: event.total }))
         }
@@ -140,36 +139,36 @@ export const parallelCompletionMachine = Machine.make({
       initial: { payment: ({}) => ({ attempts: 0 }), fulfillment: ({}) => ({ warehouse: "north" }) },
       on: {
         CancelOrder: {
-          target: targets1.root.Cancelled,
+          target: "Cancelled",
           decoded: true,
           data: ({ event }) => (new OrderCancelled({ reason: event.reason }))
         }
       },
       onDone: {
-        target: targets1.root.Complete,
+        target: "Complete",
         decoded: true,
         data: () => (new OrderComplete({ orderId: "completed-order" }))
       },
       states: {
         payment: {
           initial: {
-            target: Machine.targets(ParallelStates).root.Order.payment.AwaitingAuthorization
+            target: "Order.payment.AwaitingAuthorization"
           },
           states: {
             AwaitingAuthorization: {
               on: {
                 Authorize: {
-                  target: targets1.root.Order.payment.Authorized,
+                  target: "Order.payment.Authorized",
                   decoded: true,
                   data: ({ event }) => (new Authorized({ authorizationId: event.authorizationId }))
                 },
                 CompleteAll: {
-                  target: targets1.root.Order.payment.Authorized,
+                  target: "Order.payment.Authorized",
                   decoded: true,
                   data: ({ event }) => (new Authorized({ authorizationId: event.authorizationId }))
                 },
                 DeclinePayment: {
-                  target: targets1.root.Cancelled,
+                  target: "Cancelled",
                   decoded: true,
                   data: ({ event }) => (new OrderCancelled({ reason: event.reason }))
                 }
@@ -180,23 +179,23 @@ export const parallelCompletionMachine = Machine.make({
         },
         fulfillment: {
           initial: {
-            target: Machine.targets(ParallelStates).root.Order.fulfillment.WaitingForPayment
+            target: "Order.fulfillment.WaitingForPayment"
           },
           states: {
             WaitingForPayment: {
               on: {
                 Authorize: {
-                  target: targets1.root.Order.fulfillment.Packing,
+                  target: "Order.fulfillment.Packing",
                   decoded: true,
                   data: () => (new Packing({ packageCount: 1 }))
                 },
                 Pack: {
-                  target: targets1.root.Order.fulfillment.Packing,
+                  target: "Order.fulfillment.Packing",
                   decoded: true,
                   data: ({ event }) => (new Packing({ packageCount: event.packages }))
                 },
                 CompleteAll: {
-                  target: targets1.root.Order.fulfillment.Shipped,
+                  target: "Order.fulfillment.Shipped",
                   decoded: true,
                   data: ({ event }) => (new Shipped({ trackingCode: event.trackingCode }))
                 }
@@ -215,17 +214,17 @@ export const parallelCompletionMachine = Machine.make({
               },
               on: {
                 AutoShip: {
-                  target: targets1.root.Order.fulfillment.Shipped,
+                  target: "Order.fulfillment.Shipped",
                   decoded: true,
                   data: () => (new Shipped({ trackingCode: "automatic" }))
                 },
                 Ship: {
-                  target: targets1.root.Order.fulfillment.Shipped,
+                  target: "Order.fulfillment.Shipped",
                   decoded: true,
                   data: ({ event }) => (new Shipped({ trackingCode: event.trackingCode }))
                 },
                 CompleteAll: {
-                  target: targets1.root.Order.fulfillment.Shipped,
+                  target: "Order.fulfillment.Shipped",
                   decoded: true,
                   data: ({ event }) => (new Shipped({ trackingCode: event.trackingCode }))
                 }
@@ -242,7 +241,7 @@ export const parallelCompletionMachine = Machine.make({
     Cancelled: {
       on: {
         RetryOrder: {
-          target: targets1.root.Order,
+          target: "Order",
           decoded: true,
           data: () => (new Order({ orderId: "retry", total: 0 }))
         }

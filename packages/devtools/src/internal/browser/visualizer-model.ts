@@ -72,9 +72,7 @@ export const triggerLabel = (transition: VisualizationTransition): string => {
   }
 }
 
-const propertyAccess = (key: string): string => /^[$A-Z_a-z][$\w]*$/.test(key) ? `.${key}` : `[${JSON.stringify(key)}]`
-
-const pathAccess = (path: string): string => path === "" ? "" : path.split(".").map(propertyAccess).join("")
+const pathName = (path: string): string => JSON.stringify(path === "" ? "root" : path)
 
 /** Public declaration represented by a retained transition branch. */
 export const branchTargetApi = (branch: VisualizationBranch): string | undefined => {
@@ -84,9 +82,10 @@ export const branchTargetApi = (branch: VisualizationBranch): string | undefined
   if (path === null) return undefined
   if (selection.scope === "initial") return "initialConfiguration"
   const operation = selection.kind === "state" || selection.kind === "choice" ? "target" : selection.kind
-  const fields = [`${operation}: targets.root${pathAccess(path)}`]
+  if (operation === "target" && path === "") return "{ initialize: … }"
+  const fields = [`${operation}: ${pathName(path)}`]
   if (operation !== "update") {
-    for (const owner of branch.updates) fields.push(`update: targets.root${pathAccess(owner)}`)
+    for (const owner of branch.updates) fields.push(`update: ${pathName(owner)}`)
   }
   return `{ ${fields.join(", ")} }`
 }

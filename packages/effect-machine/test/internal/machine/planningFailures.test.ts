@@ -16,13 +16,12 @@ const defect = new Error("handler defect")
 // paths are exercised alongside the generic reference.
 const makeDefectMachine = (options: { readonly failInitial: boolean }) => {
   const root = Machine.state({ states: { Idle, Busy } })
-  const targets = Machine.targets(root)
   return Machine.make({
     root,
     events: Machine.eventsFromSchemas(Go)
   }).handle({
     initial: {
-      target: targets.root.Idle,
+      target: "Idle",
       decoded: true,
       data: () => {
         if (options.failInitial) throw defect
@@ -33,7 +32,7 @@ const makeDefectMachine = (options: { readonly failInitial: boolean }) => {
       Idle: {
         on: {
           Go: {
-            target: targets.root.Busy,
+            target: "Busy",
             decoded: true,
             data: () => {
               throw defect
@@ -50,10 +49,9 @@ const makeDefectMachine = (options: { readonly failInitial: boolean }) => {
 // stabilizes once either is entered.
 const makeLoopMachine = (options: { readonly loopInitial: boolean }) => {
   const root = Machine.state({ states: { Waiting, Idle, Busy } })
-  const targets = Machine.targets(root)
   const loop = {
-    Idle: { always: { target: targets.root.Busy, decoded: true, data: () => new Busy() } },
-    Busy: { always: { target: targets.root.Idle, decoded: true, data: () => new Idle() } }
+    Idle: { always: { target: "Busy", decoded: true, data: () => new Busy() } },
+    Busy: { always: { target: "Idle", decoded: true, data: () => new Idle() } }
   } as const
   const machine = Machine.make({
     root,
@@ -61,13 +59,13 @@ const makeLoopMachine = (options: { readonly loopInitial: boolean }) => {
   })
   return options.loopInitial
     ? machine.handle({
-      initial: { target: targets.root.Idle, decoded: true, data: new Idle() },
+      initial: { target: "Idle", decoded: true, data: new Idle() },
       states: { Waiting: {}, ...loop }
     })
     : machine.handle({
-      initial: { target: targets.root.Waiting, decoded: true, data: new Waiting() },
+      initial: { target: "Waiting", decoded: true, data: new Waiting() },
       states: {
-        Waiting: { on: { Loop: { target: targets.root.Idle, decoded: true, data: () => new Idle() } } },
+        Waiting: { on: { Loop: { target: "Idle", decoded: true, data: () => new Idle() } } },
         ...loop
       }
     })

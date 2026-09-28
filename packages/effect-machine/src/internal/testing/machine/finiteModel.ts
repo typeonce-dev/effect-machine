@@ -1311,7 +1311,6 @@ const selectableDefinitionTarget = (
 }
 
 const selectDefinitionTarget = (
-  references: Record<string, any>,
   source: string,
   target: string,
   byPath: ReadonlyMap<string, FlatFiniteState>
@@ -1322,9 +1321,7 @@ const selectDefinitionTarget = (
     : selected.root !== byPath.get(source)!.root ?
     target.split(".")[0]!
     : selectableDefinitionTarget(source, target, byPath)
-  let reference = references
-  for (const part of selectedPath.split(".")) reference = reference[part]
-  return selected.node._tag === "History" ? { history: reference } : { target: reference }
+  return selected.node._tag === "History" ? { history: selectedPath } : { target: selectedPath }
 }
 
 const resolveDefinitionTarget = (
@@ -1348,7 +1345,6 @@ const makeHandlers = (
   parent: string | undefined,
   byPath: ReadonlyMap<string, FlatFiniteState>,
   transitions: ReadonlyMap<string, FiniteTransition>,
-  references: Record<string, any>,
   branches: Record<string, Readonly<Record<string, unknown>>>
 ): Record<string, unknown> => {
   const handlers: Record<string, unknown> = Object.create(null)
@@ -1357,7 +1353,7 @@ const makeHandlers = (
     if (node._tag === "History") continue
     if (node._tag === "Choice") {
       const group = `choice:${path}`
-      branches[group] = { destination: selectDefinitionTarget(references, path, node.selected, byPath) }
+      branches[group] = { destination: selectDefinitionTarget(path, node.selected, byPath) }
       handlers[node.key] = {
         choice: {
           branches: group,
@@ -1379,7 +1375,7 @@ const makeHandlers = (
       const group = `transition:${path}:${triggerKey(transition.trigger)}`
       if (transition.target !== undefined) {
         branches[group] = {
-          destination: selectDefinitionTarget(references, path, transition.target, byPath)
+          destination: selectDefinitionTarget(path, transition.target, byPath)
         }
       }
       const config = {
@@ -1423,7 +1419,7 @@ const makeHandlers = (
           ...(node._tag === "Compound"
             ? {
               initial: {
-                target: `${path}.${node.initial}`.split(".").reduce((ref, key) => ref[key], references),
+                target: `${path}.${node.initial}`,
                 ...(byPath.get(`${path}.${node.initial}`)!.node._tag === "Choice" ? {} : {
                   decoded: true,
                   data: stateValue(byPath.get(`${path}.${node.initial}`)!)
@@ -1437,7 +1433,7 @@ const makeHandlers = (
                   .map((child) => [child.key, { decoded: true, data: stateValue(byPath.get(`${path}.${child.key}`)!) }])
               )
             }),
-          states: makeHandlers(node.states, path, byPath, transitions, references, branches)
+          states: makeHandlers(node.states, path, byPath, transitions, branches)
         }
         : {})
     }
@@ -1468,7 +1464,7 @@ export const compileModel = (model: FiniteModel): Machine.Machine.Any => {
     transition
   ]))
   const branches: Record<string, Readonly<Record<string, unknown>>> = Object.create(null)
-  const handlers = makeHandlers(model.roots, undefined, byPath, transitions, Machine.targets(defined).root, branches)
+  const handlers = makeHandlers(model.roots, undefined, byPath, transitions, branches)
   const machine = Machine.make({
     root: defined,
     branches,
@@ -1477,7 +1473,7 @@ export const compileModel = (model: FiniteModel): Machine.Machine.Any => {
   return machine.handle(
     {
       initial: {
-        target: (Machine.targets(defined).root as unknown as Record<string, unknown>)[model.initial],
+        target: model.initial,
         decoded: true,
         data: stateValue(initial)
       },

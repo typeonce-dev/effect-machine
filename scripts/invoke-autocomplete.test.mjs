@@ -21,7 +21,7 @@ const atomDefinition = Machine.make({
   root: AtomStates,
   events: Machine.eventsFromSchemas(),
   input: Schema.String
-}).handle({ initial: { target: Machine.targets(AtomStates).root.AtomIdle }, states: { AtomIdle: {}, AtomReady: {} } })
+}).handle({ initial: { target: "AtomIdle" }, states: { AtomIdle: {}, AtomReady: {} } })
 
 AtomMachine.family(atomDefinition, {
   atoms: {
@@ -34,12 +34,12 @@ AtomMachine.family(atomDefinition, {
 const atomChildDefinition = Machine.make({
   root: AtomStates,
   events: Machine.eventsFromSchemas()
-}).handle({ initial: { target: Machine.targets(AtomStates).root.AtomIdle }, states: { AtomIdle: {}, AtomReady: {} } })
+}).handle({ initial: { target: "AtomIdle" }, states: { AtomIdle: {}, AtomReady: {} } })
 const AtomChild = Machine.childFamily(atomChildDefinition)
 const atomParent = AtomMachine.make(Machine.make({
   root: AtomStates,
   events: Machine.eventsFromSchemas()
-}).handle({ initial: { target: Machine.targets(AtomStates).root.AtomIdle }, states: { AtomIdle: {}, AtomReady: {} } }))
+}).handle({ initial: { target: "AtomIdle" }, states: { AtomIdle: {}, AtomReady: {} } }))
 AtomMachine.familyChild(atomParent, {
   child: (id: string) => AtomChild(id),
   atoms: {
@@ -58,49 +58,61 @@ AtomMachine.familyChild(atomParent, {
 })
 
 const States = Machine.state({ fields: { count: Schema.Number }, states: { Loading: { fields: {} }, Done: { fields: {} }, Failed: { fields: {} } } })
-const targets = Machine.targets(States)
 Machine.make({ /*invoke-sources*/root: States, events: Machine.eventsFromSchemas() })
 const definition = Machine.make({
   effects: { load: (tag: symbol) => Effect.fail("offline").pipe(Effect.as(tag)) },
   streams: { updates: Stream.make(1) },
-  branches: { complete: { ready: { target: targets./*branch-target-scopes*/root.Done }, unchanged: { none: true } } },
+  branches: { complete: { ready: { target: "Done" }, unchanged: { none: true } } },
   root: States, events: Machine.eventsFromSchemas(), input: Schema.String
 })
 definition.handle({
  root: ({ /*root-data-context*/ ...context }) => ({ count: context.input.length }),
- initial: { /*initial-operations*/ target: targets.root./*initial-selector*/Loading, data: ({ /*initial-context*/ ...context }) => ({}) }
+ initial: { /*initial-operations*/ target: "Loading", data: ({ /*initial-context*/ ...context }) => ({}) }
 })
-definition.handle({ root: { count: 0 }, initial: { target: targets.root.Loading }, states: { Loading: { invoke: {
+definition.handle({ root: { count: 0 }, initial: { target: "Loading" }, states: { Loading: { invoke: {
   src: "load", input: ({ /*invoke-source-context*/ ...context }) => context.event._tag,
   onDone: { branches: "complete", resolve: ({ /*done-context*/ ...context }) => context.select.ready({ /*done-exact-target*/ }) },
-  onFailure: { target: targets.root./*done-target*/Failed, data: ({ /*failure-context*/ ...context }) => ({}) }
+  onFailure: { target: "Failed", data: ({ /*failure-context*/ ...context }) => ({}) }
 } } } })
-definition.handle({ root: { count: 0 }, initial: { target: targets.root.Loading }, states: { Loading: {
+definition.handle({ root: { count: 0 }, initial: { target: "Loading" }, states: { Loading: {
 // @ts-expect-error Incomplete invocation exposes required properties in completion.
 invoke: {
   src: "load", input: () => Machine.InitialEventTypeId, /*invoke-properties*/
 } } } })
-definition.handle({ root: { count: 0 }, initial: { target: targets.root.Loading }, states: { Loading: { invoke: {
+definition.handle({ root: { count: 0 }, initial: { target: "Loading" }, states: { Loading: { invoke: {
   src: "updates", onElement: { none: true, resolve: ({ /*element-context*/ ...context }) => undefined }, onDone: { none: true }
 } } } })
 const requiredParentDefinition = Machine.make({ root: States, events: Machine.eventsFromSchemas(), parent: Machine.parent(Machine.eventsFromSchemas()), effects: { wait: (_input: undefined) => Effect.never } })
-requiredParentDefinition.handle({ root: { count: 0 }, initial: { target: targets.root.Loading }, states: { Loading: { invoke: { src: "wait", input: ({ /*required-parent-context*/ ...context }) => undefined } } } })
+requiredParentDefinition.handle({ root: { count: 0 }, initial: { target: "Loading" }, states: { Loading: { invoke: { src: "wait", input: ({ /*required-parent-context*/ ...context }) => undefined } } } })
 const optionalParentDefinition = Machine.make({ root: States, events: Machine.eventsFromSchemas(), parent: Machine.optionalParent(Machine.eventsFromSchemas()), effects: { wait: (_input: undefined) => Effect.never } })
-optionalParentDefinition.handle({ root: { count: 0 }, initial: { target: targets.root.Loading }, states: { Loading: { invoke: { src: "wait", input: ({ /*optional-parent-context*/ ...context }) => undefined } } } })
-definition.handle({ root: { count: 0 }, initial: { target: targets.root.Loading }, states: { Loading: {
+optionalParentDefinition.handle({ root: { count: 0 }, initial: { target: "Loading" }, states: { Loading: { invoke: { src: "wait", input: ({ /*optional-parent-context*/ ...context }) => undefined } } } })
+definition.handle({ root: { count: 0 }, initial: { target: "Loading" }, states: { Loading: {
 // @ts-expect-error Incomplete transition exposes its operation fields in completion.
 always: { /*transition-selector*/ }
 } } })
-definition.handle({ root: { count: 0 }, initial: { target: targets.root.Loading }, states: { Loading: { on: {}, always: { target: targets.root.Done, /*selected-operations*/ } } } })
-definition.handle({ root: { count: 0 }, initial: { target: targets.root.Loading }, states: { Loading: { always: { none: true, resolve: ({ /*targetless-context*/ ...context }) => undefined } } } })
-definition.handle({ root: { count: 0 }, initial: { target: targets.root.Loading }, states: { Loading: { always: { target: targets./*target-scopes*/root.Done, data: ({ /*transition-context*/ ...context }) => ({}) } } } })
-definition.handle({ root: { count: 0 }, initial: { target: targets.root.Loading }, states: { Loading: { always: { branches: "complete", resolve: ({ /*branch-resolve-context*/ ...context }) => context.select./*branch-select-keys*/ready({ /*transition-exact-target*/ }) } } } })
-definition.handle({ root: { count: 0 }, initial: { target: targets.root.Loading }, states: { Loading: { always: { none: true, resolve: ({ /*required-context*/ ...context }) => undefined } } } })
-definition.handle({ root: { count: 0 }, initial: { target: targets.root.Loading }, states: { Loading: { always: { none: true, declinable: true, resolve: ({ /*declinable-context*/ ...context }) => context.decline() } } } })
+definition.handle({ root: { count: 0 }, initial: { target: "Loading" }, states: { Loading: { on: {}, always: { target: "Done", /*selected-operations*/ } } } })
+definition.handle({ root: { count: 0 }, initial: { target: "Loading" }, states: { Loading: { always: { none: true, resolve: ({ /*targetless-context*/ ...context }) => undefined } } } })
+definition.handle({ root: { count: 0 }, initial: { target: "Loading" }, states: { Loading: { always: { target: "Done", data: ({ /*transition-context*/ ...context }) => ({}) } } } })
+definition.handle({ root: { count: 0 }, initial: { target: "Loading" }, states: { Loading: { always: { branches: "complete", resolve: ({ /*branch-resolve-context*/ ...context }) => context.select./*branch-select-keys*/ready({ /*transition-exact-target*/ }) } } } })
+definition.handle({ root: { count: 0 }, initial: { target: "Loading" }, states: { Loading: { always: { none: true, resolve: ({ /*required-context*/ ...context }) => undefined } } } })
+definition.handle({ root: { count: 0 }, initial: { target: "Loading" }, states: { Loading: { always: { none: true, declinable: true, resolve: ({ /*declinable-context*/ ...context }) => context.decline() } } } })
+
+// @ts-expect-error Empty paths keep the completion position unfiltered.
+definition.handle({ root: { count: 0 }, initial: { target: "" } })
+definition.handle({ root: { count: 0 }, initial: { target: "Loading" }, states: { Loading: { invoke: { src: "load", input: () => Machine.InitialEventTypeId,
+  // @ts-expect-error Empty paths keep the completion position unfiltered.
+  onFailure: { target: "" }
+} } } })
+// @ts-expect-error Empty paths keep the completion position unfiltered.
+definition.handle({ root: { count: 0 }, initial: { target: "Loading" }, states: { Loading: { always: { target: "" } } } })
+// @ts-expect-error Empty paths keep the completion position unfiltered.
+definition.handle({ root: { count: 0 }, initial: { target: "Loading" }, states: { Loading: { always: { update: "", data: {} } } } })
+// @ts-expect-error Empty paths keep the completion position unfiltered.
+Machine.make({ root: States, events: Machine.eventsFromSchemas(), branches: { probe: { destination: { target: "" } } } })
 
 const eventDefinition = Machine.make({ root: States, events: Machine.events({ Retry: {} }) })
-eventDefinition.handle({ root: { count: 0 }, initial: { target: targets.root.Loading }, states: { Loading: { on: { /*event-handler-on*/ } } } })
-eventDefinition.handle({ root: { count: 0 }, initial: { target: targets.root.Loading }, /*event-handler-root*/ states: { Loading: { /*event-handler-node*/ on: { Retry: { none: true } } } } })
+eventDefinition.handle({ root: { count: 0 }, initial: { target: "Loading" }, states: { Loading: { on: { /*event-handler-on*/ } } } })
+eventDefinition.handle({ root: { count: 0 }, initial: { target: "Loading" }, /*event-handler-root*/ states: { Loading: { /*event-handler-node*/ on: { Retry: { none: true } } } } })
 
 `
 
@@ -145,6 +157,13 @@ const stringCompletions = (prefix) => {
   const position = source.indexOf(prefix)
   assert.notEqual(position, -1)
   return new Set(service.getCompletionsAtPosition(virtualFile, position + prefix.length, {})?.entries.map((entry) => entry.name))
+}
+
+const probeCompletions = (probe) => {
+  const cursor = probe.indexOf("|")
+  const position = source.indexOf(probe.replace("|", ""))
+  assert.notEqual(position, -1)
+  return new Set(service.getCompletionsAtPosition(virtualFile, position + cursor, {})?.entries.map((entry) => entry.name))
 }
 
 test("contextually completes data-last AtomMachine selectors", () => {
@@ -199,7 +218,7 @@ test("contextually completes Effect invocation factories while authoring", () =>
   assert.equal(done.has("state"), true)
   assert.equal(done.has("select"), true)
 
-  const doneTarget = completions("done-target")
+  const doneTarget = probeCompletions('onFailure: { target: "|" }')
   assert.equal(doneTarget.has("Done"), true)
   assert.equal(doneTarget.has("Failed"), true)
 
@@ -228,9 +247,9 @@ test("contextually completes Stream element handlers while authoring", () => {
 })
 
 test("contextually completes transition definitions while authoring", () => {
-  const initialSelector = completions("initial-selector")
+  const initialSelector = probeCompletions('initial: { target: "|" } })')
   assert.equal(initialSelector.has("Loading"), true)
-  assert.equal(initialSelector.has("none"), false)
+  assert.equal(initialSelector.has("root"), false)
 
   const initialOperations = completions("initial-operations")
   assert.equal(initialOperations.has("decoded"), true)
@@ -249,9 +268,15 @@ test("contextually completes transition definitions while authoring", () => {
   assert.equal(selector.has("branches"), true)
   assert.equal(selector.has("full"), false)
 
-  const scopes = completions("target-scopes")
-  assert.equal(scopes.has("root"), true)
-  assert.equal(scopes.has("local"), false)
+  const targets = probeCompletions('always: { target: "|" }')
+  assert.equal(targets.has("Done"), true)
+  assert.equal(targets.has("Failed"), true)
+  assert.equal(targets.has("root"), false)
+
+  const owners = probeCompletions('always: { update: "|", data: {} }')
+  assert.equal(owners.has("root"), true)
+  assert.equal(owners.has("Loading"), true)
+  assert.equal(owners.has("Done"), false)
 
   const context = completions("transition-context")
   assert.equal(context.has("state"), true)
@@ -268,9 +293,10 @@ test("contextually completes transition definitions while authoring", () => {
   assert.equal(targetless.has("state"), true)
   assert.equal(targetless.has("target"), false)
 
-  const branchScopes = completions("branch-target-scopes")
-  assert.equal(branchScopes.has("root"), true)
-  assert.equal(branchScopes.has("branch"), false)
+  const branchTargets = probeCompletions('destination: { target: "|" }')
+  assert.equal(branchTargets.has("Done"), true)
+  assert.equal(branchTargets.has("Loading"), true)
+  assert.equal(branchTargets.has("root"), false)
 
   const resolve = completions("branch-resolve-context")
   assert.equal(resolve.has("state"), true)

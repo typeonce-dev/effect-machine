@@ -18,7 +18,7 @@ describe("MachineTest probe", () => {
     internalEvents: Machine.internalEventsFromSchemas(InternalEvent)
   }).handle({
     initial: {
-      target: Machine.targets(states).root.State,
+      target: "State",
       decoded: true,
       data: new State({ count: 0 })
     },

@@ -14,14 +14,13 @@ class Add extends Schema.TaggedClass<Add>("Add")("Add", {
 }) {}
 class Finish extends Schema.TaggedClass<Finish>("Finish")("Finish", {}) {}
 const CounterStates = Machine.state({ states: { count: Count, done: Done } })
-const targets1 = Machine.targets(CounterStates)
 const counterMachine = Machine.make({
-  branches: { transition1: { destination: { target: targets1.root.count } } },
+  branches: { transition1: { destination: { target: "count" } } },
   root: CounterStates,
   events: Machine.eventsFromSchemas(Add, Finish)
 }).handle({
   initial: {
-    target: Machine.targets(CounterStates).root.count,
+    target: "count",
     decoded: true,
     data: new Count({ value: 0 })
   },
@@ -35,7 +34,7 @@ const counterMachine = Machine.make({
             target({ data: new Count({ value: state.value + event.amount }), decoded: true }),
           declinable: true
         },
-        Finish: { target: targets1.root.done, decoded: true, data: () => (new Done({})) }
+        Finish: { target: "done", decoded: true, data: () => (new Done({})) }
       }
     },
     done: {}
@@ -56,7 +55,7 @@ const opaqueMachine = Machine.make({
   input: Schema.Any
 }).handle({
   initial: {
-    target: Machine.targets(OpaqueStates).root.opaque,
+    target: "opaque",
     decoded: true,
     data: ({ root: { input: payload } }) => new Opaque({ payload })
   },
@@ -66,16 +65,15 @@ const opaqueMachine = Machine.make({
   }
 })
 const StartupStates = Machine.state({ states: { count: Count } })
-const targets2 = Machine.targets(StartupStates)
 const startupMachine = Machine.make({
   branches: {
-    transition1: { zero: { target: targets2.root.count, title: "Count is zero" }, unchanged: { none: true } }
+    transition1: { zero: { target: "count", title: "Count is zero" }, unchanged: { none: true } }
   },
   root: StartupStates,
   events: Machine.eventsFromSchemas(Add)
 }).handle({
   initial: {
-    target: Machine.targets(StartupStates).root.count,
+    target: "count",
     decoded: true,
     data: new Count({ value: 0 })
   },
@@ -90,7 +88,7 @@ const startupMachine = Machine.make({
       },
       on: {
         Add: {
-          target: targets2.root.count,
+          target: "count",
           decoded: true,
           data: ({ event, state }) => (new Count({ value: state.value + event.amount }))
         }
@@ -107,7 +105,7 @@ const branchMachine = Machine.make({
   events: Machine.eventsFromSchemas(Select)
 }).handle({
   initial: {
-    target: Machine.targets(StartupStates).root.count,
+    target: "count",
     decoded: true,
     data: new Count({ value: 0 })
   },
@@ -139,7 +137,7 @@ const finiteEventMachine = Machine.make({
   events: Machine.eventsFromSchemas(TickEvent, ChoiceEvent)
 }).handle({
   initial: {
-    target: Machine.targets(EventStates).root.count,
+    target: "count",
     decoded: true,
     data: new Count({ value: 0 })
   },
@@ -158,7 +156,7 @@ const openEventMachine = Machine.make({
   events: Machine.eventsFromSchemas(OpenEvent)
 }).handle({
   initial: {
-    target: Machine.targets(EventStates).root.count,
+    target: "count",
     decoded: true,
     data: new Count({ value: 0 })
   },

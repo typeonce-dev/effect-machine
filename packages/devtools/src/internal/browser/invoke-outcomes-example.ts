@@ -16,14 +16,13 @@ const ChildStates = Machine.state({
     Done: { schema: ChildDone, type: "final", output: Schema.String }
   }
 })
-const targets1 = Machine.targets(ChildStates)
 export const invokeGalleryChildMachine = Machine.make({
   id: "invoke-gallery-child",
   root: ChildStates,
   events: Machine.eventsFromSchemas(FinishChild)
 }).handle({
   initial: {
-    target: Machine.targets(ChildStates).root.Working,
+    target: "Working",
     decoded: true,
     data: new ChildWorking({ task: "render-preview" })
   },
@@ -31,7 +30,7 @@ export const invokeGalleryChildMachine = Machine.make({
     Working: {
       on: {
         FinishChild: {
-          target: targets1.root.Done,
+          target: "Done",
           decoded: true,
           data: ({ state }) => (new ChildDone({ result: `${state.task}:complete` }))
         }
@@ -122,11 +121,10 @@ const GalleryStates = Machine.state({
     Failed
   }
 })
-const targets2 = Machine.targets(GalleryStates)
 export const invokeOutcomesMachine = Machine.make({
   branches: {
     transition13: {
-      ready: { target: targets2.root.Completed, title: "Worker reports ready" },
+      ready: { target: "Completed", title: "Worker reports ready" },
       waiting: { none: true, title: "Worker is still starting" }
     }
   },
@@ -149,44 +147,44 @@ export const invokeOutcomesMachine = Machine.make({
   internalEvents: GalleryInternalEvents
 }).handle({
   initial: {
-    target: Machine.targets(GalleryStates).root.Gallery,
+    target: "Gallery",
     decoded: true,
     data: new Gallery({ selectedDemo: null })
   },
   states: {
     Gallery: {
       initial: {
-        target: Machine.targets(GalleryStates).root.Gallery.Choose,
+        target: "Gallery.Choose",
         decoded: true,
         data: ({}) => new Choose({})
       },
       on: {
-        Reset: { target: targets2.root.Gallery.Choose, decoded: true, data: () => (new Choose({})) }
+        Reset: { target: "Gallery.Choose", decoded: true, data: () => (new Choose({})) }
       },
       states: {
         Choose: {
           on: {
             RunEffect: {
-              target: targets2.root.Gallery.LoadingDocument,
+              target: "Gallery.LoadingDocument",
               decoded: true,
               data: ({ event }) => (new LoadingDocument({ request: event.request }))
             },
             RunStream: {
-              target: targets2.root.Gallery.StreamingUpdates,
+              target: "Gallery.StreamingUpdates",
               decoded: true,
               data: () => (new StreamingUpdates({ values: [] }))
             },
             RunTimer: {
-              target: targets2.root.Gallery.WaitingForTimeout,
+              target: "Gallery.WaitingForTimeout",
               decoded: true,
               data: () => (new WaitingForTimeout({ delay: "2 seconds" }))
             },
             RunProcess: {
-              target: targets2.root.Gallery.WatchingProcess,
+              target: "Gallery.WatchingProcess",
               decoded: true,
               data: () => (new WatchingProcess({ revision: 1 }))
             },
-            RunChild: { target: targets2.root.Gallery.RunningChild, decoded: true, data: () => (new RunningChild({})) }
+            RunChild: { target: "Gallery.RunningChild", decoded: true, data: () => (new RunningChild({})) }
           }
         },
         LoadingDocument: {
@@ -195,12 +193,12 @@ export const invokeOutcomesMachine = Machine.make({
             id: "load-document",
             input: (context) => context,
             onDone: {
-              target: targets2.root.Completed,
+              target: "Completed",
               decoded: true,
               data: ({ output }) => (new Completed({ source: "effect", result: output }))
             },
             onFailure: {
-              target: targets2.root.Failed,
+              target: "Failed",
               decoded: true,
               data: ({ error }) => (new Failed({ source: "effect", message: error }))
             }
@@ -217,19 +215,19 @@ export const invokeOutcomesMachine = Machine.make({
               }
             },
             onDone: {
-              target: targets2.root.Completed,
+              target: "Completed",
               decoded: true,
               data: ({ state }) => (new Completed({ source: "stream", result: state.values.join(", ") }))
             },
             onFailure: {
-              target: targets2.root.Failed,
+              target: "Failed",
               decoded: true,
               data: ({ error }) => (new Failed({ source: "stream", message: error }))
             }
           },
           on: {
             StreamValue: {
-              target: targets2.root.Gallery.StreamingUpdates,
+              target: "Gallery.StreamingUpdates",
               decoded: true,
               data: ({ event, state }) => (new StreamingUpdates({ values: [...state.values, event.value] }))
             }
@@ -240,7 +238,7 @@ export const invokeOutcomesMachine = Machine.make({
             src: "source3",
             id: "request-timeout",
             onDone: {
-              target: targets2.root.Completed,
+              target: "Completed",
               decoded: true,
               data: () => (new Completed({ source: "timer", result: "timeout elapsed" }))
             }
@@ -252,7 +250,7 @@ export const invokeOutcomesMachine = Machine.make({
             id: "status-worker",
             address: Machine.childAddress("status-worker"),
             onFailure: {
-              target: targets2.root.Failed,
+              target: "Failed",
               decoded: true,
               data: ({ error }) => (new Failed({ source: "process", message: String(error) }))
             },
@@ -269,7 +267,7 @@ export const invokeOutcomesMachine = Machine.make({
           invoke: {
             src: "source5",
             onDone: {
-              target: targets2.root.Completed,
+              target: "Completed",
               decoded: true,
               data: ({ output }) => (new Completed({ source: "child machine", result: output }))
             }
@@ -279,12 +277,12 @@ export const invokeOutcomesMachine = Machine.make({
     },
     Completed: {
       on: {
-        Reset: { target: targets2.root.Gallery, decoded: true, data: () => (new Gallery({ selectedDemo: null })) }
+        Reset: { target: "Gallery", decoded: true, data: () => (new Gallery({ selectedDemo: null })) }
       }
     },
     Failed: {
       on: {
-        Reset: { target: targets2.root.Gallery, decoded: true, data: () => (new Gallery({ selectedDemo: null })) }
+        Reset: { target: "Gallery", decoded: true, data: () => (new Gallery({ selectedDemo: null })) }
       }
     }
   }

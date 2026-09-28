@@ -122,7 +122,6 @@ type IsAny<A> = 0 extends (1 & A) ? true : false
  * import { Schema } from "effect"
  * const events = Machine.events({ Add: { by: Schema.Number } })
  * const Root = Machine.state({ fields: { count: Schema.Number } })
- * const targets = Machine.targets(Root)
  * export const counter = Machine.make({
  *   root: Root,
  *   events
@@ -130,7 +129,7 @@ type IsAny<A> = 0 extends (1 & A) ? true : false
  *   root: () => ({ count: 0 }),
  *   on: {
  *     Add: {
- *       update: targets.root,
+ *       update: "root",
  *       guard: ({ event }) => event.by > 0,
  *       data: ({ root, event }) => ({ count: root.count + event.by })
  *     }
@@ -307,12 +306,11 @@ export interface Definition<
    * **Example**
    *
    * ```ts
-   * const targets = Machine.targets(States)
    * const counter = definition.handle({ states: {
    *   Count: {
    *     on: {
    *       Increment: {
-   *         update: targets.root.Count,
+   *         update: "Count",
    *         decoded: ({ event, state }) => new Count({ value: state.value + event.by })
    *       }
    *     }
@@ -5137,10 +5135,8 @@ export declare namespace Machine {
    * @category utility types
    * @since 0.4.0
    */
-  export type EventTransitionReturn<Transition> = Transition extends
-    { readonly initial: TargetReference<any, infer P, any> } ? InitialTarget<P>
-    : Transition extends { readonly resolve?: infer Resolve } ?
-      NonNullable<Resolve> extends (...args: any) => infer Ret ? Ret : never
+  export type EventTransitionReturn<Transition> = Transition extends { readonly resolve?: infer Resolve } ?
+    NonNullable<Resolve> extends (...args: any) => infer Ret ? Ret : never
     : never
   /**
    * Extracts the return value from a state's event handlers.
@@ -6385,15 +6381,13 @@ export declare namespace Machine {
       Sources[K] extends (...args: never[]) => unknown ? Parameters<Sources[K]>["length"] extends 1 ? unknown : never
       : unknown
   }
-  type ReferenceRoot<S extends StateSchemas> = Extract<S[""], StateNodeConfig>
-  type ReferenceAt<S extends StateSchemas, P extends StateNodeIdentifier<S> | HistoryIdentifier<S>> = TargetReference<
-    ReferenceRoot<S>,
-    P,
-    P extends HistoryIdentifier<S> ? "history" : P extends ChoiceIdentifier<S> ? "choice" : "state"
+  // Declarations spell descendants as dotted paths and the root node as "root".
+  type PathName<P extends string> = P extends "" ? "root" : P
+  type PathOf<Name> = Name extends "root" ? "" : Name extends string ? Name : never
+  type ReferenceAt<S extends StateSchemas, P extends StateNodeIdentifier<S> | HistoryIdentifier<S>> = PathName<P>
+  type ReferenceUnion<S extends StateSchemas, Paths extends StateNodeIdentifier<S> | HistoryIdentifier<S>> = PathName<
+    Paths
   >
-  type ReferenceUnion<S extends StateSchemas, Paths extends StateNodeIdentifier<S> | HistoryIdentifier<S>> = {
-    readonly [P in Paths]: ReferenceAt<S, P>
-  }[Paths]
   type DestinationPath<S extends StateSchemas> = Exclude<StateNodeIdentifier<S>, "">
   type RootSchemas<Root extends StateNodeConfig> = { readonly "": Root }
 
@@ -6406,9 +6400,25 @@ export declare namespace Machine {
     & (
       | {
         /** Selects a declared descendant; its transition or bound branch constructor supplies required values. */
-        readonly target: ReferenceUnion<S, DestinationPath<S>> | TargetReference<Root, "", "state">
+        readonly target: ReferenceUnion<S, DestinationPath<S>>
         /** Replaces the complete value of a retained source or ancestor without replacing its active children. */
         readonly update?: ReferenceUnion<S, ValuedStateIdentifier<S>>
+        /** Enters a compound or parallel subtree through its declared initialization. */
+        readonly initial?: never
+        /** Restores the declared history reference, using its fallback on first entry. */
+        readonly history?: never
+        /** Accepts the event without selecting a new destination. */
+        readonly none?: never
+        /** Reconstructs root and its initial children from fresh machine input. */
+        readonly initialize?: never
+      }
+      | {
+        /** Reconstructs root and its initial children from fresh machine input supplied by the resolver. */
+        readonly initialize: true
+        /** Selects a declared descendant; its transition or bound branch constructor supplies required values. */
+        readonly target?: never
+        /** Replaces the complete value of a retained source or ancestor without replacing its active children. */
+        readonly update?: never
         /** Enters a compound or parallel subtree through its declared initialization. */
         readonly initial?: never
         /** Restores the declared history reference, using its fallback on first entry. */
@@ -6427,6 +6437,8 @@ export declare namespace Machine {
         readonly history?: never
         /** Accepts the event without selecting a new destination. */
         readonly none?: never
+        /** Reconstructs root and its initial children from fresh machine input. */
+        readonly initialize?: never
       }
       | {
         /** Restores the declared history reference, using its fallback on first entry. */
@@ -6439,6 +6451,8 @@ export declare namespace Machine {
         readonly initial?: never
         /** Accepts the event without selecting a new destination. */
         readonly none?: never
+        /** Reconstructs root and its initial children from fresh machine input. */
+        readonly initialize?: never
       }
       | {
         /** Accepts the event without selecting a new destination. */
@@ -6451,6 +6465,8 @@ export declare namespace Machine {
         readonly initial?: never
         /** Restores the declared history reference, using its fallback on first entry. */
         readonly history?: never
+        /** Reconstructs root and its initial children from fresh machine input. */
+        readonly initialize?: never
       }
     )
   export type BranchDefinitions<Root extends StateNodeConfig> = Readonly<
@@ -6473,7 +6489,7 @@ export declare namespace Machine {
   }
   type RegisteredInput<R> = R extends { readonly "~input": infer I extends Schema.Top } ? I : typeof Schema.Void
   type Registered<R, Kind extends PropertyKey> = Kind extends keyof R ? NonNullable<R[Kind]> : {}
-  type RefPath<R> = R extends TargetReference<any, infer P, any> ? P : never
+  type RefPath<R> = PathOf<R>
   type ConstructionData<Node> = [NodeSchema<Node>] extends [never] ? { readonly data?: never; readonly decoded?: never }
     :
       | (
@@ -6538,30 +6554,38 @@ export declare namespace Machine {
       >
     : never
   type SelectionOf<S extends StateSchemas, Src extends StateNodeIdentifier<S>, D, R = {}> = D extends {
-    readonly target: infer Ref
-  } ?
-    RefPath<Ref> extends infer P extends StateNodeIdentifier<S> ?
-      D extends { readonly update: infer Update }
-        ? RefPath<Update> extends
-          infer Owner extends Extract<ParentStateIdentifier<Src>, ParentStateIdentifier<P> & ValuedStateIdentifier<S>>
-          ? P extends StateIdentifier<S> ? TargetSelection<
-              ConstructionCall<
-                ConstructionObject<
-                  NodeByIdentifier<S, P>,
-                  Src extends `${P}.${infer Rest}` ? Rest : Src extends P ? "" : never
-                > & {
-                  readonly update: ConstructionData<NodeByIdentifier<S, Owner>>
-                },
-                CombinedTarget<Target<S, P>, S, Owner>
-              >,
-              P,
-              "state",
-              "branch"
-            > :
-          never
-        : never
-      : TargetSelection<ObjectSelection<S, Src, P, R>, P, P extends ChoiceIdentifier<S> ? "choice" : "state", "branch">
-    : never
+    readonly initialize: true
+  } ? TargetSelection<ObjectSelection<S, Src, Extract<"", StateNodeIdentifier<S>>, R>, "", "state", "branch">
+    : D extends {
+      readonly target: infer Ref
+    } ?
+      RefPath<Ref> extends infer P extends StateNodeIdentifier<S> ?
+        D extends { readonly update: infer Update }
+          ? RefPath<Update> extends
+            infer Owner extends Extract<ParentStateIdentifier<Src>, ParentStateIdentifier<P> & ValuedStateIdentifier<S>>
+            ? P extends StateIdentifier<S> ? TargetSelection<
+                ConstructionCall<
+                  ConstructionObject<
+                    NodeByIdentifier<S, P>,
+                    Src extends `${P}.${infer Rest}` ? Rest : Src extends P ? "" : never
+                  > & {
+                    readonly update: ConstructionData<NodeByIdentifier<S, Owner>>
+                  },
+                  CombinedTarget<Target<S, P>, S, Owner>
+                >,
+                P,
+                "state",
+                "branch"
+              > :
+            never
+          : never
+        : TargetSelection<
+          ObjectSelection<S, Src, P, R>,
+          P,
+          P extends ChoiceIdentifier<S> ? "choice" : "state",
+          "branch"
+        >
+      : never
     : D extends { readonly history: infer Ref }
       ? RefPath<Ref> extends infer P extends HistoryIdentifier<S>
         ? TargetSelection<() => HistoryTarget<S, P>, P, "history", "full"> :
@@ -6609,22 +6633,20 @@ export declare namespace Machine {
   > = P extends ChoiceIdentifier<S> ? { readonly from?: never; readonly decoded?: never }
     : P extends StateIdentifier<S> ? InlineNodeConstruction<C, NodeByIdentifier<S, P>>
     : never
-  type InlineRoot<S extends StateSchemas, C, R> =
-    & {
-      readonly target: ReferenceAt<S, Extract<"", StateNodeIdentifier<S>>>
-      readonly update?: never
-      readonly branches?: never
-      readonly resolve?: never
-      readonly history?: never
-      readonly none?: never
-    }
-    & (RegisteredInput<R> extends typeof Schema.Void ? { readonly input?: never }
-      : {
-        /** Fresh machine input used to reconstruct root and its initial children. */ readonly input: DataValue<
-          C,
-          RegisteredInput<R>["Type"]
-        >
-      })
+  type InlineRoot<C, R> = {
+    /**
+     * Reconstructs root and its initial children from fresh machine input.
+     * Machines without an input schema use `true`.
+     */
+    readonly initialize: RegisteredInput<R> extends typeof Schema.Void ? true
+      : DataValue<C, RegisteredInput<R>["Type"]>
+    readonly target?: never
+    readonly update?: never
+    readonly branches?: never
+    readonly resolve?: never
+    readonly history?: never
+    readonly none?: never
+  }
   type InlineDestination<S extends StateSchemas, Src extends StateNodeIdentifier<S>, C> = {
     readonly [P in DestinationPath<S>]:
       & {
@@ -6825,7 +6847,7 @@ export declare namespace Machine {
         | InlineDestination<S, Src, C>
         | InlineUpdate<S, Src, C>
         | InlineCombined<S, Src, C>
-        | InlineRoot<S, C, R>
+        | InlineRoot<C, R>
         | {
           /** Restores the declared history reference, using its fallback on first entry. */
           readonly history: ReferenceUnion<S, HistoryIdentifier<S>>
@@ -7083,11 +7105,7 @@ export declare namespace Machine {
     { readonly states: infer Children extends StateSchemas } ? {
       readonly [K in ActiveStateKey<Children> | ChoiceStateKey<Children>]:
         & {
-          readonly target: TargetReference<
-            ReferenceRoot<S>,
-            JoinPath<Src, K>,
-            Children[K] extends ChoiceStateNodeConfig ? "choice" : "state"
-          >
+          readonly target: JoinPath<Src, K>
         }
         & InitialData<C, Children[K]>
     }[ActiveStateKey<Children> | ChoiceStateKey<Children>]
@@ -7342,8 +7360,9 @@ export declare namespace Machine {
             }) :
       never)
   type ValidateObjectTransition<T> =
-    & ("input" extends keyof T
-      ? T extends { readonly target: TargetReference<any, "", "state"> } ? unknown : { readonly input: never }
+    & ("initialize" extends keyof T ? {
+        readonly [K in Exclude<keyof T, "initialize" | "guard" | "reenter">]: never
+      }
       : unknown)
     & {
       readonly [
@@ -7351,7 +7370,7 @@ export declare namespace Machine {
           keyof T,
           | "target"
           | "update"
-          | "input"
+          | "initialize"
           | "history"
           | "none"
           | "branches"
@@ -7741,7 +7760,7 @@ export const isFinal: <
 /**
  * Defines root or nested state schemas while preserving the exact child topology.
  *
- * Pass the root descriptor to {@link make} and {@link targets}. Nested states
+ * Pass the root descriptor to {@link make}. Nested states
  * can be declared inline or reused by mounting a descriptor in multiple places.
  * Initial edges and value constructors belong in the handler tree.
  *
@@ -7776,73 +7795,16 @@ export const isFinal: <
  */
 export const state: StateConstructor = internal.state as StateConstructor
 
-/**
- * An opaque reference to one node in a declared state tree.
- *
- * @category models
- * @since 0.34.0
- */
-export interface TargetReference<
-  Root extends Machine.StateNodeConfig,
-  Path extends string,
-  Kind extends "state" | "choice" | "history"
-> {
-  readonly [internal.TargetReferenceTypeId]: {
-    readonly root: { readonly node: Root }
-    readonly path: Path
-    readonly kind: Kind
-  }
-}
-
-type TargetReferenceTree<Root extends Machine.StateNodeConfig, Node, Path extends string> =
-  & TargetReference<
-    Root,
-    Path,
-    Node extends { readonly type: "history" } ? "history"
-      : Node extends { readonly type: "choice" } ? "choice"
-      : "state"
-  >
-  & (Node extends {
-    /** Child handlers nested according to the declared root topology. */
-    readonly states: infer Children
-  } ? {
-      readonly [Key in Extract<keyof Children, string>]: TargetReferenceTree<
-        Root,
-        Children[Key],
-        Machine.JoinPath<Path, Key>
-      >
-    } :
-    {})
-
-/**
- * References for every path in a declared root tree.
- *
- * @category models
- * @since 0.34.0
- */
-export interface Targets<Root extends Machine.StateNodeConfig> {
-  /** Root data owner and the starting point for descendant state references. */
-  readonly root: TargetReferenceTree<Root, Root, "">
-}
-
-/**
- * Derives immutable state references from a root descriptor.
- *
- * References follow the declared tree: `targets.root.Checkout.Review`.
- * Creating references does not construct state values or start machine work.
- *
- * @category constructors
- * @since 0.34.0
- */
-export const targets: <const Root extends Machine.StateNodeConfig>(root: State<Root>) => Targets<Root> =
-  internal.targets
-
 type UniqueSourceNames<F, S, T, L, C> = [
   | Extract<keyof F, keyof S | keyof T | keyof L | keyof C>
   | Extract<keyof S, keyof T | keyof L | keyof C>
   | Extract<keyof T, keyof L | keyof C>
   | Extract<keyof L, keyof C>
 ] extends [never] ? unknown : { readonly "~effect/Machine/DuplicateSourceName": never }
+
+type ReservedRootName<Root> = Root extends { readonly states: infer Children }
+  ? "root" extends keyof Children ? { readonly "~effect/Machine/ReservedRootStateName": never } : unknown
+  : unknown
 
 type MakeConfig<
   Root extends Machine.StateNodeConfig,
@@ -7877,7 +7839,9 @@ type MakeConfig<
   /** Stable definition identifier used by inspection and visualization. */
   readonly id?: string
   /** State topology and value schemas, captured by a `Machine.state` descriptor. */
-  readonly root: { readonly [StateTypeId]: typeof StateTypeId; readonly node: Root }
+  readonly root:
+    & { readonly [StateTypeId]: typeof StateTypeId; readonly node: Root }
+    & ReservedRootName<NoInfer<Root>>
   /** Public events accepted by independently running machine references. */
   readonly events:
     & Machine.EventProtocol<"public", InputEvents>
@@ -8034,13 +7998,12 @@ interface Make {
  * }
  * const States = Machine.state({ states: { Count } })
  * const Events = Machine.eventsFromSchemas(Increment)
- * const targets = Machine.targets(States)
  * const counter = Machine.make({
  *   root: States,
  *   events: Events
  * }).handle({
  *   initial: {
- *     target: Machine.targets(States).root.Count,
+ *     target: "Count",
  *     decoded: true,
  *     data: new Count({ value: 0 })
  *   },
@@ -8048,7 +8011,7 @@ interface Make {
  *     Count: {
  *       on: {
  *         Increment: {
- *           update: targets.root.Count,
+ *           update: "Count",
  *           decoded: true,
  *           data: ({ event, state }) => new Count({ value: state.value + event.by })
  *         }
@@ -8286,7 +8249,7 @@ export const emittedEventsFromSchemas: {
  *   events: Machine.eventsFromSchemas()
  * }).handle({
  *   initial: {
- *     target: Machine.targets(States).root.Idle
+ *     target: "Idle"
  *   },
  *   states: {
  *     Idle: {}
@@ -8373,7 +8336,7 @@ export const encodeSnapshot: <
  *   events: Machine.eventsFromSchemas()
  * }).handle({
  *   initial: {
- *     target: Machine.targets(States).root.Idle
+ *     target: "Idle"
  *   },
  *   states: {
  *     Idle: {}
@@ -8445,7 +8408,10 @@ type ValidateTransitionBranchRecord<Branches> = [keyof Branches] extends [never]
       readonly [K in keyof Branches]:
         & {
           readonly [
-            Extra in Exclude<keyof Branches[K], "target" | "update" | "initial" | "history" | "none" | "title">
+            Extra in Exclude<
+              keyof Branches[K],
+              "target" | "update" | "initialize" | "initial" | "history" | "none" | "title"
+            >
           ]: never
         }
         & (Branches[K] extends { readonly title: "" } ? { readonly title: never } : unknown)
@@ -8486,7 +8452,7 @@ type ValidateTransitionBranchRecord<Branches> = [keyof Branches] extends [never]
  *   events: Machine.eventsFromSchemas()
  * }).handle({
  *   initial: {
- *     target: Machine.targets(States).root.Idle
+ *     target: "Idle"
  *   },
  *   states: {
  *     Idle: {}
@@ -8776,7 +8742,7 @@ export const enabled: <
  *   events: Machine.eventsFromSchemas(),
  *   internalEvents
  * }).handle({
- *   initial: { target: Machine.targets(Root).root.Idle },
+ *   initial: { target: "Idle" },
  *   states: { Idle: { on: { Loaded: { none: true } } } }
  * })
  *
@@ -8898,18 +8864,17 @@ export const can: {
  * class Toggle extends Schema.TaggedClass<Toggle>("Toggle")("Toggle", {}) {
  * }
  * const States = Machine.state({ states: { Off, On } })
- * const targets = Machine.targets(States)
  * const machine = Machine.make({
  *   root: States,
  *   events: Machine.eventsFromSchemas(Toggle)
  * }).handle({
  *   initial: {
- *     target: Machine.targets(States).root.Off
+ *     target: "Off"
  *   },
  *   states: {
  *     Off: {
  *       on: {
- *         Toggle: { target: targets.root.On }
+ *         Toggle: { target: "On" }
  *       }
  *     },
  *     On: {}
@@ -9349,7 +9314,7 @@ export const prepare: <
  *   events: Machine.eventsFromSchemas()
  * }).handle({
  *   initial: {
- *     target: Machine.targets(States).root.Idle
+ *     target: "Idle"
  *   },
  *   states: {
  *     Idle: {}
@@ -9465,7 +9430,7 @@ export const start: <
  *   events: Machine.eventsFromSchemas()
  * }).handle({
  *   initial: {
- *     target: Machine.targets(States).root.Idle
+ *     target: "Idle"
  *   },
  *   states: {
  *     Idle: {}

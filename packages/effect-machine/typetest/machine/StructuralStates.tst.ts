@@ -139,24 +139,23 @@ describe("structural active state types", () => {
     >()
   })
   it("types structural handler contexts and targets without fake values", () => {
-    const targets1 = Machine.targets(States)
     Machine.make({
       branches: {
-        transition1: { destination: { target: targets1.root.player.transport.Ready } },
-        transition2: { destination: { target: targets1.root.player.transport.Ready } }
+        transition1: { destination: { target: "player.transport.Ready" } },
+        transition2: { destination: { target: "player.transport.Ready" } }
       },
       root: States,
       events: Machine.eventsFromSchemas(Select, Loaded, Play)
     }).handle({
       initial: {
-        target: Machine.targets(States).root.player
+        target: "player"
       },
       states: {
         player: {
           states: {
             transport: {
               initial: {
-                target: Machine.targets(States).root.player.transport.Empty
+                target: "player.transport.Empty"
               },
               states: {
                 Empty: {
@@ -165,7 +164,7 @@ describe("structural active state types", () => {
                   },
                   on: {
                     Select: {
-                      target: targets1.root.player.transport.Loading,
+                      target: "player.transport.Loading",
                       data: ({ containingState, ancestors, state }) => {
                         expect(state).type.toBe<undefined>()
                         expect(containingState).type.toBe<undefined>()
@@ -186,7 +185,7 @@ describe("structural active state types", () => {
                 },
                 Ready: {
                   initial: {
-                    target: Machine.targets(States).root.player.transport.Ready.Paused
+                    target: "player.transport.Ready.Paused"
                   },
                   states: {
                     Paused: {
@@ -215,7 +214,7 @@ describe("structural active state types", () => {
             },
             settings: {
               initial: {
-                target: Machine.targets(States).root.player.settings.Audible,
+                target: "player.settings.Audible",
                 data: { volume: 1 }
               },
               states: { Audible: {}, Muted: {} }

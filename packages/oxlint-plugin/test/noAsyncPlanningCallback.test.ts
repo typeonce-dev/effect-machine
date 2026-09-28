@@ -59,6 +59,11 @@ Machine.make({}).handle({ on: { Save: { target: destination, data: async () => (
     },
     {
       code: `import { Machine } from "@typeonce/effect-machine"
+Machine.make({}).handle({ on: { Reset: { initialize: async ({ event }) => ({ id: event.id }) } } })`,
+      errors: [{ messageId: "asyncPlanning" }]
+    },
+    {
+      code: `import { Machine } from "@typeonce/effect-machine"
 Machine.make({ root: Machine.state({}) }).handle({ on: { Update: (to) => to.self.update.from(async () => ({ count: 1 })) } })`,
       errors: [{ messageId: "asyncPlanning" }]
     },

@@ -12,7 +12,7 @@ describe("Machine inspection", () => {
   }
   const States = Machine.state({
     states: {
-      root: {
+      main: {
         schema: Root,
         states: {
           idle: Idle,
@@ -25,9 +25,9 @@ describe("Machine inspection", () => {
     path: "" as const,
     value: undefined,
     state: {
-      path: "root",
+      path: "main",
       value: new Root({}),
-      state: { path: "root.idle", value: new Idle({}) }
+      state: { path: "main.idle", value: new Idle({}) }
     }
   }
   const machine = Machine.make({
@@ -35,14 +35,14 @@ describe("Machine inspection", () => {
     events: Machine.eventsFromSchemas(Reset)
   }).handle({
     initial: {
-      target: Machine.targets(States).root.root,
+      target: "main",
       decoded: true,
       data: new Root({})
     },
     states: {
-      root: {
+      main: {
         initial: {
-          target: Machine.targets(States).root.root.idle,
+          target: "main.idle",
           decoded: true,
           data: new Idle({})
         },
@@ -60,7 +60,7 @@ describe("Machine inspection", () => {
       events: Machine.eventsFromSchemas(Reset)
     }).handle({
       initial: {
-        target: Machine.targets(FlatStates).root.Idle,
+        target: "Idle",
         decoded: true,
         data: new Idle({})
       },
@@ -95,11 +95,11 @@ describe("Machine inspection", () => {
       ]
     >()
     const nodes = Machine.stateNodes(machine)
-    expect(nodes[0]!.path).type.toBe<"" | "root" | "root.idle" | "root.recent">()
-    expect(nodes.find((node) => node.type === "history")!.path).type.toBe<"root.recent">()
-    expect(nodes.find((node) => node.type === "history")!.parent).type.toBe<"" | "root" | "root.idle">()
-    expect(nodes.find((node) => node.type === "atomic")!.path).type.toBe<"" | "root" | "root.idle">()
-    expect(Machine.configuration(machine, initial)[0]!.path).type.toBe<"" | "root" | "root.idle">()
+    expect(nodes[0]!.path).type.toBe<"" | "main" | "main.idle" | "main.recent">()
+    expect(nodes.find((node) => node.type === "history")!.path).type.toBe<"main.recent">()
+    expect(nodes.find((node) => node.type === "history")!.parent).type.toBe<"" | "main" | "main.idle">()
+    expect(nodes.find((node) => node.type === "atomic")!.path).type.toBe<"" | "main" | "main.idle">()
+    expect(Machine.configuration(machine, initial)[0]!.path).type.toBe<"" | "main" | "main.idle">()
   })
   it("narrows every compiled state-node property from its type", () => {
     const inspect = (node: Machine.Machine.StateNode<"state">) => {
@@ -175,14 +175,14 @@ describe("Machine inspection", () => {
       events: Machine.eventsFromSchemas()
     }).handle({
       initial: {
-        target: Machine.targets(ChoiceStates).root.Flow,
+        target: "Flow",
         decoded: true,
         data: new Root({})
       },
       states: {
         Flow: {
           initial: {
-            target: Machine.targets(ChoiceStates).root.Flow.Routing
+            target: "Flow.Routing"
           },
           states: { Ready: {} }
         }
@@ -220,33 +220,32 @@ describe("Machine inspection", () => {
     expect(initialDefinition.selection.kind).type.toBe<"state" | "initial">()
     expect(initialDefinition.selection.scope).type.toBe<"initial">()
     const definition = Machine.transitionDefinitions(machine)[0]!
-    expect(definition.source).type.toBe<"" | "root" | "root.idle" | "root.recent">()
+    expect(definition.source).type.toBe<"" | "main" | "main.idle" | "main.recent">()
     expect(definition.acceptance).type.toBe<Machine.Machine.TransitionAcceptance>()
     if (definition.trigger.type === "event") {
       expect(definition.trigger.event).type.toBe<"Reset">()
     }
     expect(definition.branches).type.toBe<
-      ReadonlyArray<Machine.Machine.TransitionBranch<"" | "root" | "root.idle" | "root.recent">>
+      ReadonlyArray<Machine.Machine.TransitionBranch<"" | "main" | "main.idle" | "main.recent">>
     >()
-    expect(definition.branches[0]!.selection.path).type.toBe<"" | "root" | "root.idle" | "root.recent" | undefined>()
+    expect(definition.branches[0]!.selection.path).type.toBe<"" | "main" | "main.idle" | "main.recent" | undefined>()
   })
   it("requires statically selected transitions", () => {
     const FlatStates = Machine.state({ states: { idle: Idle, running: Running } })
-    const targets3 = Machine.targets(FlatStates)
     const flat = Machine.make({
       root: FlatStates,
       events: Machine.eventsFromSchemas(Reset)
     })
     flat.handle({
       initial: {
-        target: Machine.targets(FlatStates).root.idle,
+        target: "idle",
         decoded: true,
         data: new Idle({})
       },
       states: {
         idle: {
           on: {
-            Reset: { target: targets3.root.running, decoded: true, data: () => (new Running({})) }
+            Reset: { target: "running", decoded: true, data: () => (new Running({})) }
           }
         },
         running: {}
@@ -254,7 +253,7 @@ describe("Machine inspection", () => {
     })
     expect(flat.handle).type.toBeCallableWith({
       initial: {
-        target: Machine.targets(FlatStates).root.idle,
+        target: "idle",
         data: () => {
           throw new Error("type-only constructor")
         }
@@ -263,7 +262,7 @@ describe("Machine inspection", () => {
     expect(flat.handle).type.not.toBeCallableWith({
       states: { idle: { on: { Reset: () => undefined } } },
       initial: {
-        target: Machine.targets(FlatStates).root.idle,
+        target: "idle",
         data: () => {
           throw new Error("type-only constructor")
         }
@@ -272,7 +271,7 @@ describe("Machine inspection", () => {
     expect(flat.handle).type.not.toBeCallableWith({
       states: { idle: { on: { Reset: { target: () => undefined, resolve: () => undefined } } } },
       initial: {
-        target: Machine.targets(FlatStates).root.idle,
+        target: "idle",
         data: () => {
           throw new Error("type-only constructor")
         }

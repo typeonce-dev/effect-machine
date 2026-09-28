@@ -10,19 +10,18 @@ import { AtomMachine } from "../../effect-machine/src/unstable/reactivity/index.
 import { createMachineContext, MachineState } from "../src/index.js"
 const Events = Machine.events({ Increment: {}, Close: {} })
 const root1 = Machine.state({ fields: { count: Schema.Number }, states: { Open: {}, Closed: {} } })
-const targets1 = Machine.targets(root1)
 const counter = Machine.make({
   root: root1,
   events: Events,
   input: Schema.Number
 }).handle({
   initial: {
-    target: Machine.targets(root1).root.Open
+    target: "Open"
   },
   root: ({ input }) => ({ count: input }),
-  on: { Increment: { update: targets1.root, data: ({ root: current }) => ({ count: current.count + 1 }) } },
+  on: { Increment: { update: "root", data: ({ root: current }) => ({ count: current.count + 1 }) } },
   states: {
-    Open: { on: { Close: { target: targets1.root.Closed } } },
+    Open: { on: { Close: { target: "Closed" } } },
     Closed: {}
   }
 })

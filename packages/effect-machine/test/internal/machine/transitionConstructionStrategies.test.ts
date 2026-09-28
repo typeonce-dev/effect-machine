@@ -7,7 +7,6 @@ it.effect("compares flat updates and verifies guarded updates retain generic pla
     for (const guarded of [false, true]) {
       const events = Machine.events({ Add: { by: Schema.Number }, Refresh: {} })
       const root1 = Machine.state({ fields: { count: Schema.Number } })
-      const targets1 = Machine.targets(root1)
       const machine = Machine.make({
         root: root1,
         events
@@ -15,7 +14,7 @@ it.effect("compares flat updates and verifies guarded updates retain generic pla
         root: () => ({ count: 0 }),
         on: {
           Add: {
-            update: targets1.root,
+            update: "root",
             guard: guarded
               ? ({ event }) => event.by > 0
               : undefined,
@@ -54,31 +53,30 @@ it.effect("compares atomic construction and verifies guards retain generic plann
         schema: Root,
         states: { Idle: {}, Saved: { schema: Saved }, Done: { type: "final" } }
       })
-      const targets2 = Machine.targets(root2)
       const machine = Machine.make({
-        branches: { transition1: { saved: { target: targets2.root.Saved } } },
+        branches: { transition1: { saved: { target: "Saved" } } },
         root: root2,
         events
       }).handle({
         initial: {
-          target: Machine.targets(root2).root.Idle
+          target: "Idle"
         },
         root: () => ({ count: 0 }),
-        on: { Save: { update: targets2.root, data: ({ root: current }) => ({ count: current.count + 10 }) } },
+        on: { Save: { update: "root", data: ({ root: current }) => ({ count: current.count + 10 }) } },
         states: {
           Idle: {
             on: {
               Save: {
-                target: targets2.root.Saved,
-                update: targets2.root,
+                target: "Saved",
+                update: "root",
                 guard: guarded
                   ? ({ event }) => event.allowed
                   : undefined,
                 data: ({ root }) => ({ target: { text: "saved" }, update: { count: root.count + 1 } })
               },
               Decoded: {
-                target: targets2.root.Saved,
-                update: targets2.root,
+                target: "Saved",
+                update: "root",
                 decoded: true,
                 data: ({ root: current }) => ({
                   target: new Saved({ text: "decoded" }),
@@ -90,8 +88,8 @@ it.effect("compares atomic construction and verifies guards retain generic plann
           Saved: {
             on: {
               Save: {
-                target: targets2.root.Saved,
-                update: targets2.root,
+                target: "Saved",
+                update: "root",
                 reenter: true,
                 guard: guarded
                   ? ({ event }) => event.allowed
@@ -103,7 +101,7 @@ it.effect("compares atomic construction and verifies guards retain generic plann
                 reenter: true,
                 resolve: ({ state, select }) => select.saved({ data: state, decoded: true })
               },
-              Finish: { target: targets2.root.Done }
+              Finish: { target: "Done" }
             }
           },
           Done: {}

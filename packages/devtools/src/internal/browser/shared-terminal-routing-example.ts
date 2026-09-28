@@ -23,7 +23,6 @@ const ReplicationEvents = Machine.eventsFromSchemas(Schema.TaggedUnion({
   StopRequested: {}
 }))
 const operation: Effect.Effect<void, string> = Effect.succeed(undefined)
-const targets1 = Machine.targets(ReplicationStates)
 export const sharedTerminalRoutingMachine = Machine.make({
   effects: {
     source1: operation,
@@ -41,130 +40,130 @@ export const sharedTerminalRoutingMachine = Machine.make({
   events: ReplicationEvents
 }).handle({
   initial: {
-    target: Machine.targets(ReplicationStates).root.Connecting
+    target: "Connecting"
   },
   states: {
     Connecting: {
       invoke: {
         src: "source1",
         id: "connect",
-        onDone: { target: targets1.root.IdentifyingSource },
-        onFailure: { target: targets1.root.Failed }
+        onDone: { target: "IdentifyingSource" },
+        onFailure: { target: "Failed" }
       },
       on: {
-        SessionUnavailable: { target: targets1.root.SessionUnavailable },
-        StopRequested: { target: targets1.root.Stopping }
+        SessionUnavailable: { target: "SessionUnavailable" },
+        StopRequested: { target: "Stopping" }
       }
     },
     IdentifyingSource: {
       invoke: {
         src: "source2",
         id: "identify-source",
-        onDone: { target: targets1.root.ReadingServerInfo },
-        onFailure: { target: targets1.root.Failed }
+        onDone: { target: "ReadingServerInfo" },
+        onFailure: { target: "Failed" }
       },
       on: {
-        SessionUnavailable: { target: targets1.root.SessionUnavailable },
-        StopRequested: { target: targets1.root.Stopping }
+        SessionUnavailable: { target: "SessionUnavailable" },
+        StopRequested: { target: "Stopping" }
       }
     },
     ReadingServerInfo: {
       invoke: {
         src: "source3",
         id: "read-server-info",
-        onDone: { target: targets1.root.ReadingSlot },
-        onFailure: { target: targets1.root.Failed }
+        onDone: { target: "ReadingSlot" },
+        onFailure: { target: "Failed" }
       },
       on: {
-        SessionUnavailable: { target: targets1.root.SessionUnavailable },
-        StopRequested: { target: targets1.root.Stopping }
+        SessionUnavailable: { target: "SessionUnavailable" },
+        StopRequested: { target: "Stopping" }
       }
     },
     ReadingSlot: {
       invoke: {
         src: "source4",
         id: "read-slot",
-        onDone: { target: targets1.root.CreatingSlot },
-        onFailure: { target: targets1.root.Failed }
+        onDone: { target: "CreatingSlot" },
+        onFailure: { target: "Failed" }
       },
       on: {
-        SessionUnavailable: { target: targets1.root.SessionUnavailable },
-        StopRequested: { target: targets1.root.Stopping }
+        SessionUnavailable: { target: "SessionUnavailable" },
+        StopRequested: { target: "Stopping" }
       }
     },
     CreatingSlot: {
       invoke: {
         src: "source5",
         id: "create-slot",
-        onDone: { target: targets1.root.CopyingSnapshot },
-        onFailure: { target: targets1.root.Failed }
+        onDone: { target: "CopyingSnapshot" },
+        onFailure: { target: "Failed" }
       },
       on: {
-        SessionUnavailable: { target: targets1.root.SessionUnavailable },
-        StopRequested: { target: targets1.root.Stopping }
+        SessionUnavailable: { target: "SessionUnavailable" },
+        StopRequested: { target: "Stopping" }
       }
     },
     CopyingSnapshot: {
       invoke: {
         src: "source6",
         id: "copy-snapshot",
-        onDone: { target: targets1.root.CatchingUp },
-        onFailure: { target: targets1.root.Failed }
+        onDone: { target: "CatchingUp" },
+        onFailure: { target: "Failed" }
       },
       on: {
-        SessionUnavailable: { target: targets1.root.SessionUnavailable },
-        StopRequested: { target: targets1.root.Stopping }
+        SessionUnavailable: { target: "SessionUnavailable" },
+        StopRequested: { target: "Stopping" }
       }
     },
     CatchingUp: {
       invoke: {
         src: "source7",
         id: "catch-up",
-        onDone: { target: targets1.root.ApplyingChanges },
-        onFailure: { target: targets1.root.Failed }
+        onDone: { target: "ApplyingChanges" },
+        onFailure: { target: "Failed" }
       },
       on: {
-        SessionUnavailable: { target: targets1.root.SessionUnavailable },
-        StopRequested: { target: targets1.root.Stopping }
+        SessionUnavailable: { target: "SessionUnavailable" },
+        StopRequested: { target: "Stopping" }
       }
     },
     ApplyingChanges: {
       invoke: {
         src: "source8",
         id: "apply-changes",
-        onDone: { target: targets1.root.Ready },
-        onFailure: { target: targets1.root.Failed }
+        onDone: { target: "Ready" },
+        onFailure: { target: "Failed" }
       },
       on: {
-        SessionUnavailable: { target: targets1.root.SessionUnavailable },
-        StopRequested: { target: targets1.root.Stopping }
+        SessionUnavailable: { target: "SessionUnavailable" },
+        StopRequested: { target: "Stopping" }
       }
     },
     Ready: {
       on: {
-        SessionUnavailable: { target: targets1.root.SessionUnavailable },
-        StopRequested: { target: targets1.root.Stopping }
+        SessionUnavailable: { target: "SessionUnavailable" },
+        StopRequested: { target: "Stopping" }
       }
     },
     SessionUnavailable: {
       on: {
-        Retry: { target: targets1.root.Connecting },
-        StopRequested: { target: targets1.root.Stopping }
+        Retry: { target: "Connecting" },
+        StopRequested: { target: "Stopping" }
       }
     },
     Stopping: {
       invoke: {
         src: "source9",
         id: "stop-session",
-        onDone: { target: targets1.root.Stopped },
-        onFailure: { target: targets1.root.Failed }
+        onDone: { target: "Stopped" },
+        onFailure: { target: "Failed" }
       }
     },
     Stopped: {},
     Failed: {
       on: {
-        Retry: { target: targets1.root.Connecting },
-        StopRequested: { target: targets1.root.Stopping }
+        Retry: { target: "Connecting" },
+        StopRequested: { target: "Stopping" }
       }
     }
   }

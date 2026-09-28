@@ -1,9 +1,8 @@
 /** Captures reusable sources and topology declarations before handler compilation. */
 import * as Effect from "effect/Effect"
-import { hasProperty } from "effect/Predicate"
+import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
 import type { Machine } from "../../Machine.js"
-import * as Reference from "./targetReference.js"
 import * as Topology from "./topology.js"
 
 type SourceKind = "effects" | "streams" | "timers" | "logic" | "children"
@@ -11,9 +10,14 @@ interface Source {
   readonly kind: SourceKind
   readonly value: unknown
 }
+type PathKind = "state" | "choice" | "history"
 export interface Declaration {
   readonly initialize?: (input: unknown) => unknown
   readonly root: Machine.Any["root"]
+  /** Whether the machine declares an input schema used by `initialize`. */
+  readonly input: boolean
+  /** Declared state paths keyed by internal identifier; the root is `""`. */
+  readonly paths: ReadonlyMap<string, PathKind>
   readonly sources: ReadonlyMap<string, Source>
   readonly branches: ReadonlyMap<string, Readonly<Record<string, Readonly<Record<string, unknown>>>>>
 }
@@ -21,10 +25,29 @@ const record = (value: unknown, message: string): Record<string, unknown> => {
   if (typeof value !== "object" || value === null || Array.isArray(value)) throw new Error(message)
   return value as Record<string, unknown>
 }
+/** The root node's public path name. Top-level states cannot use it. */
+export const rootPathName = "root"
+const collectPaths = (root: Machine.Any["root"]): ReadonlyMap<string, PathKind> => {
+  const paths = new Map<string, PathKind>()
+  const visit = (node: Machine.StateNodeConfig | Machine.TaggedSchema, path: string): void => {
+    const type = !Schema.isSchema(node) && "type" in node ? node.type : undefined
+    paths.set(path, type === "history" || type === "choice" ? type : "state")
+    if (!Schema.isSchema(node) && "states" in node) {
+      for (const [key, child] of Object.entries(node.states)) visit(child, path === "" ? key : `${path}.${key}`)
+    }
+  }
+  visit(root.node, "")
+  if (paths.has(rootPathName)) {
+    throw new Error(`Machine top-level state name "${rootPathName}" is reserved for the root`)
+  }
+  return paths
+}
 export const capture = (
   root: Machine.Any["root"],
   config: Readonly<Record<string, unknown>>
 ): Declaration => {
+  const paths = collectPaths(root)
+  const input = config.input !== undefined
   const sources = new Map<string, Source>()
   for (const kind of ["effects", "streams", "timers", "logic", "children"] as const) {
     if (config[kind] === undefined) continue
@@ -51,35 +74,44 @@ export const capture = (
           const spec = { ...record(value, `Machine branch "${name}.${key}" must be a declaration`) }
           for (const field of Reflect.ownKeys(spec)) {
             if (
-              typeof field !== "string" || !["target", "update", "history", "none", "title"].includes(field)
+              typeof field !== "string" ||
+              !["target", "update", "history", "none", "initialize", "title"].includes(field)
             ) {
               throw new Error(`Machine branch "${name}.${key}" contains an unknown declaration field`)
             }
           }
+          if (spec.initialize !== undefined && spec.initialize !== true) {
+            throw new Error(`Machine branch "${name}.${key}" declares initialize: true; its resolver supplies input`)
+          }
           if (spec.title !== undefined && (typeof spec.title !== "string" || spec.title.length === 0)) {
             throw new Error("Machine branch title must be a non-empty string")
           }
-          selection({ root, sources, branches }, spec)
+          selection({ root, input, paths, sources, branches }, spec)
           return [key, Object.freeze(spec)]
         })))
       )
     }
   }
-  return { root, sources, branches }
+  return { root, input, paths, sources, branches }
 }
-const reference = (value: unknown, root: Declaration["root"]): Reference.Reference[typeof Reference.TypeId] => {
-  if (!hasProperty(value, Reference.TypeId)) throw new Error("Machine target must be a declared state reference")
-  const ref = (value as Reference.Reference)[Reference.TypeId]
-  if (ref.root !== root) throw new Error("Machine target reference belongs to a different root descriptor")
-  return ref
+const reference = (
+  value: unknown,
+  declaration: Declaration
+): { readonly path: string; readonly kind: PathKind } => {
+  const path = value === rootPathName ? "" : typeof value === "string" && value !== "" ? value : undefined
+  const kind = path === undefined ? undefined : declaration.paths.get(path)
+  if (path === undefined || kind === undefined) {
+    throw new Error(`Machine target ${String(value)} is not a declared state path`)
+  }
+  return { path, kind }
 }
 export const selection = (
   declaration: Declaration,
   config: Readonly<Record<string, unknown>>
 ): Topology.TargetSelection => {
-  const keys = ["target", "history", "none"].filter((key) => config[key] !== undefined)
+  const keys = ["target", "history", "none", "initialize"].filter((key) => config[key] !== undefined)
   if (keys.length === 0 && config.update !== undefined) {
-    const owner = reference(config.update, declaration.root)
+    const owner = reference(config.update, declaration)
     if (owner.kind !== "state") throw new Error("Machine update requires an active state reference")
     return Topology.makeTargetSelection("update", owner.path, "branch")
   }
@@ -91,11 +123,18 @@ export const selection = (
     }
     return Topology.noneTargetSelection
   }
-  const ref = reference(config[key], declaration.root)
+  if (key === "initialize") {
+    if (config.update !== undefined) throw new Error("Machine initialize cannot update a retained owner")
+    return Topology.makeTargetSelection("state", "", "branch")
+  }
+  const ref = reference(config[key], declaration)
+  if (key === "target" && ref.path === "") {
+    throw new Error("Machine root is not a destination; use initialize to reconstruct it from machine input")
+  }
   if ((key === "history") !== (ref.kind === "history")) {
     throw new Error("Machine history references require a history transition")
   }
-  const update = config.update === undefined ? undefined : reference(config.update, declaration.root).path
+  const update = config.update === undefined ? undefined : reference(config.update, declaration).path
   if (update !== undefined && key !== "target") throw new Error("Machine owner updates require an ordinary destination")
   return Topology.makeTargetSelection(
     ref.kind,

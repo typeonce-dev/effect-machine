@@ -11,7 +11,7 @@ const machine = Machine.make({
   events: Machine.eventsFromSchemas(TimedOut)
 }).handle({
   initial: {
-    target: Machine.targets(States).root.Loading,
+    target: "Loading",
     decoded: true,
     data: new Loading({})
   },

@@ -26,23 +26,22 @@ describe("state value updates", () => {
         readonly notice: string | null
         readonly request: string
       } | undefined
-      const targets1 = Machine.targets(states)
       const machine = Machine.make({
         branches: {
-          transition1: { destination: { target: targets1.root.Ready.SavingPlan, update: targets1.root.Ready } },
-          transition2: { destination: { target: targets1.root.Ready.SavingPlan, update: targets1.root.Ready } }
+          transition1: { destination: { target: "Ready.SavingPlan", update: "Ready" } },
+          transition2: { destination: { target: "Ready.SavingPlan", update: "Ready" } }
         },
         root: states,
         events: Machine.eventsFromSchemas(Event)
       }).handle({
         initial: {
-          target: Machine.targets(states).root.Ready,
+          target: "Ready",
           data: { notice: "Previous notice" }
         },
         states: {
           Ready: {
             initial: {
-              target: Machine.targets(states).root.Ready.Idle
+              target: "Ready.Idle"
             },
             states: {
               Idle: {
@@ -120,21 +119,20 @@ describe("state value updates", () => {
         }
       })
       let idleSawDay: string | undefined
-      const targets2 = Machine.targets(states)
       const machine = Machine.make({
-        branches: { transition1: { destination: { target: targets2.root.Ready.Idle, update: targets2.root.Ready } } },
+        branches: { transition1: { destination: { target: "Ready.Idle", update: "Ready" } } },
         effects: { source1: Effect.suspend(() => Effect.succeed("Monday")) },
         root: states,
         events: Machine.eventsFromSchemas()
       }).handle({
         initial: {
-          target: Machine.targets(states).root.Ready,
+          target: "Ready",
           data: { day: "Sunday", notice: "Saving" }
         },
         states: {
           Ready: {
             initial: {
-              target: Machine.targets(states).root.Ready.Saving,
+              target: "Ready.Saving",
               data: { request: "change" }
             },
             states: {
@@ -200,31 +198,30 @@ describe("state value updates", () => {
           }
         }
       })
-      const targets3 = Machine.targets(states)
       const machine = Machine.make({
         root: states,
         events: Machine.eventsFromSchemas(Event)
       }).handle({
         initial: {
-          target: Machine.targets(states).root.session,
+          target: "session",
           data: { count: 0 }
         },
         states: {
           session: {
             initial: {
-              target: Machine.targets(states).root.session.editing,
+              target: "session.editing",
               data: { draft: "kept" }
             },
             states: {
               editing: {
                 initial: {
-                  target: Machine.targets(states).root.session.editing.idle
+                  target: "session.editing.idle"
                 },
                 states: {
                   idle: {
                     on: {
                       Increment: {
-                        update: targets3.root.session,
+                        update: "session",
                         data: ({ ancestors: { session: current } }) => ({ count: current.count + 1 })
                       }
                     }
@@ -289,22 +286,21 @@ describe("state value updates", () => {
           }
         }
       })
-      const targets4 = Machine.targets(states)
       const machine = Machine.make({
         branches: {
-          transition1: { changed: { update: targets4.root.scope, title: "Value changed" }, unchanged: { none: true } }
+          transition1: { changed: { update: "scope", title: "Value changed" }, unchanged: { none: true } }
         },
         root: states,
         events: Machine.eventsFromSchemas(Event)
       }).handle({
         initial: {
-          target: Machine.targets(states).root.scope,
+          target: "scope",
           data: { count: 0 }
         },
         states: {
           scope: {
             initial: {
-              target: Machine.targets(states).root.scope.idle
+              target: "scope.idle"
             },
             states: {
               idle: {
@@ -356,19 +352,18 @@ describe("state value updates", () => {
           }
         }
       })
-      const targets5 = Machine.targets(states)
       const machine = Machine.make({
         root: states,
         events: Machine.eventsFromSchemas(Event)
       }).handle({
         initial: {
-          target: Machine.targets(states).root.scope,
+          target: "scope",
           data: { count: 0 }
         },
         states: {
           scope: {
             initial: {
-              target: Machine.targets(states).root.scope.idle
+              target: "scope.idle"
             },
             entry: () => {
               lifecycle.push("enter scope")
@@ -390,11 +385,11 @@ describe("state value updates", () => {
                 },
                 on: {
                   Quiet: {
-                    update: targets5.root.scope,
+                    update: "scope",
                     data: ({ ancestors: { scope: current } }) => ({ count: current.count + 1 })
                   },
                   Loud: {
-                    update: targets5.root.scope,
+                    update: "scope",
                     reenter: true,
                     data: ({ ancestors: { scope: current } }) => ({ count: current.count + 1 })
                   }
@@ -426,20 +421,19 @@ describe("state value updates", () => {
           }
         }
       })
-      const targets6 = Machine.targets(states)
       const machine = Machine.make({
-        branches: { transition1: { destination: { update: targets6.root.scope } } },
+        branches: { transition1: { destination: { update: "scope" } } },
         root: states,
         events: Machine.eventsFromSchemas()
       }).handle({
         initial: {
-          target: Machine.targets(states).root.scope,
+          target: "scope",
           data: { count: 0 }
         },
         states: {
           scope: {
             initial: {
-              target: Machine.targets(states).root.scope.idle
+              target: "scope.idle"
             },
             states: {
               idle: {
@@ -467,7 +461,7 @@ describe("state value updates", () => {
       const Event = Schema.TaggedUnion({ Leave: {}, Return: {}, Update: {} })
       const states = Machine.state({
         states: {
-          root: {
+          main: {
             schema: State.cases.Root,
             states: {
               a: State.cases.A,
@@ -481,26 +475,25 @@ describe("state value updates", () => {
         path: "" as const,
         value: undefined,
         state: {
-          path: "root" as const,
+          path: "main" as const,
           value: State.cases.Root.make({ count: 0 }),
-          state: { path: "root.a" as const, value: State.cases.A.make({}) }
+          state: { path: "main.a" as const, value: State.cases.A.make({}) }
         }
       })
-      const targets7 = Machine.targets(states)
       const machine = Machine.make({
-        branches: { transition3: { destination: { history: targets7.root.root.recent } } },
+        branches: { transition3: { destination: { history: "main.recent" } } },
         root: states,
         events: Machine.eventsFromSchemas(Event)
       }).handle({
         initial: {
-          target: Machine.targets(states).root.root,
+          target: "main",
           decoded: true,
           data: State.cases.Root.make({ count: 0 })
         },
         states: {
-          root: {
+          main: {
             initial: {
-              target: Machine.targets(states).root.root.a,
+              target: "main.a",
               decoded: true,
               data: State.cases.A.make({})
             },
@@ -508,10 +501,10 @@ describe("state value updates", () => {
             states: {
               a: {
                 on: {
-                  Leave: { target: targets7.root.outside },
+                  Leave: { target: "outside" },
                   Update: {
-                    update: targets7.root.root,
-                    data: ({ ancestors: { root: current } }) => ({ count: current.count + 1 })
+                    update: "main",
+                    data: ({ ancestors: { main: current } }) => ({ count: current.count + 1 })
                   }
                 }
               }
@@ -530,11 +523,11 @@ describe("state value updates", () => {
       const historyBefore = restored.next.history
       const updated = yield* Machine.plan(machine, restored.next, Event.cases.Update.make({}))
       assert.deepStrictEqual(updated.next.history, historyBefore)
-      if (updated.next.state.path !== "root") {
+      if (updated.next.state.path !== "main") {
         throw new Error("expected restored root")
       }
       assert.strictEqual(updated.next.state.value.count, 1)
-      assert.strictEqual(updated.next.state.state.path, "root.a")
+      assert.strictEqual(updated.next.state.state.path, "main.a")
     }))
   it.effect("preserves completion outputs and does not replay completion", () =>
     Effect.gen(function*() {
@@ -548,7 +541,7 @@ describe("state value updates", () => {
       const Event = Schema.TaggedUnion({ Update: {} })
       const states = Machine.state({
         states: {
-          root: {
+          main: {
             schema: State.cases.Root,
             type: "parallel",
             states: {
@@ -567,21 +560,20 @@ describe("state value updates", () => {
         }
       })
       let completions = 0
-      const targets8 = Machine.targets(states)
       const machine = Machine.make({
         root: states,
         events: Machine.eventsFromSchemas(Event)
       }).handle({
         initial: {
-          target: Machine.targets(states).root.root,
+          target: "main",
           data: { revision: 0 }
         },
         states: {
-          root: {
+          main: {
             states: {
               left: {
                 initial: {
-                  target: Machine.targets(states).root.root.left.done
+                  target: "main.left.done"
                 },
                 onDone: {
                   none: true,
@@ -596,14 +588,14 @@ describe("state value updates", () => {
               },
               right: {
                 initial: {
-                  target: Machine.targets(states).root.root.right.idle
+                  target: "main.right.idle"
                 },
                 states: {
                   idle: {
                     on: {
                       Update: {
-                        update: targets8.root.root,
-                        data: ({ ancestors: { root: current } }) => ({ revision: current.revision + 1 })
+                        update: "main",
+                        data: ({ ancestors: { main: current } }) => ({ revision: current.revision + 1 })
                       }
                     }
                   }
@@ -633,25 +625,24 @@ describe("state value updates", () => {
           }
         }
       })
-      const targets9 = Machine.targets(states)
       const machine = Machine.make({
         id: "state-update-schema",
         root: states,
         events: Machine.eventsFromSchemas(Event)
       }).handle({
         initial: {
-          target: Machine.targets(states).root.scope,
+          target: "scope",
           data: { count: 0 }
         },
         states: {
           scope: {
             initial: {
-              target: Machine.targets(states).root.scope.idle
+              target: "scope.idle"
             },
             states: {
               idle: {
                 on: {
-                  Break: { update: targets9.root.scope, data: () => ({ count: "bad" } as any) }
+                  Break: { update: "scope", data: () => ({ count: "bad" } as any) }
                 }
               }
             }
@@ -676,27 +667,26 @@ describe("state value updates", () => {
         }
       })
       let starts = 0
-      const targets10 = Machine.targets(states)
       const machine = Machine.make({
         effects: { source1: Effect.suspend(() => Effect.sync(() => ++starts)) },
         root: states,
         events: Machine.eventsFromSchemas()
       }).handle({
         initial: {
-          target: Machine.targets(states).root.scope,
+          target: "scope",
           data: { count: 0 }
         },
         states: {
           scope: {
             initial: {
-              target: Machine.targets(states).root.scope.idle
+              target: "scope.idle"
             },
             states: {
               idle: {
                 invoke: {
                   src: "source1",
                   id: "load",
-                  onDone: { update: targets10.root.scope, data: ({ output }) => ({ count: output }) }
+                  onDone: { update: "scope", data: ({ output }) => ({ count: output }) }
                 }
               }
             }
@@ -726,21 +716,20 @@ describe("state value updates", () => {
           }
         }
       })
-      const targets11 = Machine.targets(states)
       const machine = Machine.make({
-        branches: { transition1: { destination: { update: targets11.root.scope } } },
+        branches: { transition1: { destination: { update: "scope" } } },
         root: states,
         events: Events,
         emittedEvents: Emissions
       }).handle({
         initial: {
-          target: Machine.targets(states).root.scope,
+          target: "scope",
           data: { count: 0 }
         },
         states: {
           scope: {
             initial: {
-              target: Machine.targets(states).root.scope.idle
+              target: "scope.idle"
             },
             states: {
               idle: {

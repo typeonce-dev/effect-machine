@@ -3,7 +3,6 @@ import { Machine } from "../../src/index.js"
 
 export const Events = Machine.events({ Start: {}, Reenter: {}, Finish: {} })
 const Root = Machine.state({ states: { Idle: {}, Active: {}, Complete: { type: "final", output: Schema.Void } } })
-const targets = Machine.targets(Root)
 export const observedMachine = (work: Effect.Effect<void, "failed">, stream: Stream.Stream<number> = Stream.never) =>
   Machine.make({
     id: "Observed",
@@ -13,18 +12,18 @@ export const observedMachine = (work: Effect.Effect<void, "failed">, stream: Str
     streams: { updates: stream },
     timers: { timeout: "1 hour" }
   }).handle({
-    initial: { target: targets.root.Idle },
+    initial: { target: "Idle" },
     states: {
-      Idle: { on: { Start: { target: targets.root.Active } } },
+      Idle: { on: { Start: { target: "Active" } } },
       Active: {
         invoke: [
-          { src: "work", id: "custom-work", onDone: { none: true }, onFailure: { target: targets.root.Complete } },
+          { src: "work", id: "custom-work", onDone: { none: true }, onFailure: { target: "Complete" } },
           { src: "updates", onElement: { none: true }, onDone: { none: true } },
           { src: "timeout", onDone: { none: true } }
         ],
         on: {
-          Reenter: { target: targets.root.Active, reenter: true },
-          Finish: { target: targets.root.Complete }
+          Reenter: { target: "Active", reenter: true },
+          Finish: { target: "Complete" }
         }
       },
       Complete: { output: () => undefined }

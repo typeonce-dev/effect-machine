@@ -230,20 +230,19 @@ describe("machine operation totality", () => {
           Done: { schema: Done, type: "final", output: Schema.NumberFromString }
         }
       })
-      const targets1 = Machine.targets(states)
       const machine = Machine.make({
         root: states,
         events: Machine.eventsFromSchemas(Finish)
       }).handle({
         initial: {
-          target: Machine.targets(states).root.Value,
+          target: "Value",
           decoded: true,
           data: { _tag: "Value", amount: 42 }
         },
         states: {
           Value: {
             on: {
-              Finish: { target: targets1.root.Done, decoded: true, data: () => ({ _tag: "Done" }) }
+              Finish: { target: "Done", decoded: true, data: () => ({ _tag: "Done" }) }
             }
           },
           Done: { output: () => 42 }

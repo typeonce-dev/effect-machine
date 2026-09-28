@@ -210,55 +210,50 @@ const makeDeepMachine = () =>
   })
 const atHub = <const Config extends object>(config: Config) =>
   ({
-    initial: { target: Machine.targets(DeepStates).root.Root },
+    initial: { target: "Root" },
     states: {
       Root: {
-        initial: { target: Machine.targets(DeepStates).root.Root.L1 },
+        initial: { target: "Root.L1" },
         states: {
           L1: {
-            initial: { target: Machine.targets(DeepStates).root.Root.L1.L2 },
+            initial: { target: "Root.L1.L2" },
             states: {
               L2: {
-                initial: { target: Machine.targets(DeepStates).root.Root.L1.L2.L3 },
+                initial: { target: "Root.L1.L2.L3" },
                 states: {
                   L3: {
-                    initial: { target: Machine.targets(DeepStates).root.Root.L1.L2.L3.L4 },
+                    initial: { target: "Root.L1.L2.L3.L4" },
                     states: {
                       L4: {
-                        initial: { target: Machine.targets(DeepStates).root.Root.L1.L2.L3.L4.L5 },
+                        initial: { target: "Root.L1.L2.L3.L4.L5" },
                         states: {
                           L5: {
-                            initial: { target: Machine.targets(DeepStates).root.Root.L1.L2.L3.L4.L5.L6 },
+                            initial: { target: "Root.L1.L2.L3.L4.L5.L6" },
                             states: {
                               L6: {
-                                initial: { target: Machine.targets(DeepStates).root.Root.L1.L2.L3.L4.L5.L6.L7 },
+                                initial: { target: "Root.L1.L2.L3.L4.L5.L6.L7" },
                                 states: {
                                   L7: {
-                                    initial: { target: Machine.targets(DeepStates).root.Root.L1.L2.L3.L4.L5.L6.L7.L8 },
+                                    initial: { target: "Root.L1.L2.L3.L4.L5.L6.L7.L8" },
                                     states: {
                                       L8: {
                                         initial: {
-                                          target: Machine.targets(DeepStates).root.Root.L1.L2.L3.L4.L5.L6.L7.L8.L9
+                                          target: "Root.L1.L2.L3.L4.L5.L6.L7.L8.L9"
                                         },
                                         states: {
                                           L9: {
                                             initial: {
-                                              target:
-                                                Machine.targets(DeepStates).root.Root.L1.L2.L3.L4.L5.L6.L7.L8.L9.L10
+                                              target: "Root.L1.L2.L3.L4.L5.L6.L7.L8.L9.L10"
                                             },
                                             states: {
                                               L10: {
                                                 initial: {
-                                                  target:
-                                                    Machine.targets(DeepStates).root.Root.L1.L2.L3.L4.L5.L6.L7.L8.L9.L10
-                                                      .Hub
+                                                  target: "Root.L1.L2.L3.L4.L5.L6.L7.L8.L9.L10.Hub"
                                                 },
                                                 states: {
                                                   Hub: {
                                                     initial: {
-                                                      target:
-                                                        Machine.targets(DeepStates).root.Root.L1.L2.L3.L4.L5.L6.L7.L8.L9
-                                                          .L10.Hub.Idle
+                                                      target: "Root.L1.L2.L3.L4.L5.L6.L7.L8.L9.L10.Hub.Idle"
                                                     },
                                                     history: {
                                                       recent: {
@@ -272,9 +267,7 @@ const atHub = <const Config extends object>(config: Config) =>
                                                     states: {
                                                       Route: {
                                                         choice: {
-                                                          target:
-                                                            Machine.targets(DeepStates).root.Root.L1.L2.L3.L4.L5.L6.L7
-                                                              .L8.L9.L10.Hub.Idle
+                                                          target: "Root.L1.L2.L3.L4.L5.L6.L7.L8.L9.L10.Hub.Idle"
                                                         }
                                                       },
                                                       Idle: {},
@@ -285,8 +278,7 @@ const atHub = <const Config extends object>(config: Config) =>
                                                           left: {
                                                             initial: {
                                                               target:
-                                                                Machine.targets(DeepStates).root.Root.L1.L2.L3.L4.L5.L6
-                                                                  .L7.L8.L9.L10.Hub.Work.left.LeftDone,
+                                                                "Root.L1.L2.L3.L4.L5.L6.L7.L8.L9.L10.Hub.Work.left.LeftDone",
                                                               data: { value: "" }
                                                             },
                                                             states: {
@@ -298,8 +290,7 @@ const atHub = <const Config extends object>(config: Config) =>
                                                           right: {
                                                             initial: {
                                                               target:
-                                                                Machine.targets(DeepStates).root.Root.L1.L2.L3.L4.L5.L6
-                                                                  .L7.L8.L9.L10.Hub.Work.right.RightDone,
+                                                                "Root.L1.L2.L3.L4.L5.L6.L7.L8.L9.L10.Hub.Work.right.RightDone",
                                                               data: { value: 0 }
                                                             },
                                                             states: {
@@ -510,7 +501,7 @@ describe("deep handler trees", () => {
       events: Machine.eventsFromSchemas()
     }).handle({
       initial: {
-        target: Machine.targets(States).root.n0,
+        target: "n0",
         data: () => {
           throw new Error("type-only constructor")
         }
@@ -518,7 +509,7 @@ describe("deep handler trees", () => {
       states: {
         n0: {
           initial: {
-            target: Machine.targets(States).root.n0.n1,
+            target: "n0.n1",
             data: () => {
               throw new Error("type-only constructor")
             }
@@ -526,7 +517,7 @@ describe("deep handler trees", () => {
           states: {
             n1: {
               initial: {
-                target: Machine.targets(States).root.n0.n1.n2,
+                target: "n0.n1.n2",
                 data: () => {
                   throw new Error("type-only constructor")
                 }
@@ -534,7 +525,7 @@ describe("deep handler trees", () => {
               states: {
                 n2: {
                   initial: {
-                    target: Machine.targets(States).root.n0.n1.n2.n3,
+                    target: "n0.n1.n2.n3",
                     data: () => {
                       throw new Error("type-only constructor")
                     }
@@ -542,7 +533,7 @@ describe("deep handler trees", () => {
                   states: {
                     n3: {
                       initial: {
-                        target: Machine.targets(States).root.n0.n1.n2.n3.n4,
+                        target: "n0.n1.n2.n3.n4",
                         data: () => {
                           throw new Error("type-only constructor")
                         }
@@ -550,7 +541,7 @@ describe("deep handler trees", () => {
                       states: {
                         n4: {
                           initial: {
-                            target: Machine.targets(States).root.n0.n1.n2.n3.n4.n5,
+                            target: "n0.n1.n2.n3.n4.n5",
                             data: () => {
                               throw new Error("type-only constructor")
                             }
@@ -558,7 +549,7 @@ describe("deep handler trees", () => {
                           states: {
                             n5: {
                               initial: {
-                                target: Machine.targets(States).root.n0.n1.n2.n3.n4.n5.n6,
+                                target: "n0.n1.n2.n3.n4.n5.n6",
                                 data: () => {
                                   throw new Error("type-only constructor")
                                 }
@@ -566,7 +557,7 @@ describe("deep handler trees", () => {
                               states: {
                                 n6: {
                                   initial: {
-                                    target: Machine.targets(States).root.n0.n1.n2.n3.n4.n5.n6.n7,
+                                    target: "n0.n1.n2.n3.n4.n5.n6.n7",
                                     data: () => {
                                       throw new Error("type-only constructor")
                                     }
@@ -574,7 +565,7 @@ describe("deep handler trees", () => {
                                   states: {
                                     n7: {
                                       initial: {
-                                        target: Machine.targets(States).root.n0.n1.n2.n3.n4.n5.n6.n7.n8,
+                                        target: "n0.n1.n2.n3.n4.n5.n6.n7.n8",
                                         data: () => {
                                           throw new Error("type-only constructor")
                                         }
@@ -582,7 +573,7 @@ describe("deep handler trees", () => {
                                       states: {
                                         n8: {
                                           initial: {
-                                            target: Machine.targets(States).root.n0.n1.n2.n3.n4.n5.n6.n7.n8.n9,
+                                            target: "n0.n1.n2.n3.n4.n5.n6.n7.n8.n9",
                                             data: () => {
                                               throw new Error("type-only constructor")
                                             }
@@ -590,7 +581,7 @@ describe("deep handler trees", () => {
                                           states: {
                                             n9: {
                                               initial: {
-                                                target: Machine.targets(States).root.n0.n1.n2.n3.n4.n5.n6.n7.n8.n9.n10,
+                                                target: "n0.n1.n2.n3.n4.n5.n6.n7.n8.n9.n10",
                                                 data: () => {
                                                   throw new Error("type-only constructor")
                                                 }
@@ -598,9 +589,7 @@ describe("deep handler trees", () => {
                                               states: {
                                                 n10: {
                                                   initial: {
-                                                    target:
-                                                      Machine.targets(States).root.n0.n1.n2.n3.n4.n5.n6.n7.n8.n9.n10
-                                                        .n11,
+                                                    target: "n0.n1.n2.n3.n4.n5.n6.n7.n8.n9.n10.n11",
                                                     data: () => {
                                                       throw new Error("type-only constructor")
                                                     }
@@ -608,9 +597,7 @@ describe("deep handler trees", () => {
                                                   states: {
                                                     n11: {
                                                       initial: {
-                                                        target:
-                                                          Machine.targets(States).root.n0.n1.n2.n3.n4.n5.n6.n7.n8.n9.n10
-                                                            .n11.n12,
+                                                        target: "n0.n1.n2.n3.n4.n5.n6.n7.n8.n9.n10.n11.n12",
                                                         data: () => {
                                                           throw new Error("type-only constructor")
                                                         }
@@ -618,9 +605,7 @@ describe("deep handler trees", () => {
                                                       states: {
                                                         n12: {
                                                           initial: {
-                                                            target:
-                                                              Machine.targets(States).root.n0.n1.n2.n3.n4.n5.n6.n7.n8.n9
-                                                                .n10.n11.n12.n13,
+                                                            target: "n0.n1.n2.n3.n4.n5.n6.n7.n8.n9.n10.n11.n12.n13",
                                                             data: () => {
                                                               throw new Error("type-only constructor")
                                                             }
@@ -629,8 +614,7 @@ describe("deep handler trees", () => {
                                                             n13: {
                                                               initial: {
                                                                 target:
-                                                                  Machine.targets(States).root.n0.n1.n2.n3.n4.n5.n6.n7
-                                                                    .n8.n9.n10.n11.n12.n13.n14,
+                                                                  "n0.n1.n2.n3.n4.n5.n6.n7.n8.n9.n10.n11.n12.n13.n14",
                                                                 data: () => {
                                                                   throw new Error("type-only constructor")
                                                                 }
@@ -639,8 +623,7 @@ describe("deep handler trees", () => {
                                                                 n14: {
                                                                   initial: {
                                                                     target:
-                                                                      Machine.targets(States).root.n0.n1.n2.n3.n4.n5.n6
-                                                                        .n7.n8.n9.n10.n11.n12.n13.n14.n15,
+                                                                      "n0.n1.n2.n3.n4.n5.n6.n7.n8.n9.n10.n11.n12.n13.n14.n15",
                                                                     data: () => {
                                                                       throw new Error("type-only constructor")
                                                                     }
@@ -649,8 +632,7 @@ describe("deep handler trees", () => {
                                                                     n15: {
                                                                       initial: {
                                                                         target:
-                                                                          Machine.targets(States).root.n0.n1.n2.n3.n4.n5
-                                                                            .n6.n7.n8.n9.n10.n11.n12.n13.n14.n15.n16,
+                                                                          "n0.n1.n2.n3.n4.n5.n6.n7.n8.n9.n10.n11.n12.n13.n14.n15.n16",
                                                                         data: () => {
                                                                           throw new Error("type-only constructor")
                                                                         }
@@ -659,9 +641,7 @@ describe("deep handler trees", () => {
                                                                         n16: {
                                                                           initial: {
                                                                             target:
-                                                                              Machine.targets(States).root.n0.n1.n2.n3
-                                                                                .n4.n5.n6.n7.n8.n9.n10.n11.n12.n13.n14
-                                                                                .n15.n16.n17,
+                                                                              "n0.n1.n2.n3.n4.n5.n6.n7.n8.n9.n10.n11.n12.n13.n14.n15.n16.n17",
                                                                             data: () => {
                                                                               throw new Error("type-only constructor")
                                                                             }
@@ -670,9 +650,7 @@ describe("deep handler trees", () => {
                                                                             n17: {
                                                                               initial: {
                                                                                 target:
-                                                                                  Machine.targets(States).root.n0.n1.n2
-                                                                                    .n3.n4.n5.n6.n7.n8.n9.n10.n11.n12
-                                                                                    .n13.n14.n15.n16.n17.n18,
+                                                                                  "n0.n1.n2.n3.n4.n5.n6.n7.n8.n9.n10.n11.n12.n13.n14.n15.n16.n17.n18",
                                                                                 data: () => {
                                                                                   throw new Error(
                                                                                     "type-only constructor"
@@ -683,10 +661,7 @@ describe("deep handler trees", () => {
                                                                                 n18: {
                                                                                   initial: {
                                                                                     target:
-                                                                                      Machine.targets(States).root.n0.n1
-                                                                                        .n2.n3.n4.n5.n6.n7.n8.n9.n10.n11
-                                                                                        .n12.n13.n14.n15.n16.n17.n18
-                                                                                        .n19,
+                                                                                      "n0.n1.n2.n3.n4.n5.n6.n7.n8.n9.n10.n11.n12.n13.n14.n15.n16.n17.n18.n19",
                                                                                     data: () => {
                                                                                       throw new Error(
                                                                                         "type-only constructor"
@@ -697,10 +672,7 @@ describe("deep handler trees", () => {
                                                                                     n19: {
                                                                                       initial: {
                                                                                         target:
-                                                                                          Machine.targets(States).root
-                                                                                            .n0.n1.n2.n3.n4.n5.n6.n7.n8
-                                                                                            .n9.n10.n11.n12.n13.n14.n15
-                                                                                            .n16.n17.n18.n19.n20,
+                                                                                          "n0.n1.n2.n3.n4.n5.n6.n7.n8.n9.n10.n11.n12.n13.n14.n15.n16.n17.n18.n19.n20",
                                                                                         data: () => {
                                                                                           throw new Error(
                                                                                             "type-only constructor"
@@ -711,11 +683,7 @@ describe("deep handler trees", () => {
                                                                                         n20: {
                                                                                           initial: {
                                                                                             target:
-                                                                                              Machine.targets(States)
-                                                                                                .root.n0.n1.n2.n3.n4.n5
-                                                                                                .n6.n7.n8.n9.n10.n11.n12
-                                                                                                .n13.n14.n15.n16.n17.n18
-                                                                                                .n19.n20.n21,
+                                                                                              "n0.n1.n2.n3.n4.n5.n6.n7.n8.n9.n10.n11.n12.n13.n14.n15.n16.n17.n18.n19.n20.n21",
                                                                                             data: () => {
                                                                                               throw new Error(
                                                                                                 "type-only constructor"
@@ -725,13 +693,8 @@ describe("deep handler trees", () => {
                                                                                           states: {
                                                                                             n21: {
                                                                                               initial: {
-                                                                                                target: Machine.targets(
-                                                                                                  States
-                                                                                                ).root.n0.n1.n2.n3.n4
-                                                                                                  .n5.n6.n7.n8.n9.n10
-                                                                                                  .n11.n12.n13.n14.n15
-                                                                                                  .n16.n17.n18.n19.n20
-                                                                                                  .n21.n22,
+                                                                                                target:
+                                                                                                  "n0.n1.n2.n3.n4.n5.n6.n7.n8.n9.n10.n11.n12.n13.n14.n15.n16.n17.n18.n19.n20.n21.n22",
                                                                                                 data: () => {
                                                                                                   throw new Error(
                                                                                                     "type-only constructor"
@@ -742,14 +705,7 @@ describe("deep handler trees", () => {
                                                                                                 n22: {
                                                                                                   initial: {
                                                                                                     target:
-                                                                                                      Machine.targets(
-                                                                                                        States
-                                                                                                      ).root.n0.n1.n2.n3
-                                                                                                        .n4.n5.n6.n7.n8
-                                                                                                        .n9.n10.n11.n12
-                                                                                                        .n13.n14.n15.n16
-                                                                                                        .n17.n18.n19.n20
-                                                                                                        .n21.n22.n23,
+                                                                                                      "n0.n1.n2.n3.n4.n5.n6.n7.n8.n9.n10.n11.n12.n13.n14.n15.n16.n17.n18.n19.n20.n21.n22.n23",
                                                                                                     data: () => {
                                                                                                       throw new Error(
                                                                                                         "type-only constructor"
@@ -759,18 +715,8 @@ describe("deep handler trees", () => {
                                                                                                   states: {
                                                                                                     n23: {
                                                                                                       initial: {
-                                                                                                        target: Machine
-                                                                                                          .targets(
-                                                                                                            States
-                                                                                                          ).root.n0.n1
-                                                                                                          .n2.n3.n4.n5
-                                                                                                          .n6.n7.n8.n9
-                                                                                                          .n10.n11.n12
-                                                                                                          .n13.n14.n15
-                                                                                                          .n16.n17.n18
-                                                                                                          .n19.n20.n21
-                                                                                                          .n22.n23
-                                                                                                          .n24,
+                                                                                                        target:
+                                                                                                          "n0.n1.n2.n3.n4.n5.n6.n7.n8.n9.n10.n11.n12.n13.n14.n15.n16.n17.n18.n19.n20.n21.n22.n23.n24",
                                                                                                         data: () => {
                                                                                                           throw new Error(
                                                                                                             "type-only constructor"

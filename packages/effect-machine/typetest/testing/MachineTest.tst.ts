@@ -22,7 +22,7 @@ describe("MachineTest", () => {
     input: Input
   }).handle({
     initial: {
-      target: Machine.targets(States).root.idle,
+      target: "idle",
       decoded: true,
       data: new Idle({})
     },
@@ -57,7 +57,7 @@ describe("MachineTest", () => {
       events: Machine.eventsFromSchemas(PublicEvent)
     }).handle({
       initial: {
-        target: Machine.targets(States).root.idle,
+        target: "idle",
         decoded: true,
         data: new Idle({})
       },
@@ -110,7 +110,7 @@ describe("MachineTest", () => {
       events: Machine.eventsFromSchemas(PublicEvent)
     }).handle({
       initial: {
-        target: Machine.targets(States).root.idle,
+        target: "idle",
         decoded: true,
         data: new Idle({})
       },

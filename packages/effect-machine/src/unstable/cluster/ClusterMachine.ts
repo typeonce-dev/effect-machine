@@ -352,7 +352,7 @@ export const layerMemory: Layer.Layer<Storage> = internal.layerMemory
  *   events: Machine.eventsFromSchemas()
  * }).handle({
  *   initial: {
- *     target: Machine.targets(States).root.Idle
+ *     target: "Idle"
  *   },
  *   states: {
  *     Idle: {}

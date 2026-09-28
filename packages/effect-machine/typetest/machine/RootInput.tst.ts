@@ -3,30 +3,29 @@ import { describe, expect, it } from "tstyche"
 import { Machine } from "../../src/index.js"
 
 describe("root input construction", () => {
-  it("requires fresh typed input only when targeting root", () => {
+  it("requires fresh typed input only when initializing root", () => {
     const root = Machine.state({
       states: {
         Loading: { fields: { request: Schema.String }, states: { Busy: {} } },
         Idle: {}
       }
     })
-    const targets = Machine.targets(root)
     const definition = Machine.make({
       root,
       input: Schema.Struct({ request: Schema.String }),
       events: Machine.events({ Reload: { request: Schema.String }, Branch: {} }),
-      branches: { reset: { root: { target: targets.root } } }
+      branches: { reset: { root: { initialize: true } } }
     })
     const machine = definition.handle({
       initial: {
-        target: targets.root.Loading,
+        target: "Loading",
         data: ({ input }) => {
           expect(input).type.toBe<{ readonly request: string }>()
           return { request: input.request }
         }
       },
       on: {
-        Reload: { target: targets.root, input: ({ event }) => ({ request: event.request }) },
+        Reload: { initialize: ({ event }) => ({ request: event.request }) },
         Branch: {
           branches: "reset",
           resolve: ({ select }) => {
@@ -40,31 +39,47 @@ describe("root input construction", () => {
       },
       states: {
         Loading: {
-          initial: { target: targets.root.Loading.Busy },
+          initial: { target: "Loading.Busy" },
           on: {
-            Reload: { target: targets.root.Loading, data: ({ event }) => ({ request: event.request }) }
+            Reload: { target: "Loading", data: ({ event }) => ({ request: event.request }) }
           }
         }
       }
     })
     expect(Machine.planInitial(machine, { request: "a" })).type.not.toBe<never>()
-    const initial = { target: targets.root.Idle }
-    const states = { Loading: { initial: { target: targets.root.Loading.Busy } } }
-    expect(definition.handle).type.not.toBeCallableWith({ initial, states, on: { Reload: { target: targets.root } } })
+    const initial = { target: "Idle" as const }
+    const states = { Loading: { initial: { target: "Loading.Busy" as const } } }
+    expect(definition.handle).type.not.toBeCallableWith({ initial, states, on: { Reload: { initialize: true } } })
     expect(definition.handle).type.not.toBeCallableWith({
       initial,
       states,
-      on: { Reload: { target: targets.root, input: { request: 1 } } }
+      on: { Reload: { initialize: { request: 1 } } }
     })
     expect(definition.handle).type.not.toBeCallableWith({
       initial,
       states,
-      on: { Reload: { target: targets.root, input: { request: "a" }, data: {} } }
+      on: { Reload: { initialize: { request: "a" }, data: {} } }
     })
     expect(definition.handle).type.not.toBeCallableWith({
       initial,
       states,
-      on: { Reload: { target: targets.root.Idle, input: { request: "a" } } }
+      on: { Reload: { target: "Idle", input: { request: "a" } } }
+    })
+    expect(definition.handle).type.not.toBeCallableWith({ initial, states, on: { Reload: { target: "root" } } })
+    expect(definition.handle).type.not.toBeCallableWith({
+      initial,
+      states,
+      on: { Reload: { initialize: { request: "a" }, target: "Idle" } }
+    })
+    expect(definition.handle).type.not.toBeCallableWith({
+      initial,
+      states,
+      on: { Reload: { initialize: { request: "a" }, update: "root" } }
+    })
+    expect(definition.handle).type.toBeCallableWith({
+      initial,
+      states,
+      on: { Reload: { initialize: { request: "a" }, guard: () => true, reenter: true } }
     })
   })
 })

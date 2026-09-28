@@ -19,7 +19,6 @@ const States = Machine.state({
   }
 })
 let branchDeclarationReads = 0
-const targets1 = Machine.targets(States)
 const machine = Machine.make({
   branches: {
     routing: {
@@ -28,27 +27,27 @@ const machine = Machine.make({
           branchDeclarationReads++
           return "Score is perfect"
         },
-        target: targets1.root.Flow.Approved
+        target: "Flow.Approved"
       },
-      negative: { title: "Score is negative", target: targets1.root.Flow.Rejected },
-      zero: { title: "Score is zero", target: targets1.root.Flow.Rejected },
-      passing: { title: "Score is at least 70", target: targets1.root.Flow.Approved },
-      failing: { target: targets1.root.Flow.Rejected }
+      negative: { title: "Score is negative", target: "Flow.Rejected" },
+      zero: { title: "Score is zero", target: "Flow.Rejected" },
+      passing: { title: "Score is at least 70", target: "Flow.Approved" },
+      failing: { target: "Flow.Rejected" }
     },
-    transition1: { destination: { target: targets1.root.Flow } }
+    transition1: { destination: { target: "Flow" } }
   },
   root: States,
   events: Machine.eventsFromSchemas(Recheck)
 }).handle({
   initial: {
-    target: Machine.targets(States).root.Flow,
+    target: "Flow",
     decoded: true,
     data: new Flow({ score: 80 })
   },
   states: {
     Flow: {
       initial: {
-        target: Machine.targets(States).root.Flow.Routing
+        target: "Flow.Routing"
       },
       states: {
         Routing: {
@@ -71,7 +70,7 @@ const machine = Machine.make({
         Approved: {
           on: {
             Recheck: {
-              target: targets1.root.Flow,
+              target: "Flow",
               decoded: true,
               data: ({ event }) => (new Flow({ score: event.score }))
             }
@@ -183,12 +182,11 @@ describe("Machine choice pseudo-states", () => {
         readonly enabled: boolean
         readonly score: number
       } | undefined
-      const targets2 = Machine.targets(states)
       const inputChoice = Machine.make({
         branches: {
           transition1: {
-            approved: { target: targets2.root.Root.Flow.Approved },
-            rejected: { target: targets2.root.Root.Flow.Rejected }
+            approved: { target: "Root.Flow.Approved" },
+            rejected: { target: "Root.Flow.Rejected" }
           }
         },
         root: states,
@@ -196,20 +194,20 @@ describe("Machine choice pseudo-states", () => {
         input: Schema.Struct({ enabled: Schema.Boolean, score: Schema.Number })
       }).handle({
         initial: {
-          target: Machine.targets(states).root.Root,
+          target: "Root",
           data: ({ root: { input: input } }) => ({ enabled: input.enabled })
         },
         root: ({ input }) => ({ input }),
         states: {
           Root: {
             initial: {
-              target: Machine.targets(states).root.Root.Flow,
+              target: "Root.Flow",
               data: ({ root: { input: input } }) => ({ score: input.score })
             },
             states: {
               Flow: {
                 initial: {
-                  target: Machine.targets(states).root.Root.Flow.Routing
+                  target: "Root.Flow.Routing"
                 },
                 states: {
                   Routing: {
@@ -264,28 +262,27 @@ describe("Machine choice pseudo-states", () => {
           }
         }
       })
-      const targets3 = Machine.targets(states)
       const chained = Machine.make({
-        branches: { transition1: { destination: { target: targets3.root.Flow.Second } } },
+        branches: { transition1: { destination: { target: "Flow.Second" } } },
         root: states,
         events: Machine.eventsFromSchemas()
       }).handle({
         initial: {
-          target: Machine.targets(states).root.Flow,
+          target: "Flow",
           decoded: true,
           data: new Flow({ score: 80 })
         },
         states: {
           Flow: {
             initial: {
-              target: Machine.targets(states).root.Flow.First
+              target: "Flow.First"
             },
             states: {
               First: {
                 choice: { branches: "transition1", resolve: ({ select: { destination: target } }) => target() }
               },
               Second: {
-                choice: { target: targets3.root.Flow.Approved, decoded: true, data: () => (new Approved({})) }
+                choice: { target: "Flow.Approved", decoded: true, data: () => (new Approved({})) }
               },
               Approved: {}
             }
@@ -321,25 +318,24 @@ describe("Machine choice pseudo-states", () => {
           }
         }
       })
-      const targets4 = Machine.targets(states)
       const looping = Machine.make({
         branches: {
-          transition1: { destination: { target: targets4.root.Flow.Second } },
-          transition2: { destination: { target: targets4.root.Flow.First } }
+          transition1: { destination: { target: "Flow.Second" } },
+          transition2: { destination: { target: "Flow.First" } }
         },
         id: "ChoiceLoopMachine",
         root: states,
         events: Machine.eventsFromSchemas()
       }).handle({
         initial: {
-          target: Machine.targets(states).root.Flow,
+          target: "Flow",
           decoded: true,
           data: new Flow({ score: 80 })
         },
         states: {
           Flow: {
             initial: {
-              target: Machine.targets(states).root.Flow.First
+              target: "Flow.First"
             },
             states: {
               First: {
@@ -372,21 +368,20 @@ describe("Machine choice pseudo-states", () => {
           }
         }
       })
-      const targets5 = Machine.targets(states)
       const alwaysMachine = Machine.make({
-        branches: { transition1: { destination: { target: targets5.root.Flow.Routing } } },
+        branches: { transition1: { destination: { target: "Flow.Routing" } } },
         root: states,
         events: Machine.eventsFromSchemas()
       }).handle({
         initial: {
-          target: Machine.targets(states).root.Flow,
+          target: "Flow",
           decoded: true,
           data: new Flow({ score: 10 })
         },
         states: {
           Flow: {
             initial: {
-              target: Machine.targets(states).root.Flow.Approved,
+              target: "Flow.Approved",
               decoded: true,
               data: new Approved({})
             },
@@ -395,7 +390,7 @@ describe("Machine choice pseudo-states", () => {
                 always: { branches: "transition1", resolve: ({ select: { destination: target } }) => target() }
               },
               Routing: {
-                choice: { target: targets5.root.Flow.Rejected, decoded: true, data: () => (new Rejected({})) }
+                choice: { target: "Flow.Rejected", decoded: true, data: () => (new Rejected({})) }
               },
               Rejected: {}
             }
@@ -436,21 +431,20 @@ describe("Machine choice pseudo-states", () => {
           }
         }
       })
-      const targets6 = Machine.targets(states)
       const completion = Machine.make({
-        branches: { transition1: { destination: { target: targets6.root.Flow } } },
+        branches: { transition1: { destination: { target: "Flow" } } },
         root: states,
         events: Machine.eventsFromSchemas()
       }).handle({
         initial: {
-          target: Machine.targets(states).root.Flow,
+          target: "Flow",
           decoded: true,
           data: new Flow({ score: 0 })
         },
         states: {
           Flow: {
             initial: {
-              target: Machine.targets(states).root.Flow.Done,
+              target: "Flow.Done",
               decoded: true,
               data: new Done({})
             },
@@ -462,7 +456,7 @@ describe("Machine choice pseudo-states", () => {
             states: {
               Done: {},
               Routing: {
-                choice: { target: targets6.root.Flow.Rejected, decoded: true, data: () => (new Rejected({})) }
+                choice: { target: "Flow.Rejected", decoded: true, data: () => (new Rejected({})) }
               },
               Rejected: {}
             }
@@ -515,13 +509,12 @@ describe("Machine choice pseudo-states", () => {
           }
         }
       })
-      const targets7 = Machine.targets(states)
       const parallel = Machine.make({
         root: states,
         events: Machine.eventsFromSchemas()
       }).handle({
         initial: {
-          target: Machine.targets(states).root.Board,
+          target: "Board",
           decoded: true,
           data: new Board({})
         },
@@ -531,22 +524,22 @@ describe("Machine choice pseudo-states", () => {
             states: {
               Left: {
                 initial: {
-                  target: Machine.targets(states).root.Board.Left.Routing
+                  target: "Board.Left.Routing"
                 },
                 states: {
                   Routing: {
-                    choice: { target: targets7.root.Board.Left.Ready, decoded: true, data: () => (new Ready({})) }
+                    choice: { target: "Board.Left.Ready", decoded: true, data: () => (new Ready({})) }
                   },
                   Ready: {}
                 }
               },
               Right: {
                 initial: {
-                  target: Machine.targets(states).root.Board.Right.Routing
+                  target: "Board.Right.Routing"
                 },
                 states: {
                   Routing: {
-                    choice: { target: targets7.root.Board.Right.Ready, decoded: true, data: () => (new RightReady({})) }
+                    choice: { target: "Board.Right.Ready", decoded: true, data: () => (new RightReady({})) }
                   },
                   Ready: {}
                 }
@@ -588,24 +581,23 @@ describe("Machine choice pseudo-states", () => {
           Outside
         }
       })
-      const targets8 = Machine.targets(states)
       const history = Machine.make({
         branches: {
-          transition2: { destination: { history: targets8.root.Flow.Recent } },
-          transition3: { destination: { target: targets8.root.Flow } }
+          transition2: { destination: { history: "Flow.Recent" } },
+          transition3: { destination: { target: "Flow" } }
         },
         root: states,
         events: Machine.eventsFromSchemas(Leave, Resume)
       }).handle({
         initial: {
-          target: Machine.targets(states).root.Flow,
+          target: "Flow",
           decoded: true,
           data: new Flow({ score: 1 })
         },
         states: {
           Flow: {
             initial: {
-              target: Machine.targets(states).root.Flow.Active,
+              target: "Flow.Active",
               decoded: true,
               data: new Active({})
             },
@@ -626,7 +618,7 @@ describe("Machine choice pseudo-states", () => {
             states: {
               Active: {
                 on: {
-                  Leave: { target: targets8.root.Outside, decoded: true, data: () => (new Outside({})) }
+                  Leave: { target: "Outside", decoded: true, data: () => (new Outside({})) }
                 }
               },
               Routing: {
@@ -672,21 +664,20 @@ describe("Machine choice pseudo-states", () => {
           }
         }
       })
-      const targets9 = Machine.targets(states)
       const initialHistory = Machine.make({
-        branches: { transition1: { destination: { history: targets9.root.Flow.Recent } } },
+        branches: { transition1: { destination: { history: "Flow.Recent" } } },
         root: states,
         events: Machine.eventsFromSchemas()
       }).handle({
         initial: {
-          target: Machine.targets(states).root.Flow,
+          target: "Flow",
           decoded: true,
           data: new Flow({ score: 1 })
         },
         states: {
           Flow: {
             initial: {
-              target: Machine.targets(states).root.Flow.Routing
+              target: "Flow.Routing"
             },
             history: {
               Recent: {
@@ -736,21 +727,20 @@ describe("Machine choice pseudo-states", () => {
           Outside
         }
       })
-      const targets10 = Machine.targets(states)
       const historyChoice = Machine.make({
-        branches: { transition2: { destination: { history: targets10.root.Flow.Recent } } },
+        branches: { transition2: { destination: { history: "Flow.Recent" } } },
         root: states,
         events: Machine.eventsFromSchemas(Resume)
       }).handle({
         initial: {
-          target: Machine.targets(states).root.Outside,
+          target: "Outside",
           decoded: true,
           data: new Outside({})
         },
         states: {
           Flow: {
             initial: {
-              target: Machine.targets(states).root.Flow.Active
+              target: "Flow.Active"
             },
             history: {
               Recent: {
@@ -761,7 +751,7 @@ describe("Machine choice pseudo-states", () => {
             states: {
               Active: {},
               Routing: {
-                choice: { target: targets10.root.Flow.Active, decoded: true, data: () => (new Active({})) }
+                choice: { target: "Flow.Active", decoded: true, data: () => (new Active({})) }
               }
             }
           },
