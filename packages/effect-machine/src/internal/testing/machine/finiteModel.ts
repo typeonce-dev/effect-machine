@@ -9,8 +9,8 @@
  * @internal
  */
 
+import * as Arbitrary from "effect/Arbitrary"
 import * as Schema from "effect/Schema"
-import * as Arbitrary from "effect/unstable/arbitrary/Arbitrary"
 import * as Machine from "../../../Machine.js"
 import { chooseArbitrary } from "./arbitrary.js"
 

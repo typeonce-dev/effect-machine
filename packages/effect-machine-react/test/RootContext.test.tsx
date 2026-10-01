@@ -2,7 +2,7 @@
 import { RegistryContext } from "@effect/atom-react"
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react"
 import { Schema } from "effect"
-import { AtomRegistry } from "effect/unstable/reactivity"
+import { AtomRegistry } from "effect/reactivity"
 import * as React from "react"
 import { afterEach, expect, it } from "vitest"
 import { Machine } from "../../effect-machine/src/index.js"

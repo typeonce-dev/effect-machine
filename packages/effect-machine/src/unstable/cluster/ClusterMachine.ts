@@ -3,12 +3,12 @@
  *
  * @since 0.4.0
  */
+import type { Entity, MessageStorage, Sharding, Snowflake } from "effect/cluster"
 import type * as Effect from "effect/Effect"
 import type * as Layer from "effect/Layer"
 import type * as Option from "effect/Option"
+import type { Rpc } from "effect/rpc"
 import type * as Schema from "effect/Schema"
-import type { Entity, MessageStorage, Sharding, Snowflake } from "effect/unstable/cluster"
-import type { Rpc } from "effect/unstable/rpc"
 import * as internal from "../../internal/machine/cluster.js"
 import * as Protocol from "../../internal/machine/clusterProtocol.js"
 import { Accepted, Rejected, Storage } from "../../internal/machine/clusterProtocol.js"

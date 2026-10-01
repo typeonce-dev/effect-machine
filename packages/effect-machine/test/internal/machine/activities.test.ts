@@ -1,6 +1,6 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Duration, Effect, Schema, Stream } from "effect"
-import * as Arbitrary from "effect/unstable/arbitrary/Arbitrary"
+import * as Arbitrary from "effect/Arbitrary"
 import { Machine } from "../../../src/index.js"
 import { activityDefinitions } from "../../../src/internal/machine/activities.js"
 import { makeMermaidRenderer } from "../../machine/visualization/mermaid.js"

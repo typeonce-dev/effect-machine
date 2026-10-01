@@ -1,6 +1,6 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Cause, Effect, Exit, Option, Schema } from "effect"
-import * as Arbitrary from "effect/unstable/arbitrary/Arbitrary"
+import * as Arbitrary from "effect/Arbitrary"
 import { Machine } from "../../src/index.js"
 class Root extends Schema.TaggedClass<Root>("CodecRoot")("CodecRoot", {
   id: Schema.NonEmptyString

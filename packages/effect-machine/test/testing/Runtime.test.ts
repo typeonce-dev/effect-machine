@@ -1,6 +1,6 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Cause, Clock, Effect, Exit, Option, Schema, Stream } from "effect"
-import * as Arbitrary from "effect/unstable/arbitrary/Arbitrary"
+import * as Arbitrary from "effect/Arbitrary"
 import { Machine } from "../../src/index.js"
 import { MachineTest } from "../../src/testing/index.js"
 class Counter extends Schema.TaggedClass<Counter>("Counter")("Counter", {

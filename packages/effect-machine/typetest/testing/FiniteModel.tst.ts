@@ -1,4 +1,4 @@
-import * as Arbitrary from "effect/unstable/arbitrary/Arbitrary"
+import * as Arbitrary from "effect/Arbitrary"
 import { describe, expect, it } from "tstyche"
 import { Machine } from "../../src/index.js"
 import { MachineTest } from "../../src/testing/index.js"

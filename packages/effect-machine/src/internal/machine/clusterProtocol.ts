@@ -1,8 +1,8 @@
 /** Canonical checkpoint service and wire schemas for the Cluster adapter. */
+import type { ClusterError, EntityAddress, Snowflake } from "effect/cluster"
 import * as Context from "effect/Context"
 import type * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
-import type { ClusterError, EntityAddress, Snowflake } from "effect/unstable/cluster"
 import type * as Public from "../../unstable/cluster/ClusterMachine.js"
 import type { Checkpoint, LoadResult } from "../../unstable/cluster/ClusterMachine.js"
 type EntityAddress = EntityAddress.EntityAddress

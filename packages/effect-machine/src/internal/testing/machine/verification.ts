@@ -4,12 +4,12 @@
  * @since 0.4.0
  */
 
+import * as Arbitrary from "effect/Arbitrary"
 import * as Data from "effect/Data"
 import * as Effect from "effect/Effect"
 import * as Graph from "effect/Graph"
 import * as Schema from "effect/Schema"
 import * as SchemaAST from "effect/SchemaAST"
-import * as Arbitrary from "effect/unstable/arbitrary/Arbitrary"
 import * as Machine from "../../../Machine.js"
 import type {
   Coverage,

@@ -27,7 +27,7 @@ Bind service-backed machines once at the application runtime:
 
 ```ts
 import { AtomMachine } from "@typeonce/effect-machine/reactivity"
-import { Atom } from "effect/unstable/reactivity"
+import { Atom } from "effect/reactivity"
 import { AppLayer } from "./app-layer"
 
 const atomRuntime = Atom.runtime(AppLayer)
@@ -195,7 +195,7 @@ and invalid event input for an active machine remains a
 When acceptance depends on a changing payload, project an event atom instead:
 
 ```ts
-import { Atom } from "effect/unstable/reactivity"
+import { Atom } from "effect/reactivity"
 
 const submitEvent = Atom.map(draftAtom, (draft) =>
   AuthEvents.Submitted({ draft }))

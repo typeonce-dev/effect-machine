@@ -6,10 +6,10 @@
 
 import { dual } from "effect/Function"
 import type * as Option from "effect/Option"
+import type { AsyncResult, Atom, AtomRegistry } from "effect/reactivity"
 import type * as Schema from "effect/Schema"
 import type * as Scope from "effect/Scope"
 import type * as Stream from "effect/Stream"
-import type { AsyncResult, Atom, AtomRegistry } from "effect/unstable/reactivity"
 import * as internal from "../../internal/machine/atom.js"
 import type { ChildNotActiveError, NotReadyError } from "../../internal/machine/atom.js"
 import type { EnsureExecutable } from "../../internal/machine/readiness.js"

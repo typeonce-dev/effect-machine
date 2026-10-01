@@ -1,6 +1,5 @@
 import { assert, describe, it } from "@effect/vitest"
 import { type Duration, Effect, Exit, Fiber, Latch, Layer, Option, Schema } from "effect"
-import { TestClock } from "effect/testing"
 import {
   ClusterError,
   MessageStorage,
@@ -10,7 +9,8 @@ import {
   Sharding,
   ShardingConfig,
   Snowflake
-} from "effect/unstable/cluster"
+} from "effect/cluster"
+import { TestClock } from "effect/testing"
 import { Machine } from "../../../src/index.js"
 import { ClusterMachine } from "../../../src/unstable/cluster/index.js"
 class Count extends Schema.TaggedClass<Count>("Count")("Count", {

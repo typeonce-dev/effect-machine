@@ -1,6 +1,6 @@
 import { Context, Effect, type Layer, Schema, SchemaGetter } from "effect"
-import { type MessageStorage, type Sharding } from "effect/unstable/cluster"
-import type { Rpc, RpcGroup } from "effect/unstable/rpc"
+import { type MessageStorage, type Sharding } from "effect/cluster"
+import type { Rpc, RpcGroup } from "effect/rpc"
 import { describe, expect, it } from "tstyche"
 import { Machine } from "../../../src/index.js"
 import { ClusterMachine } from "../../../src/unstable/cluster/index.js"

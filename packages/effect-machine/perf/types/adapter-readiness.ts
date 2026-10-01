@@ -1,4 +1,4 @@
-import { Atom } from "effect/unstable/reactivity"
+import { Atom } from "effect/reactivity"
 import { Machine } from "../../dist/index.js"
 import { ClusterMachine } from "../../dist/unstable/cluster/index.js"
 import { AtomMachine } from "../../dist/unstable/reactivity/index.js"
