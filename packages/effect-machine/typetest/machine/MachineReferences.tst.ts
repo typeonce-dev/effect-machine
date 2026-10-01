@@ -1,5 +1,5 @@
 import { Effect, Schema, Stream } from "effect"
-import { AtomRegistry } from "effect/unstable/reactivity"
+import { AtomRegistry } from "effect/reactivity"
 import { describe, expect, it } from "tstyche"
 import { Machine } from "../../src/index.js"
 import { MachineTest } from "../../src/testing/index.js"

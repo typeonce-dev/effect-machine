@@ -4,13 +4,13 @@
  * @since 0.4.0
  */
 import * as Cause from "effect/Cause"
+import { ClusterSchema, Entity, MessageStorage } from "effect/cluster"
+import type { EntityAddress, Snowflake } from "effect/cluster"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
+import { Rpc } from "effect/rpc"
 import * as Schema from "effect/Schema"
-import { ClusterSchema, Entity, MessageStorage } from "effect/unstable/cluster"
-import type { EntityAddress, Snowflake } from "effect/unstable/cluster"
-import { Rpc } from "effect/unstable/rpc"
 import type * as Machine from "../../Machine.js"
 import type { Checkpoint } from "../../unstable/cluster/ClusterMachine.js"
 import type { ClusterMachine } from "../../unstable/cluster/ClusterMachine.js"

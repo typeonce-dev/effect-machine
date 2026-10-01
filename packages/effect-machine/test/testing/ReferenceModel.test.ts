@@ -1,7 +1,7 @@
 import { assert, describe, it } from "@effect/vitest"
+import * as Arbitrary from "effect/Arbitrary"
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
-import * as Arbitrary from "effect/unstable/arbitrary/Arbitrary"
 import { Machine } from "../../src/index.js"
 import { MachineTest } from "../../src/testing/index.js"
 const event = (_tag: string): {

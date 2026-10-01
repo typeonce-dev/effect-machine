@@ -2,7 +2,7 @@
 import { RegistryContext, useAtomSuspense } from "@effect/atom-react"
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react"
 import { Effect, Option, Schema } from "effect"
-import { AtomRegistry } from "effect/unstable/reactivity"
+import { AtomRegistry } from "effect/reactivity"
 import * as React from "react"
 import { renderToString } from "react-dom/server"
 import { afterEach, assert, describe, it } from "vitest"

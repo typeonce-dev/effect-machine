@@ -4,10 +4,10 @@
  * @since 0.4.0
  */
 
+import type * as Arbitrary from "effect/Arbitrary"
 import type * as Effect from "effect/Effect"
 import type * as Graph from "effect/Graph"
 import type * as Schema from "effect/Schema"
-import type * as Arbitrary from "effect/unstable/arbitrary/Arbitrary"
 import type { EnsureExecutable } from "../internal/machine/readiness.js"
 import type { SchemaArbitraryReport } from "../internal/testing/machine/arbitrary.js"
 import * as ExplorationImpl from "../internal/testing/machine/exploration.js"

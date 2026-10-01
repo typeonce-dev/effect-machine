@@ -1,6 +1,6 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Cause, Effect, Exit, Fiber, Schema, Stream } from "effect"
-import * as Arbitrary from "effect/unstable/arbitrary/Arbitrary"
+import * as Arbitrary from "effect/Arbitrary"
 import { isDeepStrictEqual } from "node:util"
 import { Machine } from "../../src/index.js"
 import { MachineTest } from "../../src/testing/index.js"

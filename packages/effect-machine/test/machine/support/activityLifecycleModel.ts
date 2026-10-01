@@ -1,6 +1,6 @@
 import { Cause, Data, Deferred, Effect, Exit, Queue, Ref } from "effect"
+import * as Arbitrary from "effect/Arbitrary"
 import * as Schema from "effect/Schema"
-import * as Arbitrary from "effect/unstable/arbitrary/Arbitrary"
 import { Machine } from "../../../src/index.js"
 
 export type ActivityOutcome = "succeeded" | "cancelled" | "failed"

@@ -1,6 +1,6 @@
+import * as Arbitrary from "effect/Arbitrary"
 import * as Schema from "effect/Schema"
 import * as SchemaAST from "effect/SchemaAST"
-import * as Arbitrary from "effect/unstable/arbitrary/Arbitrary"
 
 /**
  * Warning emitted when schema arbitrary generation must enforce an opaque

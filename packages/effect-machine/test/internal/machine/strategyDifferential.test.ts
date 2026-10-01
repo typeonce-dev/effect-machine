@@ -1,6 +1,6 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Deferred, Effect, Fiber, Option, Schema, Stream } from "effect"
-import * as Arbitrary from "effect/unstable/arbitrary/Arbitrary"
+import * as Arbitrary from "effect/Arbitrary"
 import { Machine } from "../../../src/index.js"
 import * as Configuration from "../../../src/internal/machine/configuration.js"
 import * as ExecutionPlan from "../../../src/internal/machine/executionPlan.js"

@@ -1,5 +1,5 @@
 import { Effect, Schema } from "effect"
-import { Atom } from "effect/unstable/reactivity"
+import { Atom } from "effect/reactivity"
 import { describe, expect, it } from "tstyche"
 import { Machine } from "../../src/index.js"
 import { AtomMachine } from "../../src/unstable/reactivity/index.js"

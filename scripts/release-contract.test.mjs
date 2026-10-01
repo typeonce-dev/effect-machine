@@ -33,13 +33,16 @@ test("all Effect Machine packages release with the same version", async () => {
   )
 })
 
-test("devtools pins its platform packages to the supported Effect prerelease", async () => {
+test("devtools pins its platform packages to the tested stable Effect version", async () => {
   const devtools = await readJson("packages/devtools/package.json")
+  const effect = devtools.devDependencies.effect
+  assert.match(effect, /^\d+\.\d+\.\d+$/)
+  assert.equal(devtools.peerDependencies.effect, `^${effect}`)
   for (const name of ["@effect/platform-browser", "@effect/platform-node", "@effect/platform-node-shared"]) {
     assert.equal(
       devtools.dependencies[name],
-      devtools.peerDependencies.effect,
-      `${name} must match the supported Effect version`
+      effect,
+      `${name} must match the tested Effect version`
     )
   }
 })

@@ -34,11 +34,11 @@ Cluster and are exposed only through explicit integration boundaries.
 ## Install
 
 ```sh
-pnpm add @typeonce/effect-machine effect@4.0.0-rc.117
+pnpm add @typeonce/effect-machine effect@4.0.0
 ```
 
-`effect` is an exact peer dependency. Install the version above and upgrade it
-in lockstep with this package.
+`effect` is a peer dependency requiring stable `^4.0.0`. Keep any installed
+`@effect/*` packages on the same version as `effect`.
 
 ## Quick start
 
@@ -447,7 +447,7 @@ cost.
 
 ```ts
 import { AtomMachine } from "@typeonce/effect-machine/reactivity"
-import { Atom } from "effect/unstable/reactivity"
+import { Atom } from "effect/reactivity"
 
 const runtime = Atom.runtime(AppLayer)
 const counterAtom = AtomMachine.bind(runtime).make(Counter)
@@ -604,11 +604,11 @@ tests do not execute invokes or time. Use a started machine and a probe when
 those semantics matter.
 
 Generated scenarios, finite models, and runtime commands use
-`effect/unstable/arbitrary/Arbitrary`. Custom generator options accept native
+`effect/Arbitrary`. Custom generator options accept native
 `Arbitrary` values. For example:
 
 ```ts
-import * as Arbitrary from "effect/unstable/arbitrary/Arbitrary"
+import * as Arbitrary from "effect/Arbitrary"
 
 const generated = MachineTest.scenarios(Counter, { maxEvents: 20 })
 const samples = yield* Arbitrary.sampleEffect(generated.arbitrary, {

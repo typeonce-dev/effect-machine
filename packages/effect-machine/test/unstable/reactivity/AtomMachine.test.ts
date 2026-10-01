@@ -1,6 +1,6 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Cause, Data, Deferred, Effect, Fiber, Layer, Option, Ref, Schema, Stream } from "effect"
-import { AsyncResult, Atom, AtomRegistry } from "effect/unstable/reactivity"
+import { AsyncResult, Atom, AtomRegistry } from "effect/reactivity"
 import { Machine } from "../../../src/index.js"
 import { AtomMachine } from "../../../src/unstable/reactivity/index.js"
 class Count extends Schema.TaggedClass<Count>("Count")("Count", {

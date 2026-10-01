@@ -18,7 +18,7 @@ const Attempts = Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 5 })).
   title: "Attempts",
   description: "An integer between one and five."
 })
-const Labels = Schema.Array(Schema.NonEmptyString).check(Schema.isLengthBetween(1, 3)).annotate({
+const Labels = Schema.Array(Schema.NonEmptyString).check(Schema.isBetweenLength(1, 3)).annotate({
   title: "Labels",
   description: "One to three non-empty labels."
 })

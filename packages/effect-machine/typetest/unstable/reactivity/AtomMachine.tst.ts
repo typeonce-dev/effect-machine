@@ -1,5 +1,5 @@
 import { Context, Effect, Layer, type Option, Schema, Stream } from "effect"
-import { AsyncResult, Atom } from "effect/unstable/reactivity"
+import { AsyncResult, Atom } from "effect/reactivity"
 import { describe, expect, it } from "tstyche"
 import { Machine } from "../../../src/index.js"
 import { AtomMachine } from "../../../src/unstable/reactivity/index.js"

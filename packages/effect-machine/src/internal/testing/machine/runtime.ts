@@ -4,6 +4,7 @@
  * @since 0.4.0
  */
 
+import * as Arbitrary from "effect/Arbitrary"
 import * as Cause from "effect/Cause"
 import * as Data from "effect/Data"
 import * as Deferred from "effect/Deferred"
@@ -14,7 +15,6 @@ import * as Queue from "effect/Queue"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
 import { TestClock } from "effect/testing"
-import * as Arbitrary from "effect/unstable/arbitrary/Arbitrary"
 import * as Machine from "../../../Machine.js"
 import type { CausalRuntimeEvidence, Probe, ProbeStep, RuntimeInvariant } from "../../../testing/MachineTest.js"
 import * as Protocol from "../../machine/protocol.js"
