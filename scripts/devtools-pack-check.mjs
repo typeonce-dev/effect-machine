@@ -104,12 +104,12 @@ try {
     dependencies: {
       "@typeonce/effect-machine": `file:${coreArchive}`,
       "@typeonce/effect-machine-devtools": `file:${devtoolsArchive}`,
-      effect: devtoolsPackage.peerDependencies.effect
+      effect: devtoolsPackage.devDependencies.effect
     }
   }, null, 2))
   await writeFile(
     join(consumer, "pnpm-workspace.yaml"),
-    `packages:\n  - .\noverrides:\n  "@typeonce/effect-machine": "file:${coreArchive}"\nminimumReleaseAgeExclude:\n  - "effect"\n  - "@effect/platform-browser"\n  - "@effect/platform-node"\n  - "@effect/platform-node-shared"\n`
+    `packages:\n  - .\noverrides:\n  "@typeonce/effect-machine": "file:${coreArchive}"\n  "@effect/platform-browser": ${devtoolsPackage.devDependencies.effect}\n  "@effect/platform-node": ${devtoolsPackage.devDependencies.effect}\n  "@effect/platform-node-shared": ${devtoolsPackage.devDependencies.effect}\nminimumReleaseAgeExclude:\n  - "effect"\n  - "@effect/platform-browser"\n  - "@effect/platform-node"\n  - "@effect/platform-node-shared"\n`
   )
   await writeFile(machineFile, readyMachine)
 

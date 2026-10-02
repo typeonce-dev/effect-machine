@@ -58,10 +58,10 @@ try {
     private: true,
     type: "module",
     dependencies: {
-      "@effect/atom-react": reactPackage.peerDependencies["@effect/atom-react"],
+      "@effect/atom-react": reactPackage.devDependencies["@effect/atom-react"],
       "@typeonce/effect-machine": `file:${coreArchive}`,
       "@typeonce/effect-machine-react": `file:${reactArchive}`,
-      effect: reactPackage.peerDependencies.effect,
+      effect: reactPackage.devDependencies.effect,
       react: "19.2.7",
       scheduler: "0.27.0"
     }

@@ -33,16 +33,28 @@ test("all Effect Machine packages release with the same version", async () => {
   )
 })
 
-test("devtools pins its platform packages to the tested stable Effect version", async () => {
-  const devtools = await readJson("packages/devtools/package.json")
-  const effect = devtools.devDependencies.effect
-  assert.match(effect, /^\d+\.\d+\.\d+$/)
-  assert.equal(devtools.peerDependencies.effect, `^${effect}`)
+test("Effect consumers accept stable 4.x while development versions stay synchronized", async () => {
+  const [root, core, react, devtools] = await Promise.all([
+    readJson("package.json"),
+    readJson("packages/effect-machine/package.json"),
+    readJson("packages/effect-machine-react/package.json"),
+    readJson("packages/devtools/package.json")
+  ])
+  const effect = root.devDependencies.effect
+  assert.match(effect, /^4\.\d+\.\d+$/)
+  for (const manifest of [core, react, devtools]) {
+    assert.equal(manifest.peerDependencies.effect, "^4.0.0")
+    assert.equal(manifest.devDependencies.effect, effect)
+  }
+  assert.equal(root.devDependencies["@effect/vitest"], effect)
+  assert.equal(core.devDependencies["@effect/vitest"], effect)
+  assert.equal(react.peerDependencies["@effect/atom-react"], "^4.0.0")
+  assert.equal(react.devDependencies["@effect/atom-react"], effect)
   for (const name of ["@effect/platform-browser", "@effect/platform-node", "@effect/platform-node-shared"]) {
     assert.equal(
       devtools.dependencies[name],
-      effect,
-      `${name} must match the tested Effect version`
+      "^4.0.0",
+      `${name} must accept the same stable Effect major as its peer`
     )
   }
 })
