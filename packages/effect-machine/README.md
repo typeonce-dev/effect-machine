@@ -40,6 +40,10 @@ pnpm add @typeonce/effect-machine effect@4.0.0
 `effect` is a peer dependency requiring stable `^4.0.0`. Keep any installed
 `@effect/*` packages on the same version as `effect`.
 
+Development and benchmarks use exact versions. CI checks both the pinned
+minimum and the latest stable Effect 4 ecosystem with runtime, type, and
+packed-consumer tests.
+
 ## Quick start
 
 Declare the root once, then add behavior with event maps:

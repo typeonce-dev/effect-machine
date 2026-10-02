@@ -23,6 +23,20 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm check
 
+  latest-effect:
+    name: latest-effect
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - name: Select the latest stable Effect 4 ecosystem in this checkout
+        run: node scripts/prepare-effect-compatibility.mjs
+      - run: pnpm install --no-frozen-lockfile
+      - run: pnpm check
+
   changeset-policy:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest

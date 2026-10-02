@@ -32,9 +32,9 @@
     "dev": "tsx src/bin.ts"
   },
   "dependencies": {
-    "@effect/platform-browser": "4.0.0",
-    "@effect/platform-node": "4.0.0",
-    "@effect/platform-node-shared": "4.0.0",
+    "@effect/platform-browser": "^4.0.0",
+    "@effect/platform-node": "^4.0.0",
+    "@effect/platform-node-shared": "^4.0.0",
     "@typeonce/effect-machine": "workspace:^",
     "chokidar": "4.0.3",
     "elkjs": "0.12.0",
