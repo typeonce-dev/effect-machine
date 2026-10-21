@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 import { RegistryContext, useAtomSuspense } from "@effect/atom-react"
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react"
-import { Effect, Option, Schema } from "effect"
-import { AtomRegistry } from "effect/reactivity"
+import { Effect, Equal, Option, Schema } from "effect"
+import { AsyncResult, Atom, AtomRegistry } from "effect/reactivity"
 import * as React from "react"
 import { renderToString } from "react-dom/server"
 import { afterEach, assert, describe, it } from "vitest"
@@ -78,6 +78,56 @@ describe("useMachineAtom", () => {
     })
     await waitFor(() => assert.strictEqual(screen.getByTestId("value").textContent, "1"))
     assert.strictEqual(ownerRenders, initialOwnerRenders)
+    assert.ok(readerRenders > initialReaderRenders)
+    view.unmount()
+    registry.dispose()
+  })
+  it("rerenders a field projection only when the projected value changes", async () => {
+    const machine = trackedMachine(() => {})
+    const registry = AtomRegistry.make({ defaultIdleTTL: 1000 })
+    const makeOwned = () => AtomMachine.make(machine, 0)
+    const reachedThreshold = Atom.family((owned: ReturnType<typeof makeOwned>) =>
+      Atom.mapResult(AtomMachine.select(owned, "Active"), Option.map(({ value }) => value >= 2)).pipe(
+        Atom.withEquality(Equal.equals)
+      )
+    )
+    let current: ReturnType<typeof makeOwned> | undefined
+    let readerRenders = 0
+    function Reader({ owned }: {
+      readonly owned: ReturnType<typeof makeOwned>
+    }) {
+      readerRenders++
+      const reached = useAtomSuspense(reachedThreshold(owned)).value
+      return <span data-testid="reached">{String(Option.getOrThrow(reached))}</span>
+    }
+    function Owner() {
+      const owned = useMachineAtom(makeOwned)
+      current = owned
+      return (
+        <React.Suspense fallback="starting">
+          <Reader owned={owned} />
+        </React.Suspense>
+      )
+    }
+    const view = render(
+      <RegistryContext.Provider value={registry}>
+        <Owner />
+      </RegistryContext.Provider>
+    )
+    await waitFor(() => assert.strictEqual(screen.getByTestId("reached").textContent, "false"))
+    assert.strictEqual(reachedThreshold(current!), reachedThreshold(current!))
+    const initialReaderRenders = readerRenders
+    await act(() => {
+      registry.set(current!.send, new Increment({}))
+    })
+    const active = registry.get(AtomMachine.select(current!, "Active"))
+    assert.ok(AsyncResult.isSuccess(active))
+    assert.strictEqual(Option.getOrThrow(active.value).value, 1)
+    assert.strictEqual(readerRenders, initialReaderRenders)
+    await act(() => {
+      registry.set(current!.send, new Increment({}))
+    })
+    await waitFor(() => assert.strictEqual(screen.getByTestId("reached").textContent, "true"))
     assert.ok(readerRenders > initialReaderRenders)
     view.unmount()
     registry.dispose()

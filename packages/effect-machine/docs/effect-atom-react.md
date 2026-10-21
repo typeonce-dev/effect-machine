@@ -220,11 +220,41 @@ function AuthScreen() {
 }
 ```
 
-That component rerenders for every result change. Current
-`@effect/atom-react` does not select from the successful value in
-`useAtomSuspense`. Until it does, use typed path selectors for state-owned UI,
-or declare a custom derived atom once in a strongly owned scope. Do not create
-a fresh derived atom on every render.
+That component rerenders for every result change. Prefer typed path selectors
+for state-owned UI.
+
+Selection and equality belong to atoms, not to React hooks. To subscribe to
+part of a selected value, derive an atom from the path selector and give it the
+equality that defines a meaningful change. Declare the derivation once with
+`Atom.family`, keyed by the machine atom, so every render reuses the same atom:
+
+```tsx
+import { useAtomSuspense } from "@effect/atom-react"
+import { Equal, Option } from "effect"
+import { Atom } from "effect/reactivity"
+
+type AuthMachineAtom = ReturnType<typeof useAuthMachine>
+
+const editingEmail = Atom.family((machine: AuthMachineAtom) =>
+  Atom.mapResult(
+    AtomMachine.select(machine, "Editing"),
+    Option.map(({ email }) => email)
+  ).pipe(Atom.withEquality(Equal.equals))
+)
+
+function EmailField() {
+  const machine = useAuthMachine()
+  const email = useAtomSuspense(editingEmail(machine)).value
+
+  return Option.match(email, {
+    onNone: () => null,
+    onSome: (email) => <input value={email} />
+  })
+}
+```
+
+The component rerenders only when the projected email changes, not when other
+`Editing` fields change. Do not create a fresh derived atom on every render.
 
 ## Share a keyed machine outside one React owner
 

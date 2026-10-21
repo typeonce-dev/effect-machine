@@ -34,10 +34,10 @@ Cluster and are exposed only through explicit integration boundaries.
 ## Install
 
 ```sh
-pnpm add @typeonce/effect-machine effect@4.0.0
+pnpm add @typeonce/effect-machine effect@4.0.5
 ```
 
-`effect` is a peer dependency requiring stable `^4.0.0`. Keep any installed
+`effect` is a peer dependency requiring stable `^4.0.5`. Keep any installed
 `@effect/*` packages on the same version as `effect`.
 
 Development and benchmarks use exact versions. CI checks both the pinned

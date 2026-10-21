@@ -2,12 +2,12 @@ packages:
   - "packages/*"
 
 overrides:
-  effect: 4.0.0
-  "@effect/vitest": 4.0.0
-  "@effect/atom-react": 4.0.0
-  "@effect/platform-browser": 4.0.0
-  "@effect/platform-node": 4.0.0
-  "@effect/platform-node-shared": 4.0.0
+  effect: 4.0.5
+  "@effect/vitest": 4.0.5
+  "@effect/atom-react": 4.0.5
+  "@effect/platform-browser": 4.0.5
+  "@effect/platform-node": 4.0.5
+  "@effect/platform-node-shared": 4.0.5
 
 minimumReleaseAge: 1440
 minimumReleaseAgeExclude:
