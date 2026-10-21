@@ -47,7 +47,8 @@ without an `input` prop.
 
 `useMachineAtom(() => makeMachine(input))` remains available for custom owners.
 Use `AtomMachine.select`, `selectSnapshot`, and `matches` for custom granular
-subscriptions. Read `.result` for the whole logical snapshot or `.snapshot` for
+subscriptions. Derive narrower projections with `Atom.family`, `Atom.mapResult`,
+and `Atom.withEquality` rather than hook options. Read `.result` for the whole logical snapshot or `.snapshot` for
 runtime status; the bridge has no separate `.state` projection.
 
 See the [React guide](../effect-machine/docs/effect-atom-react.md) for events,
