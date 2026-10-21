@@ -43,17 +43,17 @@ test("Effect consumers accept stable 4.x while development versions stay synchro
   const effect = root.devDependencies.effect
   assert.match(effect, /^4\.\d+\.\d+$/)
   for (const manifest of [core, react, devtools]) {
-    assert.equal(manifest.peerDependencies.effect, "^4.0.5")
+    assert.equal(manifest.peerDependencies.effect, "^4.0.0")
     assert.equal(manifest.devDependencies.effect, effect)
   }
   assert.equal(root.devDependencies["@effect/vitest"], effect)
   assert.equal(core.devDependencies["@effect/vitest"], effect)
-  assert.equal(react.peerDependencies["@effect/atom-react"], "^4.0.5")
+  assert.equal(react.peerDependencies["@effect/atom-react"], "^4.0.0")
   assert.equal(react.devDependencies["@effect/atom-react"], effect)
   for (const name of ["@effect/platform-browser", "@effect/platform-node", "@effect/platform-node-shared"]) {
     assert.equal(
       devtools.dependencies[name],
-      "^4.0.5",
+      "^4.0.0",
       `${name} must accept the same stable Effect major as its peer`
     )
   }
