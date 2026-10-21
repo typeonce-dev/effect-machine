@@ -1,5 +1,18 @@
 # @typeonce/effect-machine-devtools
 
+## 0.41.0
+
+### Minor Changes
+
+- c0d60f0: Require Effect 4.0.5 or newer. The `effect`, `@effect/atom-react`, and `@effect/platform-*` requirements now accept `^4.0.5`, which includes Effect's fix for repeated rebuilds of derived atoms.
+
+  Upgrade `effect` and any installed `@effect/*` packages to matching 4.0.5 or newer versions.
+
+### Patch Changes
+
+- Updated dependencies [c0d60f0]
+  - @typeonce/effect-machine@0.41.0
+
 ## 0.40.0
 
 ### Minor Changes
