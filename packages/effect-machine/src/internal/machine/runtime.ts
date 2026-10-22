@@ -31,33 +31,30 @@ const makeRuntime = makeProcessRuntime(startLogicInternal, startCompiledSync)
 export type ProcessRuntimeStrategy = "generic" | "compiled" | "auto"
 
 // A root machine is owned by the Scope that starts it, like `Effect.forkScoped`.
-// Each machine gets an owner scope forked from the caller's Scope: closing the
-// caller's Scope stops the machine, and termination closes the owner scope so
-// it leaves its parent again. Owned children keep their process-local
-// ownership.
+// Each started machine gets an owner scope forked from the caller's Scope:
+// closing the caller's Scope stops the machine, and termination closes the
+// owner scope so it leaves its parent again. The owner scope holds only the
+// ref's own `stop` effect, so termination can drop the closing effect.
+// Owned children keep their process-local ownership.
 const ownedByScope = <State, Event, Error, Output, Emitted, StartError, Requirements>(
   start: (
-    ownership: Pick<StartInternalOptions, "onStop">
+    ownership: Pick<StartInternalOptions, "onStopSync">
   ) => Effect.Effect<MachineRef<State, Event, Error, Output, Emitted>, StartError, Requirements>
 ): Effect.Effect<MachineRef<State, Event, Error, Output, Emitted>, StartError, Requirements | Scope.Scope> =>
   Effect.flatMap(Effect.scope, (parent) =>
     Effect.suspend(() => {
-      const owner = Scope.forkUnsafe(parent)
+      let owner: Scope.Closeable | undefined
       let terminated = false
-      const onStop = Effect.suspend(() => {
+      const onStopSync = () => {
         terminated = true
-        return Scope.close(owner, Exit.void)
-      })
-      return Effect.uninterruptibleMask((restore) =>
-        restore(start({ onStop })).pipe(
-          Effect.tap((ref) =>
-            Scope.addFinalizer(
-              owner,
-              Effect.suspend(() => terminated ? Effect.void : ref.stop)
-            )
-          ),
-          Effect.onExit((exit) => Exit.isFailure(exit) ? Scope.close(owner, exit) : Effect.void)
-        )
+        if (owner !== undefined) Scope.closeUnsafe(owner, Exit.void)
+      }
+      return Effect.uninterruptible(
+        Effect.flatMap(start({ onStopSync }), (ref) => {
+          if (terminated) return Effect.succeed(ref)
+          owner = Scope.forkUnsafe(parent)
+          return Effect.as(Scope.addFinalizer(owner, ref.stop), ref)
+        })
       )
     }))
 
@@ -192,7 +189,7 @@ const prepareProcessWithStrategy = Effect.fnUntraced(function*<
       inspectionRoot: true,
       origin: { _tag: "Root" }
     }
-  const initialize = (ownership: Pick<StartInternalOptions, "onStop">) => {
+  const initialize = (ownership: Pick<StartInternalOptions, "onStopSync">) => {
     const startOptions = { ...internalOptions, ...ownership }
     return strategy === "generic"
       ? startGenericInternal(logic, startOptions)
