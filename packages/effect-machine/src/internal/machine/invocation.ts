@@ -202,11 +202,6 @@ const startResolved = (
   sourceName?: string
 ): Effect.Effect<void, any, any> =>
   Effect.suspend(() => {
-    // Logic addresses and child descriptor ids are caller-chosen. Keep them out
-    // of the namespace reserved for runtime-owned invocation ids.
-    if (ChildRegistry.isReservedChildId(childId) && childId !== makeChildId(path, invokeId)) {
-      return Effect.fail(new ChildAlreadyExistsError({ id: invokeId }))
-    }
     const key = makeKey(path, invokeId)
     // Source construction keeps its startup failure boundary. Only the hosted
     // program is wrapped; child statecharts retain their execution descriptors.
@@ -279,6 +274,15 @@ const startResolved = (
     })
   })
 
+// Logic addresses and child descriptor ids are caller-chosen. Keep them out of
+// the namespace reserved for runtime-owned invocation ids; runtime-owned ids
+// skip this check.
+const reservedChildIdFailure = (
+  childId: string,
+  invokeId: string
+): Effect.Effect<never, ChildAlreadyExistsError> | undefined =>
+  ChildRegistry.isReservedChildId(childId) ? Effect.fail(new ChildAlreadyExistsError({ id: invokeId })) : undefined
+
 const start = (
   scope: Runtime.ProcessScope<any>,
   ownedChildren: Runtime.OwnedChildRuntime,
@@ -286,6 +290,8 @@ const start = (
   config: AnyConfig
 ): Effect.Effect<void, any, any> => {
   const invokeId = String(config.id)
+  const reserved = config.address === undefined ? undefined : reservedChildIdFailure(String(config.address), invokeId)
+  if (reserved !== undefined) return reserved
   return startResolved(
     scope,
     ownedChildren,
@@ -312,6 +318,8 @@ const startStaticChild = (
   // source function so each running parent does not retain a resolved config
   // object and an otherwise redundant source closure.
   const descriptor = raw.child
+  const reserved = reservedChildIdFailure(descriptor.id, descriptor.id)
+  if (reserved !== undefined) return reserved
   return startResolved(
     scope,
     ownedChildren,
