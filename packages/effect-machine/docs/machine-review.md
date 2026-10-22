@@ -11,10 +11,10 @@ patterns.
 Run the recommended rules from
 [`@typeonce/oxlint-plugin-effect-machine`](../../oxlint-plugin/README.md) before
 the manual review. They catch provable duplicate invocation identities,
-asynchronous work, browser access, nondeterminism, and redundant resolvers in
-direct same-module machine definitions. Continue with this review for
-cross-module ownership and architectural questions that syntax alone cannot
-answer.
+asynchronous work, browser access, nondeterminism, redundant resolvers, and
+conditional `none` fallbacks in direct same-module machine definitions.
+Continue with this review for cross-module ownership and architectural
+questions that syntax alone cannot answer.
 
 ## Review the responsibility boundaries
 
@@ -42,6 +42,12 @@ or nested construction. The group lives in `make`; its resolver selects only
 constructors derived from those declarations. Avoid an extra branch group for
 an ordinary transition. Use `reenter: true` when the source must restart.
 An empty targetless resolver simplifies to `{ none: true }`.
+
+A `{ none: true }` branch accepts its event, so `Machine.can` and
+`AtomMachine.can` return `true` when a resolver selects it. Review check: for
+every event that enables or disables a control, refuse it with `guard` or with
+`declinable: true` and `decline()`. Keep `none` only for events that are
+deliberately accepted and ignored.
 
 ## Choose React ownership or keyed family lookup
 
@@ -186,6 +192,14 @@ flow.
 Review check: search components, hooks, and atom modules for service calls,
 `Effect.run*`, promises, browser APIs, analytics, timers, and chains of `send`
 calls. Move workflow coordination into states, transitions, and invoked work.
+
+Per-instance capabilities, such as a router or a component callback, are
+services provided by the React owner, not schema fields or startup input. A
+function in state data or input cannot be encoded by `Machine.encodeSnapshot`.
+Review check: search schemas for `Schema.declare` guards that accept functions
+and move each one to a service, as in
+[Per-owner capabilities](./effect-atom-react.md#per-owner-capabilities). Do not
+drive navigation or other workflow effects from emissions.
 
 ## Report findings
 

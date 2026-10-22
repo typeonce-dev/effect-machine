@@ -321,6 +321,12 @@ const LoadMachine = Machine.make({
 implemented machine type, so the runtime must provide them when it starts the
 machine.
 
+Model a per-instance capability, such as a router or a callback owned by a UI
+component, as such a service. Do not put functions in state data or startup
+input: snapshots must remain encodable. A React owner provides the capability
+through its own runtime, as described in
+[Per-owner capabilities](./effect-atom-react.md#per-owner-capabilities).
+
 Do not start a promise inside a transition callback. A transition has no
 lifetime in which to own that work. A state does.
 
@@ -408,6 +414,11 @@ Do not read the clock, generate randomness, call a service, or await work while
 choosing a transition. Receive such values in an event or produce them through
 state-owned work first.
 
+A `{ none: true }` branch accepts its event without changing state, so
+`Machine.can` reports `true` when a resolver selects it. When the event must be
+refused, for example to disable a control, use `guard`, or declare
+`declinable: true` and return `decline()` from the resolver.
+
 When only an active state's value changes, use `update` to preserve its active
 descendants and running work:
 
@@ -482,9 +493,11 @@ events, or runtime scheduling.
 
 Use atom selectors to render state, invocation outcomes to express workflow
 behavior, `ref.join` to await final output, and `ref.changes` for ongoing
-observation. Reach for `Machine.waitFor(ref, predicate)` only when an external
-Effect or test must wait for a specific current or subsequent snapshot, such as
-a long-lived connection becoming ready. Compose `Effect.timeout` when needed.
+observation. Emissions are non-replayed notifications; do not use them for work
+the workflow depends on, such as navigation. Reach for
+`Machine.waitFor(ref, predicate)` only when an external Effect or test must wait
+for a specific current or subsequent snapshot, such as a long-lived connection
+becoming ready. Compose `Effect.timeout` when needed.
 
 Do not use `send` followed by `waitFor` as an acknowledgement protocol. The current
 snapshot might already match, and a match does not identify which event caused
