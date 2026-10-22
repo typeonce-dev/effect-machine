@@ -163,7 +163,8 @@ const captureDefinitionBranch = (
   if (selection.updatePath !== undefined) {
     const owner = stateNodes.byPath.get(selection.updatePath)
     if (
-      selection.kind !== "state" || (selection.scope !== "local" && selection.scope !== "branch") ||
+      (selection.kind !== "state" && selection.kind !== "choice") ||
+      (selection.scope !== "local" && selection.scope !== "branch") ||
       selection.path === undefined || owner === undefined || owner.schema === undefined ||
       (owner.type !== "compound" && owner.type !== "parallel") ||
       !Configuration.isDescendantOf(path, owner.path) ||
@@ -296,6 +297,15 @@ const constructBranch = (
   source?: string
 ): unknown => {
   const config = Construction.record(raw)
+  if (selection.kind === "choice" && selection.updatePath !== undefined) {
+    const { update, ...state } = config
+    if (Reflect.ownKeys(state).length > 0) throw new Error("Machine pseudo-state construction accepts no data")
+    const node = stateNodes.byPath.get(selection.path!)!
+    return Topology.makeCombinedTarget(
+      Topology.makeChoiceTarget(node.path, node.parent!),
+      Construction.update(stateNodes, selection.updatePath, update)
+    )
+  }
   if (selection.kind === "none" || selection.kind === "history" || selection.kind === "choice") {
     if (Reflect.ownKeys(config).length > 0) throw new Error("Machine pseudo-state construction accepts no data")
     if (selection.kind === "none") return undefined
@@ -475,6 +485,8 @@ const normalizeObjectTransition = (
             ...(hasData ? { data: value } : {}),
             ...(config.decoded === undefined ? {} : { decoded: config.decoded })
           }
+          : selection.kind === "choice"
+          ? { update: { data: value, decoded: config.decoded } }
           : {
             ...(value.target === undefined ? {} : { data: value.target, decoded: config.decoded }),
             update: { data: value.update, decoded: config.decoded }
@@ -705,6 +717,54 @@ const flattenHandlers = (
   }
 }
 
+const publicPath = (path: string): string => path === "" ? Declaration.rootPathName : path
+
+// A choice entered with an owner update resolves after that update, so every
+// branch it can reach, through nested choices, must keep the owner active.
+const assertChoiceUpdatesRetainOwners = (machine: Machine.Any): void => {
+  let hasChoice = false
+  for (const node of machine.stateNodes.byPath.values()) {
+    if (node.type === "choice") {
+      hasChoice = true
+      break
+    }
+  }
+  if (!hasChoice) return
+  const definitions = Topology.transitionDefinitions(machine)
+  const choices = new Map<string, Machine.TransitionDefinition>()
+  for (const definition of definitions) {
+    if (definition.trigger.type === "choice") choices.set(definition.source, definition)
+  }
+  for (const definition of definitions) {
+    for (const branch of definition.branches) {
+      const owner = branch.updates[0]
+      const entered = branch.selection.path
+      if (branch.selection.kind !== "choice" || owner === undefined || entered === undefined) continue
+      const pending = [entered]
+      const visited = new Set<string>()
+      while (pending.length > 0) {
+        const choice = pending.shift()!
+        if (visited.has(choice)) continue
+        visited.add(choice)
+        for (const choiceBranch of choices.get(choice)?.branches ?? []) {
+          const { kind, path: target } = choiceBranch.selection
+          // Targetless and update-only choice branches are rejected by choice validation itself.
+          if (target === undefined || kind === "none" || kind === "update") continue
+          if (kind === "choice") {
+            pending.push(target)
+          } else if (!Configuration.isDescendantOf(target, owner)) {
+            const label = choiceBranch.type === "branch" ? `branch "${choiceBranch.key}"` : "transition"
+            throw new Error(
+              `Machine transition from "${publicPath(definition.source)}" updates "${publicPath(owner)}" before ` +
+                `choice "${choice}", whose ${label} targets "${publicPath(target)}" outside that owner`
+            )
+          }
+        }
+      }
+    }
+  }
+}
+
 const makeHandle = (self: Definition.Any, declaration: Declaration.Declaration): Definition.Any["handle"] =>
   ((config: Record<string, unknown>) => {
     const captured = InitialDeclaration.capture(declaration.root, config)
@@ -734,7 +794,9 @@ const makeHandle = (self: Definition.Any, declaration: Declaration.Declaration):
           compiled.input === undefined ? undefined : Protocol.decodeInputSync(compiled, compiled.input, input)
         )
     }, { "": captured.handlers })
-    return makeWithHandlers(compiled, handlers)
+    const machine = makeWithHandlers(compiled, handlers)
+    assertChoiceUpdatesRetainOwners(machine)
+    return machine
   }) as Definition.Any["handle"]
 
 export const isMachine = (

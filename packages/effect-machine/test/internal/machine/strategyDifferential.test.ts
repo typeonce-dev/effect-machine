@@ -1492,6 +1492,96 @@ describe("machine planner and runtime strategies", () => {
       }
       assert.deepStrictEqual(results[1], results[0])
     }) as Effect.Effect<void, unknown, any>)
+  it.effect("fails closed to generic planning for an owner update that enters a choice", () =>
+    Effect.gen(function*() {
+      const States = Machine.state({
+        states: {
+          Flow: {
+            fields: { count: Schema.Number },
+            states: { Idle: {}, First: { type: "choice" }, Second: { type: "choice" }, Even: {}, Odd: {} }
+          }
+        }
+      })
+      const Events = Machine.events({ Bump: {}, Stay: {}, Reset: {} })
+      const machine = Machine.make({
+        root: States,
+        events: Events,
+        branches: {
+          first: { next: { target: "Flow.Second" } },
+          second: { even: { target: "Flow.Even" }, odd: { target: "Flow.Odd" } }
+        }
+      }).handle({
+        initial: { target: "Flow", data: { count: 0 } },
+        states: {
+          Flow: {
+            on: { Reset: { update: "Flow", data: () => ({ count: 0 }) } },
+            initial: { target: "Flow.Idle" },
+            states: {
+              Idle: {
+                on: {
+                  Bump: {
+                    target: "Flow.First",
+                    update: "Flow",
+                    data: ({ ancestors }) => ({ count: ancestors.Flow.count + 1 })
+                  }
+                }
+              },
+              First: { choice: { branches: "first", resolve: ({ select }) => select.next() } },
+              Second: {
+                choice: {
+                  branches: "second",
+                  resolve: ({ containingState, select }) =>
+                    containingState.count % 2 === 0 ? select.even() : select.odd()
+                }
+              },
+              Even: {
+                on: {
+                  Stay: {
+                    target: "Flow.First",
+                    update: "Flow",
+                    reenter: true,
+                    data: ({ ancestors }) => ({ count: ancestors.Flow.count + 2 })
+                  }
+                }
+              },
+              Odd: {
+                on: {
+                  Bump: {
+                    target: "Flow.First",
+                    update: "Flow",
+                    data: ({ ancestors }) => ({ count: ancestors.Flow.count + 1 })
+                  }
+                }
+              }
+            }
+          }
+        }
+      })
+      assert.strictEqual(ExecutionPlan.selectExecutionPlanForTesting(machine, "auto").strategy, "generic")
+      assert.throws(
+        () => ExecutionPlan.selectExecutionPlanForTesting(machine, "indexed-hierarchical"),
+        /cannot compile the requested indexed-hierarchical execution plan/
+      )
+      const events = [Events.Bump(), Events.Bump(), Events.Stay(), Events.Reset(), Events.Bump()]
+      yield* verifyPlannerStrategies({ machine, events, expected: "generic", label: "choice owner update" })
+      const initial = yield* Machine.planInitial(machine)
+      const steps: Array<DifferentialStep> = []
+      let state = initial.state
+      for (const event of events) {
+        const plan = yield* Machine.plan(machine, state, event)
+        steps.push({ event, plan })
+        state = plan.next
+      }
+      for (const strategy of ["generic", "compiled"] as const) {
+        yield* verifyManagedExecution({
+          machine,
+          open: openWithRuntimeStrategy(machine, strategy),
+          initial: { state: initial.state, done: initial.done, output: initial.output },
+          steps,
+          label: `${strategy} choice owner update runtime`
+        })
+      }
+    }) as Effect.Effect<void, unknown, any>)
   it.effect("compares generated eligible models across canonical and indexed planners", () =>
     Effect.gen(function*() {
       const generated = MachineTest.finiteModels({
