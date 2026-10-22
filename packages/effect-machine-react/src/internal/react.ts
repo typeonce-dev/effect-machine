@@ -47,6 +47,8 @@ const useRetainedResult = <A, E>(
 ): AsyncResult.AsyncResult<A, E> => {
   const store = React.useMemo(() => {
     let retained: AsyncResult.Success<A, E> | undefined
+    // React requires the server snapshot to be referentially stable.
+    let server: AsyncResult.AsyncResult<A, E> | undefined
     const retain = (result: AsyncResult.AsyncResult<A, E>): AsyncResult.AsyncResult<A, E> => {
       if (AsyncResult.isSuccess(result)) {
         retained = result
@@ -57,7 +59,7 @@ const useRetainedResult = <A, E>(
     return {
       subscribe: (onChange: () => void) => registry.subscribe(atom, onChange),
       snapshot: () => retain(registry.get(atom)),
-      serverSnapshot: () => retain(Atom.getServerValue(atom, registry))
+      serverSnapshot: () => (server ??= retain(Atom.getServerValue(atom, registry)))
     }
   }, [registry, atom])
   return React.useSyncExternalStore(store.subscribe, store.snapshot, store.serverSnapshot)

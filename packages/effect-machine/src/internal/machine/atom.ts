@@ -157,6 +157,30 @@ interface ServerValued<A> {
 const readServerValue = <A>(atom: Atom.Atom<A>, get: ServerRead): A =>
   Atom.ServerValueTypeId in atom ? (atom as Atom.Atom<A> & ServerValued<A>)[Atom.ServerValueTypeId](get) : get(atom)
 
+// React requires a referentially stable server snapshot, but Effect does not
+// cache server reads. A server value is a pure function of the bridge plan and
+// of the server values it reads, so each atom memoizes its latest result on the
+// identity of those inputs. Unchanged inputs therefore return the same value
+// for every read and registry, and derived atoms stay stable because their
+// sources are.
+const stableServerValue = <const Inputs extends ReadonlyArray<unknown>, A>(
+  read: (get: ServerRead) => Inputs,
+  compute: (...inputs: Inputs) => A
+): (get: ServerRead) => A => {
+  let memo: { readonly inputs: Inputs; readonly value: A } | undefined
+  return (get) => {
+    const inputs = read(get)
+    if (
+      memo === undefined ||
+      memo.inputs.length !== inputs.length ||
+      !memo.inputs.every((input, index) => Object.is(input, inputs[index]))
+    ) {
+      memo = { inputs, value: compute(...inputs) }
+    }
+    return memo.value
+  }
+}
+
 /** A bridge plan: `undefined` when no snapshot can be planned synchronously. */
 type ServerPlan = () => PlannedSnapshot.PlannedSnapshot | undefined
 
@@ -371,7 +395,12 @@ const makeRuntimeResultAtom = <State, Error, Output, StartError>(
   }).pipe(
     Atom.withEquality(Equal.equals),
     // A planned snapshot is never an error, so its state is the server result.
-    Atom.withServerValue((get) => AsyncResult.map(readServerValue(snapshot, get), (current) => current.state))
+    Atom.withServerValue(
+      stableServerValue(
+        (get) => [readServerValue(snapshot, get)],
+        (current) => AsyncResult.map(current, (current) => current.state)
+      )
+    )
   )
 
 const makeChildRuntimeResultAtom = <State, Error, Output, StartError>(
@@ -407,8 +436,11 @@ const makeChildRuntimeResultAtom = <State, Error, Output, StartError>(
     })
   }).pipe(
     Atom.withEquality(Equal.equals),
-    Atom.withServerValue((get) =>
-      AsyncResult.map(readServerValue(snapshot, get), Option.map((current) => current.state))
+    Atom.withServerValue(
+      stableServerValue(
+        (get) => [readServerValue(snapshot, get)],
+        (current) => AsyncResult.map(current, Option.map((current) => current.state))
+      )
     )
   )
 
@@ -481,7 +513,7 @@ const makeChildFromRefAtom = <Child extends Machine.ChildMachine.Any, StartError
     get.addFinalizer(cancel)
     return AsyncResult.success(Option.some(Effect.runSync(handle.snapshot)))
   }).pipe(
-    Atom.withServerValue((): AsyncResult.AsyncResult<
+    Atom.withServerValue(stableServerValue(() => [], (): AsyncResult.AsyncResult<
       Option.Option<Machine.RuntimeSnapshot<State, Error, Output>>,
       StartError
     > => {
@@ -489,7 +521,7 @@ const makeChildFromRefAtom = <Child extends Machine.ChildMachine.Any, StartError
       return planned === undefined
         ? AsyncResult.initial(true)
         : AsyncResult.success(Option.map(planned, plannedSnapshot<State, Error, Output>), { waiting: true })
-    })
+    }))
   )
 
   const commands: CommandQueues = new WeakMap()
@@ -594,12 +626,17 @@ const makeFromRefAtom = <State, Event, Error, Output, StartError, Emitted>(
       waiting: current.status === "active"
     })
   }).pipe(
-    Atom.withServerValue((): AsyncResult.AsyncResult<Machine.RuntimeSnapshot<State, Error, Output>, StartError> => {
-      const planned = plan()
-      return planned === undefined
-        ? AsyncResult.initial(true)
-        : AsyncResult.success(plannedSnapshot<State, Error, Output>(planned), { waiting: true })
-    })
+    Atom.withServerValue(
+      stableServerValue(
+        () => [],
+        (): AsyncResult.AsyncResult<Machine.RuntimeSnapshot<State, Error, Output>, StartError> => {
+          const planned = plan()
+          return planned === undefined
+            ? AsyncResult.initial(true)
+            : AsyncResult.success(plannedSnapshot<State, Error, Output>(planned), { waiting: true })
+        }
+      )
+    )
   )
 
   const commands: CommandQueues = new WeakMap()
@@ -697,7 +734,9 @@ const mapResultSelector = <A, B, E>(
 ): Atom.Atom<AsyncResult.AsyncResult<B, E>> =>
   Atom.mapResult(source, f).pipe(
     Atom.withEquality(Equal.equals),
-    Atom.withServerValue((get) => AsyncResult.map(readServerValue(source, get), f))
+    Atom.withServerValue(
+      stableServerValue((get) => [readServerValue(source, get)], (current) => AsyncResult.map(current, f))
+    )
   )
 
 const selectorsByBridge = new WeakMap<object, Map<SelectorKind, Map<string, Atom.Atom<any>>>>()
@@ -894,11 +933,10 @@ export const can = (event: unknown) => {
       )
     ).pipe(
       Atom.withEquality(Equal.equals),
-      Atom.withServerValue((get) =>
-        evaluate(
-          readServerValue(self.snapshot, get),
-          Atom.isAtom(event) ? readServerValue(event, get) : event,
-          Option.none()
+      Atom.withServerValue(
+        stableServerValue(
+          (get) => [readServerValue(self.snapshot, get), Atom.isAtom(event) ? readServerValue(event, get) : event],
+          (current, input) => evaluate(current, input, Option.none())
         )
       )
     )
@@ -1050,6 +1088,7 @@ const retainFamilyOwner = <Source extends Atom.Atom<any>>(
     { initialValueTarget: source }
   ).pipe(
     Atom.withEquality((value, next) => retained.source.equals(value, next)),
+    // The source's server value is already stable, so it passes through as is.
     Atom.withServerValue((get) => readServerValue(retained.source, get))
   )
   if (label !== undefined) {

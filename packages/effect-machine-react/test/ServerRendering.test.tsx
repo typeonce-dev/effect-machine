@@ -6,7 +6,7 @@ import { Atom, AtomRegistry } from "effect/reactivity"
 import * as React from "react"
 import { hydrateRoot } from "react-dom/client"
 import { renderToString } from "react-dom/server"
-import { afterEach, assert, it } from "vitest"
+import { afterEach, assert, it, vi } from "vitest"
 import { Machine } from "../../effect-machine/src/index.js"
 import { AtomMachine } from "../../effect-machine/src/unstable/reactivity/index.js"
 import { createMachineContext, MachineState } from "../src/index.js"
@@ -68,16 +68,27 @@ const makeAnalyticsOnboarding = () =>
 
 afterEach(cleanup)
 
+// React warns about an uncached server snapshot only once per module, so every
+// hydration asserts that the warning is absent.
 const hydrate = async (container: HTMLElement, element: React.ReactNode) => {
   const recoverable: Array<unknown> = []
-  const root = await act(async () =>
-    hydrateRoot(container, element, {
-      onRecoverableError: (error) => {
-        recoverable.push(error)
-      }
-    })
-  )
-  return { recoverable, root }
+  const consoleError = vi.spyOn(console, "error")
+  try {
+    const root = await act(async () =>
+      hydrateRoot(container, element, {
+        onRecoverableError: (error) => {
+          recoverable.push(error)
+        }
+      })
+    )
+    const serverSnapshotWarnings = consoleError.mock.calls.filter((args) =>
+      args.some((arg) => String(arg).includes("getServerSnapshot"))
+    )
+    assert.deepStrictEqual(serverSnapshotWarnings, [])
+    return { recoverable, root }
+  } finally {
+    consoleError.mockRestore()
+  }
 }
 
 it("renders the planned snapshot on the server and hydrates into the live machine", async () => {

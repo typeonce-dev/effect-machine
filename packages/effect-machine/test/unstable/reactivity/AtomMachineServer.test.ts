@@ -190,6 +190,61 @@ describe("AtomMachine server values", () => {
     registry.dispose()
   })
 
+  it("serves referentially stable values on repeated reads", () => {
+    const { counter, machine } = makeForm()
+    const registry = AtomRegistry.make()
+    const otherRegistry = AtomRegistry.make()
+    const bridge = AtomMachine.make(machine, "ada@example.com")
+    const search = bridge.child(SearchChild)
+    const forms = AtomMachine.family(machine, {
+      atoms: {
+        editing: AtomMachine.select("Editing"),
+        result: (form) => form.result
+      }
+    })
+    const searches = AtomMachine.familyChild(bridge, {
+      child: (id: string) => Machine.child(id, SearchMachine),
+      atoms: {
+        searching: AtomMachine.selectSnapshotChild("Searching"),
+        result: (child) => child.result
+      }
+    })
+    const atoms: Record<string, Atom.Atom<unknown>> = {
+      ref: bridge.ref,
+      snapshot: bridge.snapshot,
+      result: bridge.result,
+      select: AtomMachine.select(bridge, "Editing"),
+      selectSnapshot: AtomMachine.selectSnapshot(bridge, "Editing"),
+      matches: AtomMachine.matches(bridge, "Editing"),
+      can: AtomMachine.can(new Submit({}))(bridge),
+      canAtom: AtomMachine.can(Atom.make(new Submit({})))(bridge),
+      childSnapshot: search.snapshot,
+      childResult: search.result,
+      selectChild: AtomMachine.selectChild(search, "Searching"),
+      selectSnapshotChild: AtomMachine.selectSnapshotChild(search, "Searching"),
+      matchesChild: AtomMachine.matchesChild(search, "Searching"),
+      inactiveChild: search.child(SearchChild).result,
+      familyEditing: forms.editing("grace@example.com"),
+      familyResult: forms.result("grace@example.com"),
+      familyChildSearching: searches.searching("search"),
+      familyChildResult: searches.result("search")
+    }
+    const stable = (registry: AtomRegistry.AtomRegistry) =>
+      Object.fromEntries(
+        Object.entries(atoms).map((
+          [name, atom]
+        ) => [name, Object.is(serverRead(atom, registry), serverRead(atom, registry))])
+      )
+    const expected = Object.fromEntries(Object.keys(atoms).map((name) => [name, true]))
+
+    assert.deepStrictEqual(stable(registry), expected)
+    assert.deepStrictEqual(stable(otherRegistry), expected)
+    assert.strictEqual(serverRead(bridge.result, registry), serverRead(bridge.result, otherRegistry))
+    assert.strictEqual(counter.started, 0)
+    registry.dispose()
+    otherRegistry.dispose()
+  })
+
   it("serves the planned state of a bound machine without building its layer", () => {
     let built = 0
     let tracked = 0
