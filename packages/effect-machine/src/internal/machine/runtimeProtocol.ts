@@ -629,7 +629,8 @@ export interface StartInternalOptions {
   ) => Effect.Effect<void>
   readonly onReadySync?: (ref: MachineRef<any, any, any, any>) => boolean
   readonly onStop?: Effect.Effect<void>
-  readonly onStopSync?: () => void
+  /** Runs synchronously once the process has terminated, with its reference. */
+  readonly onStopSync?: (ref: MachineRef<any, any, any, any>) => void
   readonly skipStoppedOutcome?: boolean
   readonly parent?: ProcessAddress<unknown>
   readonly runtime: ProcessRuntime

@@ -75,6 +75,11 @@ Root data is shared state. `update: "root"` replaces that value while
 retaining the active child configuration and its running work. Ordinary
 transitions target a descendant; the root itself is not a destination.
 
+A started machine is owned by the enclosing `Scope`. Closing it is equivalent
+to `ref.stop`: invocations are interrupted, owned children stop, and later
+sends fail with `StoppedError`. Own a `Scope` explicitly when a machine must
+outlive the program that started it.
+
 ## Modeling workflow
 
 Put data on the lowest state that owns it. Use tagged schemas or `fields` for
@@ -567,7 +572,7 @@ Snapshots can be validated for storage or transport:
 ```ts
 const encoded = yield * Machine.encodeSnapshot(machine, snapshot)
 const decoded = yield * Machine.decodeSnapshot(machine, encoded)
-const ref = yield * Machine.resume(machine, decoded)
+const ref = yield * Machine.resume(machine, decoded) // owned by the current Scope
 ```
 
 Decoded snapshots are local runtime values and may contain class instances or
