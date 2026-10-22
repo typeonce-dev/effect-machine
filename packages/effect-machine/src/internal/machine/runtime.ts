@@ -2,7 +2,6 @@
 
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
-import * as Exit from "effect/Exit"
 import * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
 import * as InspectionRuntime from "./inspectionRuntime.js"
@@ -31,32 +30,64 @@ const makeRuntime = makeProcessRuntime(startLogicInternal, startCompiledSync)
 export type ProcessRuntimeStrategy = "generic" | "compiled" | "auto"
 
 // A root machine is owned by the Scope that starts it, like `Effect.forkScoped`.
-// Each started machine gets an owner scope forked from the caller's Scope:
-// closing the caller's Scope stops the machine, and termination closes the
-// owner scope so it leaves its parent again. The owner scope holds only the
-// ref's own `stop` effect, so termination can drop the closing effect.
-// Owned children keep their process-local ownership.
+// Each owning Scope carries one ownership record with a single finalizer that
+// stops the machines still alive, in reverse start order. The record's shared
+// hooks register a machine when it is ready and release it synchronously when
+// it terminates, so machines cost one set entry and long-lived scopes do not
+// accumulate finalizers. Owned children keep their process-local ownership.
+type OwnershipHooks = Pick<StartInternalOptions, "onReadySync" | "onStopSync">
+
+interface ScopeOwnership {
+  readonly live: Set<MachineRef<any, any, any, any>>
+  readonly hooks: OwnershipHooks
+  closed: boolean
+}
+
+const ownerships = new WeakMap<Scope.Scope, ScopeOwnership>()
+
+const stopLive = (ownership: ScopeOwnership): Effect.Effect<void> =>
+  Effect.suspend(() => {
+    ownership.closed = true
+    const refs = Array.from(ownership.live).reverse()
+    ownership.live.clear()
+    return Effect.forEach(refs, (ref) => ref.stop, { discard: true })
+  })
+
+const ownershipOf = (parent: Scope.Scope): Effect.Effect<ScopeOwnership> =>
+  Effect.suspend(() => {
+    const existing = ownerships.get(parent)
+    if (existing !== undefined) return Effect.succeed(existing)
+    const live = new Set<MachineRef<any, any, any, any>>()
+    const ownership: ScopeOwnership = {
+      live,
+      hooks: {
+        onReadySync: (ref) => {
+          live.add(ref)
+          return true
+        },
+        onStopSync: (ref) => {
+          live.delete(ref)
+        }
+      },
+      closed: false
+    }
+    ownerships.set(parent, ownership)
+    // A closed Scope runs the finalizer immediately, which marks the record
+    // closed so machines started afterwards stop right away.
+    return Effect.as(Scope.addFinalizer(parent, stopLive(ownership)), ownership)
+  })
+
 const ownedByScope = <State, Event, Error, Output, Emitted, StartError, Requirements>(
   start: (
-    ownership: Pick<StartInternalOptions, "onStopSync">
+    hooks: OwnershipHooks
   ) => Effect.Effect<MachineRef<State, Event, Error, Output, Emitted>, StartError, Requirements>
 ): Effect.Effect<MachineRef<State, Event, Error, Output, Emitted>, StartError, Requirements | Scope.Scope> =>
   Effect.flatMap(Effect.scope, (parent) =>
-    Effect.suspend(() => {
-      let owner: Scope.Closeable | undefined
-      let terminated = false
-      const onStopSync = () => {
-        terminated = true
-        if (owner !== undefined) Scope.closeUnsafe(owner, Exit.void)
-      }
-      return Effect.uninterruptible(
-        Effect.flatMap(start({ onStopSync }), (ref) => {
-          if (terminated) return Effect.succeed(ref)
-          owner = Scope.forkUnsafe(parent)
-          return Effect.as(Scope.addFinalizer(owner, ref.stop), ref)
-        })
-      )
-    }))
+    Effect.flatMap(ownershipOf(parent), (ownership) =>
+      Effect.flatMap(
+        start(ownership.hooks),
+        (ref) => ownership.closed ? Effect.as(ref.stop, ref) : Effect.succeed(ref)
+      )))
 
 const startProcessWithStrategy = Effect.fnUntraced(function*(
   logic: ProcessLogic<any, any, any, any, any, any>,
@@ -77,15 +108,15 @@ const startProcessWithStrategy = Effect.fnUntraced(function*(
       runtime
     }
   if (strategy === "generic") {
-    return yield* ownedByScope((ownership) => startGenericInternal(logic, { ...internalOptions, ...ownership }))
+    return yield* ownedByScope((hooks) => startGenericInternal(logic, { ...internalOptions, ...hooks }))
   }
   if (strategy === "compiled") {
     if (logic.execution?._tag !== "Compiled") {
       return yield* Effect.die(new Error("Machine cannot force the compiled runtime for generic process logic"))
     }
-    return yield* ownedByScope((ownership) => startCompactCompiledInternal(logic, { ...internalOptions, ...ownership }))
+    return yield* ownedByScope((hooks) => startCompactCompiledInternal(logic, { ...internalOptions, ...hooks }))
   }
-  return yield* ownedByScope((ownership) => startLogicInternal(logic, { ...internalOptions, ...ownership }))
+  return yield* ownedByScope((hooks) => startLogicInternal(logic, { ...internalOptions, ...hooks }))
 })
 
 /** @internal Test-only startup strategy selection. */
@@ -131,20 +162,20 @@ export const startProcess: <
   }
 ) {
   const runtime = yield* makeRuntime
-  return yield* ownedByScope((ownership) =>
+  return yield* ownedByScope((hooks) =>
     startLogicInternal(
       logic,
       options === undefined
         ? {
           detached: true,
           runtime,
-          ...ownership
+          ...hooks
         }
         : {
           ...options,
           detached: true,
           runtime,
-          ...ownership
+          ...hooks
         }
     )
   )
@@ -189,8 +220,8 @@ const prepareProcessWithStrategy = Effect.fnUntraced(function*<
       inspectionRoot: true,
       origin: { _tag: "Root" }
     }
-  const initialize = (ownership: Pick<StartInternalOptions, "onStopSync">) => {
-    const startOptions = { ...internalOptions, ...ownership }
+  const initialize = (hooks: OwnershipHooks) => {
+    const startOptions = { ...internalOptions, ...hooks }
     return strategy === "generic"
       ? startGenericInternal(logic, startOptions)
       : strategy === "compiled"
