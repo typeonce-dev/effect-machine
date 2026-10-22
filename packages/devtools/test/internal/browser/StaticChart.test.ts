@@ -404,7 +404,7 @@ describe("Static chart", () => {
       transitions.map(({ label, target }) => ({ label, target })),
       [
         { label: "PrintRequested", target: "Print.Operation.Printing" },
-        { label: "parallel-owner-child", target: "Print.Operation.Active" }
+        { label: "ChildSignal", target: "Print.Operation.Active" }
       ]
     )
     assert.isTrue(transitions.every(isParentChildTransition))

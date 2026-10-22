@@ -28,6 +28,15 @@ export type ChildEntry =
     ownerActive?: boolean
   }
 
+/**
+ * Prefix of the child ids the runtime assigns to Effect, Stream, and timer
+ * invocations. Caller-chosen ids in this namespace are always treated as taken,
+ * so runtime-owned invocation ids can never collide with another child.
+ */
+export const invocationChildIdPrefix = "Machine.invocation:"
+
+export const isReservedChildId = (id: string): boolean => id.startsWith(invocationChildIdPrefix)
+
 export type ChildSelector = string | ChildDescriptor
 export type ChildKey = string | symbol
 

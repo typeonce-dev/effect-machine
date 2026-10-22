@@ -1115,7 +1115,7 @@ describe("Machine", () => {
       }
     })
     expect<EntryRequirement>().type.toBeAssignableTo<Machine.Machine.Services<typeof handled>>()
-    expect<Machine.Machine.Error<typeof handled>>().type.not.toBe<any>()
+    expect<Machine.Machine.Error<typeof handled>>().type.toBe<never>()
     const staticHandled = machine.handle({
       initial: {
         target: "down",
@@ -1176,7 +1176,7 @@ describe("Machine", () => {
       }
     })
     expect<EntryRequirement>().type.toBeAssignableTo<Machine.Machine.Services<typeof staticHandled>>()
-    expect<Machine.Machine.Error<typeof staticHandled>>().type.not.toBe<any>()
+    expect<Machine.Machine.Error<typeof staticHandled>>().type.toBe<never>()
   })
   it("requires only reachable Stream handlers", () => {
     const machine = Machine.make({
