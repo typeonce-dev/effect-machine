@@ -105,16 +105,14 @@ export const parallelOwnerRoutingMachine = Machine.make({
   states: {
     Print: {
       initial: { Options: ({}) => ({}), Operation: ({}) => ({}) },
-      invoke: {
-        src: "source1",
-        onFailure: { target: "Print.Operation.Active", decoded: true, data: () => (new Active({})) }
-      },
+      invoke: { src: "source1" },
       on: {
         PrintRequested: {
           target: "Print.Operation.Printing",
           decoded: true,
           data: () => (new Printing({}))
-        }
+        },
+        ChildSignal: { target: "Print.Operation.Active", decoded: true, data: () => (new Active({})) }
       },
       states: {
         Options: {

@@ -8,8 +8,9 @@ import * as Cause from "effect/Cause"
 import * as Effect from "effect/Effect"
 import * as Stream from "effect/Stream"
 import type { ChildMachine, ChildOwner, Inspection, Logic, Machine } from "../../Machine.js"
+import * as ChildRegistry from "./childRegistry.js"
 import * as Configuration from "./configuration.js"
-import { InfiniteTransitionError, MachineSchemaDecodeError, StoppedError } from "./errors.js"
+import { ChildAlreadyExistsError, InfiniteTransitionError, MachineSchemaDecodeError, StoppedError } from "./errors.js"
 import * as InvocationDefinition from "./invocationDefinition.js"
 import * as InvocationEvent from "./invocationEvent.js"
 import * as Planner from "./planner.js"
@@ -33,7 +34,8 @@ export interface AnyConfig {
 export const makeKey = (path: string, id: string): string => `${path.length}:${path}${id}`
 
 /** @internal */
-export const makeChildId = (path: string, id: string): string => `Machine.invocation:${makeKey(path, id)}`
+export const makeChildId = (path: string, id: string): string =>
+  `${ChildRegistry.invocationChildIdPrefix}${makeKey(path, id)}`
 
 const oneShot = (effect: Effect.Effect<any, any, any>): Logic<void, never, any, any, any> => ({
   initial: () => Effect.void,
@@ -272,6 +274,15 @@ const startResolved = (
     })
   })
 
+// Logic addresses and child descriptor ids are caller-chosen. Keep them out of
+// the namespace reserved for runtime-owned invocation ids; runtime-owned ids
+// skip this check.
+const reservedChildIdFailure = (
+  childId: string,
+  invokeId: string
+): Effect.Effect<never, ChildAlreadyExistsError> | undefined =>
+  ChildRegistry.isReservedChildId(childId) ? Effect.fail(new ChildAlreadyExistsError({ id: invokeId })) : undefined
+
 const start = (
   scope: Runtime.ProcessScope<any>,
   ownedChildren: Runtime.OwnedChildRuntime,
@@ -279,6 +290,8 @@ const start = (
   config: AnyConfig
 ): Effect.Effect<void, any, any> => {
   const invokeId = String(config.id)
+  const reserved = config.address === undefined ? undefined : reservedChildIdFailure(String(config.address), invokeId)
+  if (reserved !== undefined) return reserved
   return startResolved(
     scope,
     ownedChildren,
@@ -305,6 +318,8 @@ const startStaticChild = (
   // source function so each running parent does not retain a resolved config
   // object and an otherwise redundant source closure.
   const descriptor = raw.child
+  const reserved = reservedChildIdFailure(descriptor.id, descriptor.id)
+  if (reserved !== undefined) return reserved
   return startResolved(
     scope,
     ownedChildren,
