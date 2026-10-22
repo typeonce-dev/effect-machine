@@ -1,8 +1,9 @@
 # Effect Machine Oxlint plugin
 
 `@typeonce/oxlint-plugin-effect-machine` checks Effect Machine definitions for
-invalid invocation identities, impure planning, redundant resolvers, and
-one-use intermediate machine definitions.
+invalid invocation identities, impure planning, redundant resolvers,
+conditional `none` fallbacks that keep an event accepted, and one-use
+intermediate machine definitions.
 
 The plugin uses Oxlint's JavaScript plugin interface. Custom JavaScript plugins
 are currently alpha in Oxlint, so keep Oxlint and this package on versions that
@@ -41,6 +42,7 @@ JSON configurations can list the same rules directly:
   "rules": {
     "effect-machine/no-async-planning-callback": "error",
     "effect-machine/no-browser-api-in-planning": "error",
+    "effect-machine/no-conditional-none-branch": "error",
     "effect-machine/no-conflicting-invocation-identity": "error",
     "effect-machine/no-nondeterministic-planning": "error",
     "effect-machine/no-redundant-resolve": "error",
@@ -73,6 +75,44 @@ Ignore: { none: true }
 
 The fixer preserves callbacks with comments or meaningful work. Ordinary
 transitions with default construction use `{ target: "Ready" }`.
+
+### `effect-machine/no-conditional-none-branch`
+
+A `{ none: true }` branch accepts its event without changing state, so
+`Machine.can` and `AtomMachine.can` report `true` when a resolver selects it.
+The rule reports a resolver that selects a `none` branch conditionally without
+`declinable: true`, because a control enabled by `can` would stay enabled:
+
+```ts
+// In make:
+branches: {
+  submit: {
+    review: { target: "Reviewing" },
+    incomplete: { none: true }
+  }
+}
+
+// Incorrect: Submitted is still accepted while the form is incomplete.
+Submitted: {
+  branches: "submit",
+  resolve: ({ state, select }) =>
+    state.complete ? select.review() : select.incomplete()
+}
+
+// Correct: the incomplete form declines Submitted.
+Submitted: {
+  branches: "submit",
+  declinable: true,
+  resolve: ({ state, select, decline }) =>
+    state.complete ? select.review() : decline()
+}
+```
+
+Remove the unused `none` branch from the group after the change, or use
+`guard` on an ordinary transition. The rule recognizes `select.<key>()`,
+destructured selectors, ternaries, and `if` returns against a group declared in
+the same module's `make` call. An unconditional `none` selection and a resolver
+with `declinable: true` remain valid.
 
 ### `effect-machine/no-async-planning-callback`
 
@@ -143,17 +183,17 @@ Receive facts through events or machine input, or obtain them in invoked work:
 // In make:
 branches: {
   expiry: {
-    expired: { target: "Expired" },
-    current: { none: true }
+    expired: { target: "Expired" }
   }
 }
 
 // In handle:
 Check: {
   branches: "expiry",
-  resolve: ({ event, select }) => event.now >= event.deadline
+  declinable: true,
+  resolve: ({ event, select, decline }) => event.now >= event.deadline
     ? select.expired.from()
-    : select.current()
+    : decline()
 }
 ```
 
