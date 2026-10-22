@@ -1,5 +1,61 @@
 # @typeonce/effect-machine
 
+## 0.42.0
+
+### Minor Changes
+
+- 4e9d412: Deliver `send` and `stop` writes made while an atom machine is still starting. Writes to `MachineAtom.send`, `MachineAtom.stop`, `ChildMachineAtom.send` and `ChildMachineAtom.stop` before readiness are now held and delivered in write order once the machine is ready, instead of being dropped. The write result stays waiting until delivery and fails with the startup error if startup fails. Writes after the machine stopped still fail with `StoppedError`, and child writes still fail with `ChildNotActiveError` when the owning state is inactive.
+
+  `NotReadyError` is removed from `AtomMachine` and from the `send` and `stop` failure types. Remove any handling of it.
+
+  Add `AtomMachine.MachineAtom.Any` and `AtomMachine.ChildMachineAtom.Any` for code that accepts any bridge, including bridges for machines without events, and the `MachineAtom.State`, `MachineAtom.Event` and `ChildMachineAtom.State` extractors:
+
+  ```ts
+  type Bridge = AtomMachine.MachineAtom.Any;
+  type State = AtomMachine.MachineAtom.State<typeof CounterMachineAtom>;
+  type Event = AtomMachine.MachineAtom.Event<typeof CounterMachineAtom>;
+  ```
+
+- 36b1c0a: `ChildAlreadyExistsError` now appears in a machine's error type only for invocations whose child id you choose: logic invocations with an `address` and `Machine.child` invocations. Effect, Stream, and timer invocations run under runtime-owned ids and cannot collide, so a machine that only invokes them no longer carries `ChildAlreadyExistsError` in `Machine.Error`. Invocation ids within one state must be distinct; a repeated source without distinct `id`s or a reused `id` is now a type error and is rejected when the machine is constructed.
+
+  A parent that invokes a fixed child through `children` now needs `onFailure` exactly when the child's own error type is reachable. Remove `onFailure: { none: true }` handlers that only swallowed `ChildAlreadyExistsError`; they are now rejected as unreachable, like an unreachable `onDone`.
+
+  Constraint failures now explain themselves instead of reporting `never`. Starting, resuming, preparing, or planning a machine with a required parent reports `Machine declares a required parent and cannot run as a root`, and an unreachable `onDone`, `onFailure`, `onElement`, or `onSnapshot` names the channel and source, for example `Invocation 'forever' never completes, so onDone is unreachable`.
+
+- 71d41b9: Bind started machines to the caller's `Scope`.
+
+  `Machine.start`, `Machine.resume`, and `prepared.start` now require `Scope.Scope`, like `Effect.forkScoped`. Closing that scope is equivalent to `ref.stop`: active invocations are interrupted, owned children stop, the snapshot becomes `stopped`, and later sends fail with `StoppedError`. A machine that stops or completes earlier releases its place in the scope, so long-lived scopes do not accumulate finalizers. For `prepared.start`, the scope that first evaluates it owns the machine. `AtomMachine` is unaffected.
+
+  Wrap programs that start machines in `Effect.scoped`, or own a scope explicitly when a machine must outlive the caller:
+
+  ```ts
+  const program = Effect.scoped(
+    Effect.gen(function* () {
+      const ref = yield* Machine.start(machine);
+      yield* ref.send(Events.Go());
+    })
+  );
+
+  const detached = Effect.gen(function* () {
+    const scope = yield* Scope.make();
+    return yield* Machine.start(machine).pipe(Scope.provide(scope));
+  });
+  ```
+
+- 5eda754: Reading an `AtomMachine` bridge on the server no longer starts the machine. Every bridge atom now has an Effect Atom server value, so `Atom.getServerValue` and the server render of `@effect/atom-react` hooks return the machine's planned startup state without running startup commands, invocations, or services.
+
+  `result` serves `Success(state)` and `snapshot` serves `Success({ status: "active", state })`, both waiting, where `state` is the state `Machine.planInitial` settles into with the bridge's input. `select`, `selectSnapshot`, `matches`, `can`, and `family` projections serve the same projection of that state. `child(Child)` serves the planned child state when the planned parent state invokes `Child`, and `Option.none()` otherwise. `ref`, `send`, and `stop` serve `Initial`, as does every atom of a bridge whose startup state cannot be planned synchronously. Resumed bridges serve their resumed snapshot.
+
+- edebb70: A transition that combines `target` and `update` can now enter a choice state. The owner is updated first, so the choice resolver reads the new value through `containingState`, `ancestors`, or `root` before the chosen branch is entered. With a choice target, `data` constructs only the owner value:
+
+  ```ts
+  Idle: {
+    on: { Bump: { target: "Route", update: "root", data: ({ root }) => ({ count: root.count + 1 }) } }
+  }
+  ```
+
+  A declared branch group can declare the same pair and select it with `select.route({ update: { data } })`. Every branch the choice can reach, including through nested choices, must stay below the updated owner: an escaping branch is a type error such as `Choice 'Route' branch 'out' targets 'Outside' outside the updated owner 'Flow'`, and `handle` rejects it at construction.
+
 ## 0.41.1
 
 ### Patch Changes
