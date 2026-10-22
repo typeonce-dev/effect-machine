@@ -133,9 +133,44 @@ Create the runtime inside the `useMachineAtom` factory so each owner builds it
 once. `Atom.runtime` builds layers through the registry's memo map: the shared
 `AppLayer` is built once per registry and reused, and each owner builds only its
 own capability layer. Use `Layer.provideMerge(ownerLayer, AppLayer)` when the
-owner layer itself needs application services. `createMachineContext` takes a
-module-level factory, so distribute an owner-bound machine through props or a
-React Context of your own.
+owner layer itself needs application services.
+
+To share the owner-bound machine with a subtree, declare the capability as the
+second, `Layer`-typed parameter of a `createMachineContext` factory. The first
+parameter is the startup input; `OnboardingMachine` has none, so it is `void`:
+
+```tsx
+import { createMachineContext } from "@typeonce/effect-machine-react"
+
+const navigationLayer = (router: Router) =>
+  Layer.succeed(Navigation, {
+    push: (href) => Effect.sync(() => router.push(href))
+  })
+
+export const Onboarding = createMachineContext(
+  (_: void, navigation: Layer.Layer<Navigation>) =>
+    AtomMachine
+      .bind(Atom.runtime(Layer.provideMerge(navigation, AppLayer)))
+      .make(OnboardingMachine)
+)
+
+function OnboardingRoute() {
+  return (
+    <Onboarding.Provider layer={navigationLayer(useRouter())}>
+      <OnboardingForm />
+    </Onboarding.Provider>
+  )
+}
+```
+
+The Provider requires a `layer` prop of exactly the declared `Layer` type, and
+an `input` prop when the first parameter is the machine's input, as in
+`(input: SignInInput, navigation: Layer.Layer<Navigation>)`. A factory without
+a layer parameter has a Provider without a `layer` prop. Like `input`, the
+layer is read once, when the Provider mounts: a new router instance does not
+rebuild the running machine. Change the Provider's React `key` to create a new
+owner with a new layer. Binding still checks the machine's requirements, so a
+layer type that omits `Navigation` is a compile error.
 
 ## Render state-owned data
 
@@ -161,8 +196,24 @@ Startup and runtime failures reach the nearest error boundary. Once a snapshot
 has rendered, the renderer keeps it while the machine is still starting, for
 example while a bound runtime layer builds after hydration.
 
-For custom hooks, `useAtomSuspense(AtomMachine.selectSnapshot(machine, path)).value`
-returns an Option of the selected snapshot.
+`MachineState` also renders a child machine. Pass the child bridge; paths and
+the snapshot are then the child's, and `inactive` also renders while the state
+that owns the child is not active:
+
+```tsx
+<MachineState machine={machine.child(QuantityChild)} path="" inactive={null}>
+  {(snapshot) => <NumberField value={snapshot.value.quantity} />}
+</MachineState>
+```
+
+For custom hooks, `useMachineResult(atom)` reads any result atom, such as
+`AtomMachine.selectSnapshot(machine, path)`, `matches`, or `can`, with the same
+rendering semantics as `MachineState`: it does not suspend, serves the planned
+value during server rendering and hydration, and keeps the last `Success` while
+the machine is still starting. Prefer it to `useAtomValue`, which returns
+`Initial` again after hydration and makes the renderer replace hydrated markup.
+`useAtomSuspense(AtomMachine.selectSnapshot(machine, path)).value` returns an
+Option of the selected snapshot for readers inside a Suspense boundary.
 
 `AtomMachine.select` returns the selected state value.
 `AtomMachine.selectSnapshot` also retains the selected state's child topology.
@@ -429,7 +480,8 @@ const editing = useAtomSuspense(
 ```
 
 An inactive child or path returns `Option.none()`. Re-entry follows the
-replacement child instance.
+replacement child instance. `MachineState` accepts the child bridge directly
+and renders `inactive` in both cases.
 
 Use `AtomMachine.familyChild` when a parent owns a runtime-sized set of keyed
 children:

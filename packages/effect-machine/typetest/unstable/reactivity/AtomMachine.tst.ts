@@ -674,6 +674,12 @@ describe("AtomMachine", () => {
     expect<AtomMachine.ChildMachineAtom.State<typeof child>>().type.toBe<
       Machine.Machine.Snapshot<Machine.Machine.States<typeof machine>>
     >()
+    const either = bridge as typeof bridge | typeof child
+    if (AtomMachine.isMachineAtom(either)) {
+      expect(either).type.toBe<typeof bridge>()
+    } else {
+      expect(either).type.toBe<typeof child>()
+    }
   })
   it("types early command results without a readiness failure", () => {
     const bridge = AtomMachine.make(makeMachine())

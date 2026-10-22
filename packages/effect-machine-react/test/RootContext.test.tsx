@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 import { RegistryContext } from "@effect/atom-react"
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react"
-import { Schema } from "effect"
-import { AtomRegistry } from "effect/reactivity"
+import { Context, Effect, Layer, Schema } from "effect"
+import { Atom, AtomRegistry } from "effect/reactivity"
 import * as React from "react"
 import { afterEach, expect, it } from "vitest"
 import { Machine } from "../../effect-machine/src/index.js"
@@ -145,6 +145,97 @@ it("sends startup failures from a state renderer to an error boundary", async ()
   await screen.findByText("startup failed")
   expect(caught).toBeDefined()
   expect(screen.queryByText("ready")).toBeNull()
+  view.unmount()
+  registry.dispose()
+})
+
+class Navigation extends Context.Service<Navigation, {
+  readonly push: (href: string) => Effect.Effect<void>
+}>()("test/RootContext/Navigation") {}
+const leaving = Machine.make({
+  root: Machine.state({ fields: { redirect: Schema.String }, states: { Leaving: {}, Left: {} } }),
+  events: Machine.events({}),
+  input: Schema.String,
+  effects: {
+    navigate: ({ root }: { readonly root: { readonly redirect: string } }) =>
+      Effect.flatMap(Navigation, (navigation) => navigation.push(root.redirect))
+  }
+}).handle({
+  root: ({ input }) => ({ redirect: input }),
+  initial: { target: "Leaving" },
+  states: {
+    Leaving: { invoke: { src: "navigate", input: ({ root }) => ({ root }), onDone: { target: "Left" } } },
+    Left: {}
+  }
+})
+const Leave = createMachineContext((input: string, navigation: Layer.Layer<Navigation>) =>
+  AtomMachine.bind(Atom.runtime(navigation)).make(leaving, input)
+)
+it("provides each owner's capability layer to its machine", async () => {
+  const registry = AtomRegistry.make()
+  const pushed: Array<string> = []
+  const navigation = (router: string) =>
+    Layer.succeed(Navigation, {
+      push: (href) => Effect.sync(() => pushed.push(`${router}:${href}`))
+    })
+  function Reader({ name }: { readonly name: string }) {
+    return (
+      <MachineState machine={Leave.useMachine()} path="Left">
+        {() => <span>{name} left</span>}
+      </MachineState>
+    )
+  }
+  const view = render(
+    <RegistryContext.Provider value={registry}>
+      <Leave.Provider input="/a" layer={navigation("first")}>
+        <Reader name="first" />
+      </Leave.Provider>
+      <Leave.Provider input="/b" layer={navigation("second")}>
+        <Reader name="second" />
+      </Leave.Provider>
+    </RegistryContext.Provider>
+  )
+  await screen.findByText("first left")
+  await screen.findByText("second left")
+  expect([...pushed].sort()).toEqual(["first:/a", "second:/b"])
+  view.unmount()
+  registry.dispose()
+})
+it("reads the capability layer once when the owner mounts", async () => {
+  const registry = AtomRegistry.make()
+  const pushed: Array<string> = []
+  const navigation = (router: string) =>
+    Layer.succeed(Navigation, {
+      push: (href) => Effect.sync(() => pushed.push(`${router}:${href}`))
+    })
+  const NoInput = createMachineContext((_: void, layer: Layer.Layer<Navigation>) =>
+    AtomMachine.bind(Atom.runtime(layer)).make(leaving, "/home")
+  )
+  let bridge: ReturnType<typeof NoInput.useMachine> | undefined
+  function Reader() {
+    bridge = NoInput.useMachine()
+    return (
+      <MachineState machine={bridge} path="Left">
+        {() => <span>left</span>}
+      </MachineState>
+    )
+  }
+  const tree = (router: string, key: string) => (
+    <RegistryContext.Provider value={registry}>
+      <NoInput.Provider layer={navigation(router)} key={key}>
+        <Reader />
+      </NoInput.Provider>
+    </RegistryContext.Provider>
+  )
+  const view = render(tree("first", "a"))
+  await screen.findByText("left")
+  const first = bridge
+  view.rerender(tree("second", "a"))
+  expect(bridge).toBe(first)
+  expect(pushed).toEqual(["first:/home"])
+  view.rerender(tree("third", "b"))
+  await waitFor(() => expect(pushed).toEqual(["first:/home", "third:/home"]))
+  expect(bridge).not.toBe(first)
   view.unmount()
   registry.dispose()
 })

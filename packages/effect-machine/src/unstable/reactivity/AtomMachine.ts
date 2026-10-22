@@ -180,6 +180,20 @@ export declare namespace MachineAtom {
   export type Event<A extends Any> = A extends MachineAtom<any, infer Event, any, any, any, any> ? Event : never
 }
 
+/**
+ * Returns `true` if a value is a machine bridge created by `AtomMachine`.
+ *
+ * **Details**
+ *
+ * A child bridge returned by `child(...)` is not a machine bridge. Use this
+ * guard to accept both bridge kinds and select through `selectSnapshot` or
+ * `selectSnapshotChild` accordingly.
+ *
+ * @category guards
+ * @since 0.43.0
+ */
+export const isMachineAtom: (u: unknown) => u is MachineAtom.Any = internal.isMachineAtom
+
 type RefState<Ref> = Ref extends Machine.MachineRef<infer State, any, any, any, any> ? State : never
 
 type RefError<Ref> = Ref extends Machine.MachineRef<any, any, infer Error, any, any> ? Error : never
