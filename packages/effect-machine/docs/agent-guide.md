@@ -440,6 +440,13 @@ validated atomically, and destination entry sees the new owner value. A named
 branch can declare the same pair when a resolver needs commands or nested
 construction. Its selector requires `update: { data: ownerValue }` in the construction object.
 
+The destination of `{ target, update, data }` can be a choice. The owner is
+updated before the choice resolves, so its resolver reads the new value through
+`containingState`, `ancestors`, or `root`, and `data` returns only the complete
+owner input. Every branch the choice can reach, including through nested
+choices, must stay below the owner; otherwise the definition does not compile
+and `handle` throws while naming the choice, branch, and escaping target.
+
 ## Test paths and invariants
 
 Test the statechart as a graph. Send domain events, inspect reached states, and

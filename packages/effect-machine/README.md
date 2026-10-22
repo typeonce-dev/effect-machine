@@ -277,6 +277,21 @@ Advanced construction declares both paths in a branch and uses
 A retained owner must be active for that source and remain active through the
 transition. A sibling region's value cannot be updated through this operation.
 
+The destination can be a choice. The owner is updated first, so the choice
+resolver reads the new value, and `data` constructs only the owner value:
+
+```ts
+Bump: {
+  target: "Route",
+  update: "root",
+  data: ({ root }) => ({ count: root.count + 1 })
+}
+```
+
+Every branch the choice can reach, including through nested choices, must stay
+below the owner. A declared branch selects it with
+`select.route({ update: { data: ownerValues } })`.
+
 The runtime transition API does not replace arbitrary complete root
 configurations. The root is not a destination. `initialize` restarts it: it
 accepts fresh machine input, or `true` for a machine without input, and follows

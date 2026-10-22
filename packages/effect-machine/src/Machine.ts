@@ -684,6 +684,16 @@ type InvocationDefinitionError<
   readonly field: Field
 }
 
+type TransitionDefinitionError<
+  Message extends string,
+  Choice extends string,
+  Target extends string
+> = {
+  readonly "~effect/Machine/TransitionDefinitionError": Message
+  readonly choice: Choice
+  readonly target: Target
+}
+
 type RootCompatibilityError<Message extends string> = {
   readonly "~effect/Machine/RootCompatibilityError": Message
 }
@@ -5084,7 +5094,7 @@ export declare namespace Machine {
     | ChoiceTarget<States, ChoiceIdentifier<States>>
     | StateUpdate<States, ValuedStateIdentifier<States>>
     | CombinedTarget<
-      Target<States, StateIdentifier<States>> | Snapshot<States>,
+      Target<States, StateIdentifier<States>> | Snapshot<States> | ChoiceTarget<States, ChoiceIdentifier<States>>,
       States,
       ValuedStateIdentifier<States>
     >
@@ -6445,7 +6455,10 @@ export declare namespace Machine {
       | {
         /** Selects a declared descendant; its transition or bound branch constructor supplies required values. */
         readonly target: ReferenceUnion<S, DestinationPath<S>>
-        /** Replaces the complete value of a retained source or ancestor without replacing its active children. */
+        /**
+         * Replaces the complete value of a retained ancestor of the source and target without replacing its active
+         * children. A choice target resolves after the update, and every branch it can reach must stay below the owner.
+         */
         readonly update?: ReferenceUnion<S, ValuedStateIdentifier<S>>
         /** Enters a compound or parallel subtree through its declared initialization. */
         readonly initial?: never
@@ -6620,6 +6633,14 @@ export declare namespace Machine {
                 P,
                 "state",
                 "branch"
+              >
+            : P extends ChoiceIdentifier<S> ? TargetSelection<
+                (construction: {
+                  readonly update: ConstructionData<NodeByIdentifier<S, Owner>>
+                }) => CombinedTarget<ChoiceTarget<S, P>, S, Owner>,
+                P,
+                "choice",
+                "branch"
               > :
             never
           : never
@@ -6737,6 +6758,7 @@ export declare namespace Machine {
           ) => { readonly target: NodeValue<NodeByIdentifier<S, P>>; readonly update: StateByIdentifier<S, Owner> }
           readonly from?: never
         })
+    : P extends ChoiceIdentifier<S> ? ObjectConstruction<C, StateUpdateBuilder<S, Owner>>
     : never
   type InlineCombined<S extends StateSchemas, Src extends StateNodeIdentifier<S>, C> = Src extends ChoiceIdentifier<S> ?
     never :
@@ -6747,7 +6769,11 @@ export declare namespace Machine {
           & {
             /** Selects a declared descendant; its transition or bound branch constructor supplies required values. */
             readonly target: ReferenceAt<S, P>
-            /** Replaces the complete value of a retained source or ancestor without replacing its active children. */
+            /**
+             * Replaces the complete value of a retained ancestor of the source and target without replacing its active
+             * children. A choice target resolves after the update, and every branch it can reach must stay below the
+             * owner; `data` then constructs only the owner value.
+             */
             readonly update: ReferenceAt<S, Owner>
             /** Enters a compound or parallel subtree through its declared initialization. */
             readonly initial?: never
@@ -7479,37 +7505,115 @@ export declare namespace Machine {
     : Id extends LiteralInvokeIdAt<I, Exclude<Extract<keyof I, `${number}`>, K>, R> ? Id
     : never
     : never
-  type ValidateInvokeEntry<I, R, Duplicate extends string> = I extends {
+  type ValidateInvokeEntry<I, R, Duplicate extends string, Root> = I extends {
     /** Name of the source registered in make. */
     readonly src: infer Src extends PropertyKey
   } ? {
-      readonly [K in keyof I]: [Duplicate] extends [never] ? ValidateInvokeField<I, K, R, Extract<Src, string>>
+      readonly [K in keyof I]: [Duplicate] extends [never] ? ValidateInvokeField<I, K, R, Extract<Src, string>, Root>
         : K extends ("id" extends keyof I ? "id" : "src") ? InvocationDefinitionError<
             `Invocation id '${Duplicate}' is declared more than once in this state`,
             Extract<Src, string>,
             K
           >
-        : ValidateInvokeField<I, K, R, Extract<Src, string>>
+        : ValidateInvokeField<I, K, R, Extract<Src, string>, Root>
     } :
     never
-  type ValidateInvokeField<I, K extends keyof I, R, Src extends string> = K extends AllowedInvokeChannels<R, Src>
-    ? ValidateObjectTransition<I[K]>
+  type ValidateInvokeField<I, K extends keyof I, R, Src extends string, Root> = K extends
+    AllowedInvokeChannels<R, Src> ? ValidateObjectTransition<I[K]> & ValidateChoiceUpdate<I[K], R, Root>
     : K extends "src" | "id" | "address" | "input" ? unknown
     : InvokeFieldError<K, Src>
-  type ValidateObjectInvoke<I, R> = I extends ReadonlyArray<unknown> ?
-    number extends I["length"] ? { readonly [K in keyof I]: ValidateInvokeEntry<I[K], R, never> }
-    : { readonly [K in keyof I]: ValidateInvokeEntry<I[K], R, DuplicateInvokeId<I, K, R>> } :
-    ValidateInvokeEntry<I, R, never>
+  type ValidateObjectInvoke<I, R, Root> = I extends ReadonlyArray<unknown> ?
+    number extends I["length"] ? { readonly [K in keyof I]: ValidateInvokeEntry<I[K], R, never, Root> }
+    : { readonly [K in keyof I]: ValidateInvokeEntry<I[K], R, DuplicateInvokeId<I, K, R>, Root> } :
+    ValidateInvokeEntry<I, R, never, Root>
+  // Handler config of a dotted state path, read from the root handler config.
+  type HandlerConfigAt<Config, Path extends string> = Config extends { readonly states: infer Children } ?
+    Path extends `${infer Head}.${infer Rest}` ? Head extends keyof Children ? HandlerConfigAt<Children[Head], Rest>
+      : never
+    : Path extends keyof Children ? Children[Path]
+    : never
+    : never
+  type ChoiceConfigAt<Root, Path extends string> = HandlerConfigAt<Root, Path> extends {
+    /** Implements this choice pseudo-state with one required synchronous transition. */
+    readonly choice: infer Choice
+  } ? Choice
+    : never
+  type ChoiceBranchDeclaration<Choice, R> = Choice extends {
+    /** Named groups of inspectable destinations used by transition resolvers. */
+    readonly branches: infer G extends keyof Registered<R, "branches">
+  } ? {
+      readonly [K in Extract<keyof Registered<R, "branches">[G], string>]: {
+        readonly label: `branch '${K}'`
+        readonly declaration: Registered<R, "branches">[G][K]
+      }
+    }[Extract<keyof Registered<R, "branches">[G], string>]
+    : { readonly label: "transition"; readonly declaration: Choice }
+  type IsBelowOwner<Path extends string, Owner extends string> = Owner extends "" ? Path extends "" ? false : true
+    : Path extends `${Owner}.${string}` ? true
+    : false
+  type ChoiceBranchEscape<Path extends string, Owner extends string, Choice extends string, Label extends string> =
+    IsBelowOwner<Path, Owner> extends true ? never : TransitionDefinitionError<
+      `Choice '${Choice}' ${Label} targets '${PathName<Path>}' outside the updated owner '${PathName<Owner>}'`,
+      Choice,
+      PathName<Path>
+    >
+  // Every branch reachable from a choice entered with an owner update must stay below that owner.
+  type ChoiceUpdateEscape<Root, R, Choice extends string, Owner extends string, Visited extends string = never> =
+    Choice extends Visited ? never
+      : ChoiceBranchDeclaration<ChoiceConfigAt<Root, Choice>, R> extends infer Branch ?
+        Branch extends { readonly label: infer Label extends string; readonly declaration: infer D } ? D extends {
+            /** Selects a declared descendant; its transition or bound branch constructor supplies required values. */
+            readonly target: infer Ref extends string
+          } ?
+            [ChoiceConfigAt<Root, PathOf<Ref>>] extends [never] ? ChoiceBranchEscape<PathOf<Ref>, Owner, Choice, Label>
+            : ChoiceUpdateEscape<Root, R, PathOf<Ref>, Owner, Visited | Choice>
+          : D extends {
+            /** Restores the declared history reference, using its fallback on first entry. */
+            readonly history: infer Ref extends string
+          } ? ChoiceBranchEscape<PathOf<Ref>, Owner, Choice, Label>
+          : D extends {
+            /** Reconstructs root and its initial children from fresh machine input. */
+            readonly initialize: unknown
+          } ? ChoiceBranchEscape<"", Owner, Choice, Label>
+          : never
+        : never
+      : never
+  type ChoiceUpdateEscapeOf<D, R, Root> = D extends {
+    /** Selects a declared descendant; its transition or bound branch constructor supplies required values. */
+    readonly target: infer Ref extends string
+    /** Replaces the complete value of a retained source or ancestor without replacing its active children. */
+    readonly update: infer Owner extends string
+  } ? [ChoiceConfigAt<Root, PathOf<Ref>>] extends [never] ? never
+    : ChoiceUpdateEscape<Root, R, PathOf<Ref>, PathOf<Owner>>
+    : never
+  type ValidateChoiceUpdate<T, R, Root> = T extends {
+    /** Named groups of inspectable destinations used by transition resolvers. */
+    readonly branches: infer G extends keyof Registered<R, "branches">
+  } ? {
+      readonly [K in keyof Registered<R, "branches">[G]]: ChoiceUpdateEscapeOf<Registered<R, "branches">[G][K], R, Root>
+    }[keyof Registered<R, "branches">[G]] extends infer Escape ? [Escape] extends [never] ? unknown : {
+        /** Named groups of inspectable destinations used by transition resolvers. */
+        readonly branches: Escape
+      }
+    : never
+    : ChoiceUpdateEscapeOf<T, R, Root> extends infer Escape ? [Escape] extends [never] ? unknown : {
+        /** Replaces the complete value of a retained source or ancestor without replacing its active children. */
+        readonly update: Escape
+      }
+    : never
   type ObjectDeclarations<C> =
     | Extract<keyof C, "on" | "always" | "onDone" | "choice" | "invoke">
     | (C extends { readonly states: infer Children }
       ? { readonly [K in keyof Children]: ObjectDeclarations<Children[K]> }[keyof Children]
       : never)
-  type ValidateObjectConfig<C, R> = [ObjectDeclarations<C>] extends [never] ? unknown : {
-    readonly [K in keyof C]: K extends "states" ? { readonly [P in keyof C[K]]: ValidateObjectConfig<C[K][P], R> }
-      : K extends "on" ? { readonly [P in keyof C[K]]: ValidateObjectTransition<C[K][P]> }
-      : K extends "always" | "onDone" | "choice" ? ValidateObjectTransition<C[K]>
-      : K extends "invoke" ? ValidateObjectInvoke<C[K], R>
+  type ValidateObjectConfig<C, R, Root = C> = [ObjectDeclarations<C>] extends [never] ? unknown : {
+    readonly [K in keyof C]: K extends "states" ? { readonly [P in keyof C[K]]: ValidateObjectConfig<C[K][P], R, Root> }
+      : K extends "on" ? {
+          readonly [P in keyof C[K]]: ValidateObjectTransition<C[K][P]> & ValidateChoiceUpdate<C[K][P], R, Root>
+        }
+      : K extends "always" | "onDone" ? ValidateObjectTransition<C[K]> & ValidateChoiceUpdate<C[K], R, Root>
+      : K extends "choice" ? ValidateObjectTransition<C[K]>
+      : K extends "invoke" ? ValidateObjectInvoke<C[K], R, Root>
       : unknown
   }
   type NormalizeObjectInvoke<I, R> = I extends ReadonlyArray<unknown> ?
