@@ -78,3 +78,10 @@ MachineState({
   }
 })
 expect(MachineState).type.not.toBeCallableWith({ machine: contextBridge, path: "Missing", children: () => null })
+expect(MachineState).type.toBeCallableWith({
+  machine: contextBridge,
+  path: "Editing",
+  pending: "starting",
+  inactive: null,
+  children: () => null
+})

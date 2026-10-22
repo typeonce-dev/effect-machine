@@ -150,7 +150,7 @@ export const withMachineReferences = (
   return scoped
 }
 
-const resolveMachineReferences = (
+export const resolveMachineReferences = (
   machine: Machine.Any,
   configuration: ActiveConfiguration
 ): BehaviorMachineReferences => {

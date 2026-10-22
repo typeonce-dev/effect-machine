@@ -17,6 +17,7 @@ import * as Stream from "effect/Stream"
 import type * as Machine from "../../Machine.js"
 import type { Bound, ChildMachineAtom, MachineAtom } from "../../unstable/reactivity/AtomMachine.js"
 import * as internalMachine from "./machine.js"
+import * as PlannedSnapshot from "./plannedSnapshot.js"
 import type { EnsureExecutable } from "./readiness.js"
 import type { ExcludeCompatibleRuntime as ExcludeCompatibleMachineRuntime, IsAny } from "./requirements.js"
 import * as Topology from "./topology.js"
@@ -139,6 +140,47 @@ const resumeMachineAtomEffect = (
   machine: Machine.Machine.Any,
   snapshot: Machine.Machine.Snapshot<any>
 ) => runMachineAtomEffect(get, internalMachine.resume(machine, snapshot))
+
+// Server reads. A server read renders the planned startup snapshot and never
+// evaluates a bridge ref, because evaluating it starts the machine. Effect
+// passes plain registry reads to a server value, so every exported atom carries
+// its own server value derived from the bridge plan.
+
+type ServerRead = <A>(atom: Atom.Atom<A>) => A
+
+interface ServerValued<A> {
+  readonly [Atom.ServerValueTypeId]: (get: ServerRead) => A
+}
+
+// Effect stores the server read on the atom without exposing it in `Atom`'s
+// type. This is the only erased boundary of the server protocol.
+const readServerValue = <A>(atom: Atom.Atom<A>, get: ServerRead): A =>
+  Atom.ServerValueTypeId in atom ? (atom as Atom.Atom<A> & ServerValued<A>)[Atom.ServerValueTypeId](get) : get(atom)
+
+/** A bridge plan: `undefined` when no snapshot can be planned synchronously. */
+type ServerPlan = () => PlannedSnapshot.PlannedSnapshot | undefined
+
+/**
+ * A child bridge plan: `Option.none()` when the planned parent does not run
+ * the child, `undefined` when the parent or child cannot be planned.
+ */
+type ChildServerPlan = () => Option.Option<PlannedSnapshot.PlannedSnapshot> | undefined
+
+// Plans are computed on the first server read, at most once per bridge, so
+// client starts never pay for them.
+const lazyPlan = <A>(plan: () => A): () => A => {
+  let planned: { readonly value: A } | undefined
+  return () => {
+    if (planned === undefined) planned = { value: plan() }
+    return planned.value
+  }
+}
+
+// Planned snapshots are erased to the machine's snapshot schema; the bridge
+// that owns a plan types its state, error and output.
+const plannedSnapshot = <State, Error, Output>(
+  planned: PlannedSnapshot.PlannedSnapshot
+): Machine.RuntimeSnapshot<State, Error, Output> => planned.snapshot as Machine.RuntimeSnapshot<State, Error, Output>
 
 type RefState<Ref> = Ref extends Machine.MachineRef<infer State, any, any, any, any> ? State : never
 type RefError<Ref> = Ref extends Machine.MachineRef<any, any, infer Error, any, any> ? Error : never
@@ -263,7 +305,7 @@ const makeCommandAtom = <Ref, StartError, E, W>(
   queues: CommandQueues,
   command: (ref: Ref, value: W) => Effect.Effect<void, E>
 ): Atom.Writable<AsyncResult.AsyncResult<void, StartError | E>, W> =>
-  Atom.writable(
+  Atom.writable<AsyncResult.AsyncResult<void, StartError | E>, W>(
     (get): AsyncResult.AsyncResult<void, StartError | E> => {
       const current = AsyncResult.map(get(ref), () => undefined)
       const queue = queues.get(get.registry)
@@ -303,7 +345,7 @@ const makeCommandAtom = <Ref, StartError, E, W>(
         })
       }
     }
-  )
+  ).pipe(Atom.withServerValueInitial)
 
 const makeRuntimeResultAtom = <State, Error, Output, StartError>(
   snapshot: Atom.Atom<AsyncResult.AsyncResult<Machine.RuntimeSnapshot<State, Error, Output>, StartError>>
@@ -326,7 +368,11 @@ const makeRuntimeResultAtom = <State, Error, Output, StartError>(
     return AsyncResult.success(current.value.state, {
       waiting: current.waiting
     })
-  }).pipe(Atom.withEquality(Equal.equals))
+  }).pipe(
+    Atom.withEquality(Equal.equals),
+    // A planned snapshot is never an error, so its state is the server result.
+    Atom.withServerValue((get) => AsyncResult.map(readServerValue(snapshot, get), (current) => current.state))
+  )
 
 const makeChildRuntimeResultAtom = <State, Error, Output, StartError>(
   snapshot: Atom.Atom<
@@ -359,7 +405,12 @@ const makeChildRuntimeResultAtom = <State, Error, Output, StartError>(
     return AsyncResult.success(Option.some(current.value.value.state), {
       waiting: current.waiting
     })
-  }).pipe(Atom.withEquality(Equal.equals))
+  }).pipe(
+    Atom.withEquality(Equal.equals),
+    Atom.withServerValue((get) =>
+      AsyncResult.map(readServerValue(snapshot, get), Option.map((current) => current.state))
+    )
+  )
 
 const makeChildRefAtom = <Child extends Machine.ChildMachine.Any, StartError>(
   parentRef: Atom.Atom<
@@ -367,7 +418,7 @@ const makeChildRefAtom = <Child extends Machine.ChildMachine.Any, StartError>(
   >,
   child: Child
 ): Atom.Atom<AsyncResult.AsyncResult<Option.Option<Machine.ChildMachine.Ref<Child>>, StartError>> =>
-  Atom.readable((get) => {
+  Atom.readable((get): AsyncResult.AsyncResult<Option.Option<Machine.ChildMachine.Ref<Child>>, StartError> => {
     const parent = get(parentRef)
     if (AsyncResult.isInitial(parent)) {
       return AsyncResult.initial(parent.waiting)
@@ -393,11 +444,12 @@ const makeChildRefAtom = <Child extends Machine.ChildMachine.Any, StartError>(
     )
     get.addFinalizer(cancel)
     return AsyncResult.success(current)
-  })
+  }).pipe(Atom.withServerValueInitial)
 
 const makeChildFromRefAtom = <Child extends Machine.ChildMachine.Any, StartError>(
   ref: Atom.Atom<AsyncResult.AsyncResult<Option.Option<Machine.ChildMachine.Ref<Child>>, StartError>>,
-  descriptor: Child
+  descriptor: Child,
+  plan: ChildServerPlan
 ): ChildMachineAtom<Child, StartError> => {
   type Ref = Machine.ChildMachine.Ref<Child>
   type State = RefState<Ref>
@@ -428,7 +480,17 @@ const makeChildFromRefAtom = <Child extends Machine.ChildMachine.Any, StartError
     )
     get.addFinalizer(cancel)
     return AsyncResult.success(Option.some(Effect.runSync(handle.snapshot)))
-  })
+  }).pipe(
+    Atom.withServerValue((): AsyncResult.AsyncResult<
+      Option.Option<Machine.RuntimeSnapshot<State, Error, Output>>,
+      StartError
+    > => {
+      const planned = plan()
+      return planned === undefined
+        ? AsyncResult.initial(true)
+        : AsyncResult.success(Option.map(planned, plannedSnapshot<State, Error, Output>), { waiting: true })
+    })
+  )
 
   const commands: CommandQueues = new WeakMap()
   const activeChild = (current: Option.Option<Ref>): Effect.Effect<Ref, ChildNotActiveError> =>
@@ -449,7 +511,7 @@ const makeChildFromRefAtom = <Child extends Machine.ChildMachine.Any, StartError
     (current, _: void) => Effect.flatMap(activeChild(current), (child) => child.stop)
   )
 
-  const child = makeChildSelector<StartError>(ref as any)
+  const child = makeChildSelector<StartError>(ref as any, plan)
 
   return {
     ref,
@@ -464,7 +526,8 @@ const makeChildFromRefAtom = <Child extends Machine.ChildMachine.Any, StartError
 const makeChildSelector = <StartError>(
   parentRef: Atom.Atom<
     AsyncResult.AsyncResult<Option.Option<Machine.MachineRef<any, any, any, any, any>>, StartError>
-  >
+  >,
+  parentPlan: ChildServerPlan
 ) => {
   const byMachine = new WeakMap<object, (id: string) => ChildMachineAtom<Machine.ChildMachine.Any, StartError>>()
   return <Child extends Machine.ChildMachine.Any>(descriptor: Child): ChildMachineAtom<Child, StartError> => {
@@ -475,7 +538,13 @@ const makeChildSelector = <StartError>(
         const child = internalMachine.child(id, machine)
         return makeChildFromRefAtom(
           makeChildRefAtom(parentRef as any, child),
-          child
+          child,
+          lazyPlan(() => {
+            const parent = parentPlan()
+            return parent === undefined || Option.isNone(parent)
+              ? parent
+              : PlannedSnapshot.planInvokedChild(parent.value, child)
+          })
         )
       })
       family = (id) => atoms(id) as ChildMachineAtom<Machine.ChildMachine.Any, StartError>
@@ -486,9 +555,11 @@ const makeChildSelector = <StartError>(
 }
 
 const makeFromRefAtom = <State, Event, Error, Output, StartError, Emitted>(
-  ref: Atom.Atom<AsyncResult.AsyncResult<Machine.MachineRef<State, Event, Error, Output, Emitted>, StartError>>,
-  machine: Machine.Machine.Any
+  liveRef: Atom.Atom<AsyncResult.AsyncResult<Machine.MachineRef<State, Event, Error, Output, Emitted>, StartError>>,
+  machine: Machine.Machine.Any,
+  plan: ServerPlan
 ): MachineAtom<State, Event, Error, Output, StartError, Emitted> => {
+  const ref = Atom.withServerValueInitial(liveRef)
   const snapshot = Atom.readable((
     get
   ): AsyncResult.AsyncResult<Machine.RuntimeSnapshot<State, Error, Output>, StartError> => {
@@ -522,7 +593,14 @@ const makeFromRefAtom = <State, Event, Error, Output, StartError, Emitted>(
     return AsyncResult.success(current, {
       waiting: current.status === "active"
     })
-  })
+  }).pipe(
+    Atom.withServerValue((): AsyncResult.AsyncResult<Machine.RuntimeSnapshot<State, Error, Output>, StartError> => {
+      const planned = plan()
+      return planned === undefined
+        ? AsyncResult.initial(true)
+        : AsyncResult.success(plannedSnapshot<State, Error, Output>(planned), { waiting: true })
+    })
+  )
 
   const commands: CommandQueues = new WeakMap()
 
@@ -539,7 +617,10 @@ const makeFromRefAtom = <State, Event, Error, Output, StartError, Emitted>(
   )
 
   const optionalRef = Atom.mapResult(ref, Option.some)
-  const child = makeChildSelector<StartError>(optionalRef as any)
+  const child = makeChildSelector<StartError>(optionalRef as any, () => {
+    const planned = plan()
+    return planned === undefined ? undefined : Option.some(planned)
+  })
 
   const result = {
     ref,
@@ -609,6 +690,16 @@ type SelectorKind =
   | "selectSnapshot"
   | "selectSnapshotChild"
 
+// Selectors project the bridge result live and its planned result on the server.
+const mapResultSelector = <A, B, E>(
+  source: Atom.Atom<AsyncResult.AsyncResult<A, E>>,
+  f: (value: A) => B
+): Atom.Atom<AsyncResult.AsyncResult<B, E>> =>
+  Atom.mapResult(source, f).pipe(
+    Atom.withEquality(Equal.equals),
+    Atom.withServerValue((get) => AsyncResult.map(readServerValue(source, get), f))
+  )
+
 const selectorsByBridge = new WeakMap<object, Map<SelectorKind, Map<string, Atom.Atom<any>>>>()
 
 const cachedSelector = <A>(
@@ -654,10 +745,7 @@ export const select = <
     self,
     "select",
     path,
-    () =>
-      Atom.mapResult(self.result, (snapshot) => selectValueByPath(snapshot, path)).pipe(
-        Atom.withEquality(Equal.equals)
-      )
+    () => mapResultSelector(self.result, (snapshot) => selectValueByPath(snapshot, path))
   )
 
 export const selectSnapshot = <
@@ -678,10 +766,7 @@ export const selectSnapshot = <
     self,
     "selectSnapshot",
     path,
-    () =>
-      Atom.mapResult(self.result, (snapshot) => selectSnapshotByPath(snapshot, path)).pipe(
-        Atom.withEquality(Equal.equals)
-      )
+    () => mapResultSelector(self.result, (snapshot) => selectSnapshotByPath(snapshot, path))
   )
 
 export const selectChild = <
@@ -698,10 +783,10 @@ export const selectChild = <
   >
 > =>
   cachedSelector(self, "selectChild", path, () =>
-    Atom.mapResult(
+    mapResultSelector(
       self.result,
       Option.flatMap((snapshot) => selectValueByPath(snapshot, path))
-    ).pipe(Atom.withEquality(Equal.equals)))
+    ))
 
 export const selectSnapshotChild = <
   Child extends Machine.ChildMachine.Any,
@@ -717,10 +802,10 @@ export const selectSnapshotChild = <
   >
 > =>
   cachedSelector(self, "selectSnapshotChild", path, () =>
-    Atom.mapResult(
+    mapResultSelector(
       self.result,
       Option.flatMap((snapshot) => selectSnapshotByPath(snapshot, path))
-    ).pipe(Atom.withEquality(Equal.equals)))
+    ))
 
 export const matches = <
   State extends Machine.Machine.AtomicSnapshot<string, unknown>,
@@ -738,10 +823,7 @@ export const matches = <
     self,
     "matches",
     path,
-    () =>
-      Atom.mapResult(self.result, (snapshot) => Option.isSome(Topology.getSnapshotByPath(snapshot, path))).pipe(
-        Atom.withEquality(Equal.equals)
-      )
+    () => mapResultSelector(self.result, (snapshot) => Option.isSome(Topology.getSnapshotByPath(snapshot, path)))
   )
 
 export const matchesChild = <
@@ -755,10 +837,10 @@ export const matchesChild = <
   AsyncResult.AsyncResult<boolean, StartError | RefError<Machine.ChildMachine.Ref<Child>>>
 > =>
   cachedSelector(self, "matchesChild", path, () =>
-    Atom.mapResult(
+    mapResultSelector(
       self.result,
       Option.exists((snapshot) => Option.isSome(Topology.getSnapshotByPath(snapshot, path)))
-    ).pipe(Atom.withEquality(Equal.equals)))
+    ))
 
 export const can = (event: unknown) => {
   const byBridge = new WeakMap<object, Atom.Atom<AsyncResult.AsyncResult<boolean, any>>>()
@@ -774,9 +856,11 @@ export const can = (event: unknown) => {
       ? () => Effect.die(new Error("AtomMachine.can requires a machine atom created by AtomMachine"))
       : internalMachine.can(machine)
 
-    const result = Atom.readable((get): AsyncResult.AsyncResult<boolean, any> => {
-      const current = get(self.snapshot)
-      const previous = get.self<AsyncResult.AsyncResult<boolean, any>>()
+    const evaluate = (
+      current: AsyncResult.AsyncResult<Machine.RuntimeSnapshot<any, any, any>, any>,
+      input: unknown,
+      previous: Option.Option<AsyncResult.AsyncResult<boolean, any>>
+    ): AsyncResult.AsyncResult<boolean, any> => {
       if (AsyncResult.isInitial(current)) {
         return AsyncResult.initial(current.waiting)
       } else if (AsyncResult.isFailure(current)) {
@@ -793,7 +877,6 @@ export const can = (event: unknown) => {
         return AsyncResult.success(false, { waiting: current.waiting })
       }
 
-      const input = Atom.isAtom(event) ? get(event) : event
       const exit = Effect.runSyncExit(query(current.value.state, input))
       return exit._tag === "Success"
         ? AsyncResult.success(exit.value, { waiting: current.waiting })
@@ -801,7 +884,24 @@ export const can = (event: unknown) => {
           previous,
           waiting: current.waiting
         })
-    }).pipe(Atom.withEquality(Equal.equals))
+    }
+
+    const result = Atom.readable((get): AsyncResult.AsyncResult<boolean, any> =>
+      evaluate(
+        get(self.snapshot),
+        Atom.isAtom(event) ? get(event) : event,
+        get.self<AsyncResult.AsyncResult<boolean, any>>()
+      )
+    ).pipe(
+      Atom.withEquality(Equal.equals),
+      Atom.withServerValue((get) =>
+        evaluate(
+          readServerValue(self.snapshot, get),
+          Atom.isAtom(event) ? readServerValue(event, get) : event,
+          Option.none()
+        )
+      )
+    )
 
     byBridge.set(self, result)
     return result
@@ -888,7 +988,7 @@ export const make: {
 } = ((machine: Machine.Machine.Any, ...args: ReadonlyArray<unknown>) => {
   const prepared = Atom.make(() => internalMachine.prepare(machine, ...args))
   const ref = Atom.make((get) => startPreparedMachineAtomEffect(get, prepared as any))
-  const result = makeFromRefAtom(ref as any, machine)
+  const result = makeFromRefAtom(ref as any, machine, lazyPlan(() => PlannedSnapshot.planStart(machine, args)))
   preparedByMachineAtom.set(result, prepared as any)
   return result
 }) as any
@@ -907,7 +1007,7 @@ export const resume: {
   ): ResumedMachineAtomOf<M, never>
 } = ((machine: Machine.Machine.Any, snapshot: Machine.Machine.Snapshot<any>) => {
   const ref = Atom.make((get) => resumeMachineAtomEffect(get, machine, snapshot))
-  return makeFromRefAtom(ref as any, machine)
+  return makeFromRefAtom(ref as any, machine, lazyPlan(() => PlannedSnapshot.planResume(machine, snapshot)))
 }) as any
 
 const makeWithRuntime = (
@@ -917,7 +1017,7 @@ const makeWithRuntime = (
 ): MachineAtom<any, any, any, any, any, any> => {
   const prepared = runtime.atom(() => internalMachine.prepare(machine, ...args))
   const ref = runtime.atom((get) => startPreparedMachineAtomEffect(get, prepared as any))
-  const result = makeFromRefAtom(ref as any, machine)
+  const result = makeFromRefAtom(ref as any, machine, lazyPlan(() => PlannedSnapshot.planStart(machine, args)))
   preparedByMachineAtom.set(result, prepared as any)
   return result
 }
@@ -928,7 +1028,7 @@ const resumeWithRuntime = (
   snapshot: Machine.Machine.Snapshot<any>
 ): MachineAtom<any, any, any, any, any, any> => {
   const ref = runtime.atom((get) => resumeMachineAtomEffect(get, machine, snapshot))
-  return makeFromRefAtom(ref as any, machine)
+  return makeFromRefAtom(ref as any, machine, lazyPlan(() => PlannedSnapshot.planResume(machine, snapshot)))
 }
 
 type FamilyBridge = MachineAtom.Any | ChildMachineAtom.Any
@@ -949,7 +1049,8 @@ const retainFamilyOwner = <Source extends Atom.Atom<any>>(
     (get) => get(retained.source),
     { initialValueTarget: source }
   ).pipe(
-    Atom.withEquality((value, next) => retained.source.equals(value, next))
+    Atom.withEquality((value, next) => retained.source.equals(value, next)),
+    Atom.withServerValue((get) => readServerValue(retained.source, get))
   )
   if (label !== undefined) {
     atom = atom.pipe(Atom.withLabel(label))
