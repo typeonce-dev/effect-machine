@@ -22,8 +22,7 @@ const findProperty = (
 ): ESTree.ObjectProperty | undefined =>
   node.properties.find((property): property is ESTree.ObjectProperty => propertyKey(property) === name)
 
-const isTrueLiteral = (node: ESTree.Node | undefined): boolean =>
-  node?.type === "Literal" && node.value === true
+const isTrueLiteral = (node: ESTree.Node | undefined): boolean => node?.type === "Literal" && node.value === true
 
 /** The `make` configuration that a `.handle(...)` call implements, when it is declared in this module. */
 const makeConfiguration = (
