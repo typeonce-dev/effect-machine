@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
-import { RegistryContext, useAtomSuspense } from "@effect/atom-react"
+import { RegistryContext, useAtomSet, useAtomSuspense } from "@effect/atom-react"
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react"
-import { Effect, Equal, Option, Schema } from "effect"
+import { Effect, Equal, Layer, Option, Schema } from "effect"
 import { AsyncResult, Atom, AtomRegistry } from "effect/reactivity"
 import * as React from "react"
 import { renderToString } from "react-dom/server"
@@ -241,6 +241,44 @@ describe("useMachineAtom", () => {
     await waitFor(async () => {
       assert.strictEqual((await Effect.runPromise(ref.snapshot)).status, "stopped")
     })
+    registry.dispose()
+  })
+  it("delivers events sent on first mount while a bound runtime is still building", async () => {
+    const machine = trackedMachine(() => {})
+    const runtime = Atom.runtime(Layer.effectDiscard(Effect.sleep("20 millis")))
+    const registry = AtomRegistry.make()
+    function Reader({ owned }: { readonly owned: AtomMachine.MachineAtom.Any }) {
+      const active = useAtomSuspense(AtomMachine.matches(owned, "Active")).value
+      return <span data-testid="active">{String(active)}</span>
+    }
+    function Owner() {
+      const owned = useMachineAtom(() => AtomMachine.bind(runtime).make(machine, 3))
+      const send = useAtomSet(owned.send)
+      React.useEffect(() => {
+        send(new Increment({}))
+        send(new Increment({}))
+      }, [send])
+      const value = AtomMachine.select(owned, "Active")
+      return (
+        <React.Suspense fallback="starting">
+          <Reader owned={owned} />
+          <Value value={value} />
+        </React.Suspense>
+      )
+    }
+    function Value({ value }: {
+      readonly value: Atom.Atom<AsyncResult.AsyncResult<Option.Option<Active>, unknown>>
+    }) {
+      const active = useAtomSuspense(value).value
+      return <span data-testid="value">{Option.getOrThrow(active).value}</span>
+    }
+    render(
+      <RegistryContext.Provider value={registry}>
+        <Owner />
+      </RegistryContext.Provider>
+    )
+    await waitFor(() => assert.strictEqual(screen.getByTestId("value").textContent, "5"))
+    assert.strictEqual(screen.getByTestId("active").textContent, "true")
     registry.dispose()
   })
   it("does not start the machine during server rendering", () => {

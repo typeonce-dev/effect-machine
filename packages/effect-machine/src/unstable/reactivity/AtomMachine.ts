@@ -11,21 +11,13 @@ import type * as Schema from "effect/Schema"
 import type * as Scope from "effect/Scope"
 import type * as Stream from "effect/Stream"
 import * as internal from "../../internal/machine/atom.js"
-import type { ChildNotActiveError, NotReadyError } from "../../internal/machine/atom.js"
+import type { ChildNotActiveError } from "../../internal/machine/atom.js"
 import type { EnsureExecutable } from "../../internal/machine/readiness.js"
 import type {
   ExcludeCompatibleRuntime as ExcludeCompatibleMachineRuntime,
   IsAny
 } from "../../internal/machine/requirements.js"
 import type * as Machine from "../../Machine.js"
-
-/**
- * Error returned when a machine command is issued before startup completes.
- *
- * @category errors
- * @since 0.4.0
- */
-export { NotReadyError } from "../../internal/machine/atom.js"
 
 /**
  * Error returned when a command targets a child machine that is not active.
@@ -114,23 +106,34 @@ export interface MachineAtom<State, Event, Error = never, Output = never, StartE
   readonly result: Atom.Atom<AsyncResult.AsyncResult<State, StartError | Error>>
 
   /**
-   * Writable atom that sends events to the machine. Writes before startup
-   * completes fail with `NotReadyError`.
+   * Writable atom that sends events to the machine.
+   *
+   * **Details**
+   *
+   * Events written while the machine is still starting are held and delivered
+   * in write order once startup succeeds. The write result is waiting until
+   * the event is delivered, and fails with the startup failure when startup
+   * fails. Writes after the machine stopped or completed fail with
+   * `StoppedError`.
    *
    * @since 0.4.0
    */
   readonly send: Atom.Writable<
-    AsyncResult.AsyncResult<void, StartError | NotReadyError | Machine.StoppedError>,
+    AsyncResult.AsyncResult<void, StartError | Machine.StoppedError>,
     Event
   >
 
   /**
-   * Writable atom that stops the machine. Writes before startup completes fail
-   * with `NotReadyError`.
+   * Writable atom that stops the machine.
+   *
+   * **Details**
+   *
+   * A stop written while the machine is still starting is held behind earlier
+   * writes and stops the machine as soon as startup succeeds.
    *
    * @since 0.4.0
    */
-  readonly stop: Atom.Writable<AsyncResult.AsyncResult<void, StartError | NotReadyError>, void>
+  readonly stop: Atom.Writable<AsyncResult.AsyncResult<void, StartError>, void>
 
   /**
    * Creates a reactive bridge for a directly owned child machine.
@@ -142,6 +145,39 @@ export interface MachineAtom<State, Event, Error = never, Output = never, StartE
   readonly child: <Child extends Machine.ChildMachine.Any>(
     child: Child
   ) => ChildMachineAtom<Child, StartError>
+}
+
+/**
+ * Namespace containing type-level members associated with `MachineAtom`.
+ *
+ * @category models
+ * @since 0.42.0
+ */
+export declare namespace MachineAtom {
+  /**
+   * Any machine bridge, including bridges for machines without events.
+   *
+   * @category utility types
+   * @since 0.42.0
+   */
+  export type Any = MachineAtom<any, never, any, any, any, any>
+
+  /**
+   * Extracts the state type of a machine bridge.
+   *
+   * @category utility types
+   * @since 0.42.0
+   */
+  export type State<A extends Any> = A extends MachineAtom<infer State, infer _Event, any, any, any, any> ? State
+    : never
+
+  /**
+   * Extracts the event type accepted by a machine bridge.
+   *
+   * @category utility types
+   * @since 0.42.0
+   */
+  export type Event<A extends Any> = A extends MachineAtom<any, infer Event, any, any, any, any> ? Event : never
 }
 
 type RefState<Ref> = Ref extends Machine.MachineRef<infer State, any, any, any, any> ? State : never
@@ -251,23 +287,31 @@ export interface ChildMachineAtom<Child extends Machine.ChildMachine.Any, StartE
   /**
    * Writable atom that sends events to the active child.
    *
-   * Writes fail with `ChildNotActiveError` while the child is inactive.
+   * **Details**
+   *
+   * Events written while the parent machine is still starting are held and
+   * delivered in write order once the parent is ready. Writes fail with
+   * `ChildNotActiveError` when the state that owns the child is not active.
    *
    * @since 0.4.0
    */
   readonly send: Atom.Writable<
-    AsyncResult.AsyncResult<void, StartError | NotReadyError | ChildNotActiveError | Machine.StoppedError>,
+    AsyncResult.AsyncResult<void, StartError | ChildNotActiveError | Machine.StoppedError>,
     Machine.ChildMachine.Event<Child>
   >
   /**
    * Writable atom that stops the active child.
    *
-   * Writes fail with `ChildNotActiveError` while the child is inactive.
+   * **Details**
+   *
+   * A stop written while the parent machine is still starting is held behind
+   * earlier writes. Writes fail with `ChildNotActiveError` when the state that
+   * owns the child is not active.
    *
    * @since 0.4.0
    */
   readonly stop: Atom.Writable<
-    AsyncResult.AsyncResult<void, StartError | NotReadyError | ChildNotActiveError>,
+    AsyncResult.AsyncResult<void, StartError | ChildNotActiveError>,
     void
   >
   /**
@@ -282,6 +326,32 @@ export interface ChildMachineAtom<Child extends Machine.ChildMachine.Any, StartE
   ) => ChildMachineAtom<Nested, StartError>
 }
 
+/**
+ * Namespace containing type-level members associated with `ChildMachineAtom`.
+ *
+ * @category models
+ * @since 0.42.0
+ */
+export declare namespace ChildMachineAtom {
+  /**
+   * Any child machine bridge.
+   *
+   * @category utility types
+   * @since 0.42.0
+   */
+  export type Any = ChildMachineAtom<any, any>
+
+  /**
+   * Extracts the state type of the child selected by a child bridge.
+   *
+   * @category utility types
+   * @since 0.42.0
+   */
+  export type State<A extends Any> = A extends ChildMachineAtom<infer Child, any> ?
+    RefState<Machine.ChildMachine.Ref<Child>>
+    : never
+}
+
 type BridgeStartError<Bridge> = Bridge extends MachineAtom<any, never, any, any, infer StartError, any> ? StartError
   : Bridge extends ChildMachineAtom<any, infer StartError> ? StartError
   : never
@@ -294,7 +364,7 @@ type BridgeStartError<Bridge> = Bridge extends MachineAtom<any, never, any, any,
  * @since 0.4.0
  */
 export type ChildOf<
-  Parent extends MachineAtom<any, never, any, any, any, any> | ChildMachineAtom<any, any>,
+  Parent extends MachineAtom.Any | ChildMachineAtom.Any,
   Child extends Machine.ChildMachine.Any
 > = ChildMachineAtom<Child, BridgeStartError<Parent>>
 
