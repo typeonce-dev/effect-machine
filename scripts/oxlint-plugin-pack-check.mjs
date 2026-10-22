@@ -115,6 +115,7 @@ try {
      const expected = [
        "no-async-planning-callback",
        "no-browser-api-in-planning",
+       "no-conditional-none-branch",
        "no-conflicting-invocation-identity",
        "no-nondeterministic-planning",
        "no-redundant-resolve",
