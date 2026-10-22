@@ -192,7 +192,7 @@ export const startGenericInternal: StartProcess = Effect.fnUntraced(
         Effect.andThen(options.inspectionRoot === true && inspector !== undefined ? inspector.close : Effect.void)
       )
     }
-    const cleanup = onStopSync === undefined ? onStop ?? Effect.void : Effect.sync(onStopSync)
+    const cleanup = onStopSync === undefined ? onStop ?? Effect.void : Effect.sync(() => onStopSync(ref))
     const currentCausation = inspector === undefined
       ? noCausation
       : (): Inspection.Causation | undefined => messageCausation(inFlightMessage, initializing)

@@ -1,4 +1,4 @@
-import { Effect, Schema } from "effect"
+import { Effect, Schema, Scope } from "effect"
 import { Atom } from "effect/reactivity"
 import { describe, expect, it } from "tstyche"
 import { Machine } from "../../src/index.js"
@@ -41,7 +41,7 @@ describe("Machine logical resumption", () => {
     const resumed = Machine.resume(machine, snapshot)
     type Ref = Effect.Success<typeof resumed>
     expect<Effect.Error<typeof resumed>>().type.toBe<Machine.MachineSchemaDecodeError>()
-    expect<Effect.Services<typeof resumed>>().type.toBe<never>()
+    expect<Effect.Services<typeof resumed>>().type.toBe<Scope.Scope>()
     expect<Effect.Error<Ref["join"]>>().type.toBe<
       Machine.InfiniteTransitionError | Machine.MachineSchemaDecodeError | Machine.StoppedError
     >()

@@ -648,7 +648,7 @@ class CompiledProcess implements MachineRef<any, any, any, any> {
     if (this.compiledContext !== undefined) {
       this.compiledContext.executionState = undefined
     }
-    this.options.onStopSync?.()
+    this.options.onStopSync?.(this)
     this.completion = CompiledStoppedCompletion
     this.lifecycle = "Completed"
     if (this.waiter !== undefined) {
@@ -816,7 +816,7 @@ class CompiledProcess implements MachineRef<any, any, any, any> {
               : Effect.void
           ),
           Effect.andThen(Effect.sync(() => {
-            this.options.onStopSync?.()
+            this.options.onStopSync?.(this)
             this.runState = "Idle"
             this.worker = undefined
             this.interruptRequested = false
