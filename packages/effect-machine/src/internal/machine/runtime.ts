@@ -53,41 +53,41 @@ const stopLive = (ownership: ScopeOwnership): Effect.Effect<void> =>
     return Effect.forEach(refs, (ref) => ref.stop, { discard: true })
   })
 
-const ownershipOf = (parent: Scope.Scope): Effect.Effect<ScopeOwnership> =>
-  Effect.suspend(() => {
-    const existing = ownerships.get(parent)
-    if (existing !== undefined) return Effect.succeed(existing)
-    const live = new Set<MachineRef<any, any, any, any>>()
-    const ownership: ScopeOwnership = {
-      live,
-      hooks: {
-        onReadySync: (ref) => {
-          live.add(ref)
-          return true
-        },
-        onStopSync: (ref) => {
-          live.delete(ref)
-        }
+const makeOwnership = (): ScopeOwnership => {
+  const live = new Set<MachineRef<any, any, any, any>>()
+  const ownership: ScopeOwnership = {
+    live,
+    hooks: {
+      // Declining readiness makes the runtime stop the machine itself, which
+      // covers a Scope that closed before or while the machine started.
+      onReadySync: (ref) => {
+        if (ownership.closed) return false
+        live.add(ref)
+        return true
       },
-      closed: false
-    }
-    ownerships.set(parent, ownership)
-    // A closed Scope runs the finalizer immediately, which marks the record
-    // closed so machines started afterwards stop right away.
-    return Effect.as(Scope.addFinalizer(parent, stopLive(ownership)), ownership)
-  })
+      onStopSync: (ref) => {
+        live.delete(ref)
+      }
+    },
+    closed: false
+  }
+  return ownership
+}
 
 const ownedByScope = <State, Event, Error, Output, Emitted, StartError, Requirements>(
   start: (
     hooks: OwnershipHooks
   ) => Effect.Effect<MachineRef<State, Event, Error, Output, Emitted>, StartError, Requirements>
 ): Effect.Effect<MachineRef<State, Event, Error, Output, Emitted>, StartError, Requirements | Scope.Scope> =>
-  Effect.flatMap(Effect.scope, (parent) =>
-    Effect.flatMap(ownershipOf(parent), (ownership) =>
-      Effect.flatMap(
-        start(ownership.hooks),
-        (ref) => ownership.closed ? Effect.as(ref.stop, ref) : Effect.succeed(ref)
-      )))
+  Effect.flatMap(Effect.scope, (parent) => {
+    const existing = ownerships.get(parent)
+    if (existing !== undefined) return start(existing.hooks)
+    const ownership = makeOwnership()
+    ownerships.set(parent, ownership)
+    // A closed Scope runs the finalizer immediately, which marks the record
+    // closed so the machine started next stops right away.
+    return Effect.andThen(Scope.addFinalizer(parent, stopLive(ownership)), start(ownership.hooks))
+  })
 
 const startProcessWithStrategy = Effect.fnUntraced(function*(
   logic: ProcessLogic<any, any, any, any, any, any>,
