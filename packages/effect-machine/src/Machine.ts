@@ -674,6 +674,20 @@ type StateDefinitionError<
   readonly details: Details
 }
 
+type InvocationDefinitionError<
+  Message extends string,
+  Source extends string,
+  Field extends PropertyKey
+> = {
+  readonly "~effect/Machine/InvocationDefinitionError": Message
+  readonly source: Source
+  readonly field: Field
+}
+
+type RootCompatibilityError<Message extends string> = {
+  readonly "~effect/Machine/RootCompatibilityError": Message
+}
+
 type ActiveStateKey<States extends Machine.StateSchemas> = Machine.ActiveStateKey<States>
 
 type HistoryStateKey<States extends Machine.StateSchemas> = Machine.HistoryStateKey<States>
@@ -2580,9 +2594,23 @@ export declare namespace Machine {
     infer Mode ? Mode extends ParentMode ? Parent<Mode, Events> : undefined
     : never
 
-  /** Constraint applied to APIs that create an independent root runtime. */
+  /**
+   * Constraint applied to APIs that create an independent root runtime.
+   *
+   * **Details**
+   *
+   * A machine without a parent protocol, or with an optional one, is
+   * accepted. A machine that declares a required parent can only run as an
+   * owned child, so the constraint resolves to a diagnostic that names the
+   * reason instead of an unexplained `never`.
+   *
+   * @category utility types
+   * @since 0.27.0
+   */
   export type RootCompatible<Events extends ReadonlyArray<TaggedSchema>> = ParentModeOf<Events> extends "required"
-    ? never
+    ? RootCompatibilityError<
+      "Machine declares a required parent and cannot run as a root; invoke or spawn it from an owning machine"
+    >
     : unknown
 
   /**
@@ -5292,15 +5320,30 @@ export declare namespace Machine {
     : Effect.Error<InvokeOutcomeReturn<Invoke>>
   type InvokeOutcomeServices<Invoke> = IsAny<InvokeOutcomeReturn<Invoke>> extends true ? never
     : Effect.Services<InvokeOutcomeReturn<Invoke>>
+  // Effect, Stream, and timer invocations run under a runtime-reserved child id
+  // derived from their state path and distinct lifecycle id. Only caller-chosen
+  // child ids (logic addresses and child descriptor ids) can collide.
+  type InvokeCollisionError<Invoke> = Invoke extends { readonly logic: unknown } | { readonly child: unknown }
+    ? ChildAlreadyExistsError
+    : never
   /**
    * Extracts the parent transition error contribution from invoked children.
+   *
+   * **Details**
+   *
+   * The contribution contains the startup and lifecycle-handler failures of
+   * every invocation. `ChildAlreadyExistsError` is included only for
+   * invocations whose child id is chosen by the caller, namely logic
+   * invocations with an `address` and child machine invocations, which fail to
+   * start while another child with that id is active. Effect, Stream, and timer
+   * invocations run under runtime-reserved ids and cannot collide.
    *
    * @category utility types
    * @since 0.4.0
    */
   export type InvokeError<Config> = [InvokeReturn<Config>] extends [never] ? never
     :
-      | ChildAlreadyExistsError
+      | InvokeCollisionError<InvokeReturn<Config>>
       | InvokeInitialError<InvokeReturn<Config>>
       | InvokeOutcomeError<InvokeReturn<Config>>
   /**
@@ -7414,17 +7457,49 @@ export declare namespace Machine {
       : "onElement"
       : never)
     | (SourceKind<R, K> extends "logic" | "children" ? "onSnapshot" : never)
-  type ValidateObjectInvoke<I, R> = I extends ReadonlyArray<unknown> ?
-    { readonly [K in keyof I]: ValidateObjectInvoke<I[K], R> } :
-    I extends {
-      /** Name of the source registered in make. */
-      readonly src: infer Src extends PropertyKey
-    } ? {
-        readonly [K in keyof I]: K extends AllowedInvokeChannels<R, Src> ? ValidateObjectTransition<I[K]>
-          : K extends "src" | "id" | "address" | "input" ? unknown
-          : never
-      } :
+  type UnreachableInvokeChannelMessage<Channel extends string, Src extends string> = Channel extends "onDone"
+    ? `Invocation '${Src}' never completes, so onDone is unreachable`
+    : Channel extends "onFailure" ? `Invocation '${Src}' cannot fail, so onFailure is unreachable`
+    : Channel extends "onElement" ? `Invocation '${Src}' emits no Stream elements, so onElement is unreachable`
+    : `Invocation '${Src}' has no snapshots; onSnapshot applies only to logic and child invocations`
+  type InvokeFieldError<K, Src extends string> = K extends "onDone" | "onFailure" | "onElement" | "onSnapshot"
+    ? InvocationDefinitionError<UnreachableInvokeChannelMessage<K, Src>, Src, K>
+    : K extends string ? InvocationDefinitionError<`Invocation '${Src}' does not accept the field '${K}'`, Src, K>
+    : never
+  // Explicit ids or the registered source name for programs; descriptor ids for child machines.
+  type InvokeLifecycleIdOf<I, R> = I extends { readonly id: infer Id extends string } ? Id
+    : I extends { readonly src: infer Src extends PropertyKey } ?
+      SourceValue<R, Src> extends ChildMachine<infer Id, Any> ? Id : Extract<Src, string>
+    : never
+  type LiteralInvokeIdAt<I extends ReadonlyArray<unknown>, K, R> = K extends keyof I
+    ? InvokeLifecycleIdOf<I[K], R> extends infer Id extends string ? string extends Id ? never : Id : never
+    : never
+  type DuplicateInvokeId<I extends ReadonlyArray<unknown>, K, R> = LiteralInvokeIdAt<I, K, R> extends infer Id ?
+    [Id] extends [never] ? never
+    : Id extends LiteralInvokeIdAt<I, Exclude<Extract<keyof I, `${number}`>, K>, R> ? Id
+    : never
+    : never
+  type ValidateInvokeEntry<I, R, Duplicate extends string> = I extends {
+    /** Name of the source registered in make. */
+    readonly src: infer Src extends PropertyKey
+  } ? {
+      readonly [K in keyof I]: [Duplicate] extends [never] ? ValidateInvokeField<I, K, R, Extract<Src, string>>
+        : K extends ("id" extends keyof I ? "id" : "src") ? InvocationDefinitionError<
+            `Invocation id '${Duplicate}' is declared more than once in this state`,
+            Extract<Src, string>,
+            K
+          >
+        : ValidateInvokeField<I, K, R, Extract<Src, string>>
+    } :
     never
+  type ValidateInvokeField<I, K extends keyof I, R, Src extends string> = K extends AllowedInvokeChannels<R, Src>
+    ? ValidateObjectTransition<I[K]>
+    : K extends "src" | "id" | "address" | "input" ? unknown
+    : InvokeFieldError<K, Src>
+  type ValidateObjectInvoke<I, R> = I extends ReadonlyArray<unknown> ?
+    number extends I["length"] ? { readonly [K in keyof I]: ValidateInvokeEntry<I[K], R, never> }
+    : { readonly [K in keyof I]: ValidateInvokeEntry<I[K], R, DuplicateInvokeId<I, K, R>> } :
+    ValidateInvokeEntry<I, R, never>
   type ObjectDeclarations<C> =
     | Extract<keyof C, "on" | "always" | "onDone" | "choice" | "invoke">
     | (C extends { readonly states: infer Children }

@@ -24,6 +24,7 @@ import {
   type ChildObserver,
   type ChildRegistry,
   type ChildSelector,
+  isReservedChildId,
   matchesChild,
   offerChildObservation,
   registerChild,
@@ -1138,7 +1139,7 @@ export const makeChildRuntimeSync = (
       if (registry.closed) {
         return Effect.interrupt
       }
-      if (typeof key === "string" && registry.children.has(key)) {
+      if (typeof key === "string" && (registry.children.has(key) || isReservedChildId(key))) {
         return Effect.fail(new ChildAlreadyExistsError({ id: key }))
       }
       registry.scope ??= Scope.makeUnsafe("parallel")

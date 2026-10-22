@@ -392,9 +392,16 @@ const invocations = [
 
 Include each handler demanded by the concrete program's type. Use an explicit
 `id` for simultaneous instances of one source; effect, stream, and timer IDs
-default to `src`. Logic requires a lifecycle `id` and a typed `Machine.childAddress`.
-A child uses its `Machine.child` descriptor's identity and protocol. All
-invocations are owned by their state and cancelled when it exits.
+default to `src`. Invocation IDs within one state must be distinct. Logic
+requires a lifecycle `id` and a typed `Machine.childAddress`. A child uses its
+`Machine.child` descriptor's identity and protocol. All invocations are owned by
+their state and cancelled when it exits.
+
+Effect, Stream, and timer invocations run under runtime-owned child IDs, so
+they never fail with `ChildAlreadyExistsError`. Logic addresses and child
+descriptor IDs are chosen by you: starting one while another active child uses
+the same ID fails the owning machine with `ChildAlreadyExistsError`. A parent's
+`onFailure` for an invoked child receives only the child's own typed failures.
 
 Effect services flow through the used sources and lifecycle effects into the
 machine's requirements. Unused registrations add no requirements. Supply them

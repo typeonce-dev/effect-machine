@@ -1289,7 +1289,7 @@ describe("machine planner and runtime strategies", () => {
         },
         states: {
           ParentWaiting: {
-            invoke: { src: "source1", onFailure: { none: true } },
+            invoke: { src: "source1" },
             on: {
               ChildReady: { target: "ParentDone", decoded: true, data: () => (new ParentDone({})) }
             }
