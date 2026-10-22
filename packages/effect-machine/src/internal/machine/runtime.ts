@@ -2,6 +2,8 @@
 
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
+import * as Exit from "effect/Exit"
+import * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
 import * as InspectionRuntime from "./inspectionRuntime.js"
 import { startCompactCompiledInternal, startCompiledSync } from "./runtimeCompiled.js"
@@ -28,6 +30,37 @@ const makeRuntime = makeProcessRuntime(startLogicInternal, startCompiledSync)
 
 export type ProcessRuntimeStrategy = "generic" | "compiled" | "auto"
 
+// A root machine is owned by the Scope that starts it, like `Effect.forkScoped`.
+// Each machine gets an owner scope forked from the caller's Scope: closing the
+// caller's Scope stops the machine, and termination closes the owner scope so
+// it leaves its parent again. Owned children keep their process-local
+// ownership.
+const ownedByScope = <State, Event, Error, Output, Emitted, StartError, Requirements>(
+  start: (
+    ownership: Pick<StartInternalOptions, "onStop">
+  ) => Effect.Effect<MachineRef<State, Event, Error, Output, Emitted>, StartError, Requirements>
+): Effect.Effect<MachineRef<State, Event, Error, Output, Emitted>, StartError, Requirements | Scope.Scope> =>
+  Effect.flatMap(Effect.scope, (parent) =>
+    Effect.suspend(() => {
+      const owner = Scope.forkUnsafe(parent)
+      let terminated = false
+      const onStop = Effect.suspend(() => {
+        terminated = true
+        return Scope.close(owner, Exit.void)
+      })
+      return Effect.uninterruptibleMask((restore) =>
+        restore(start({ onStop })).pipe(
+          Effect.tap((ref) =>
+            Scope.addFinalizer(
+              owner,
+              Effect.suspend(() => terminated ? Effect.void : ref.stop)
+            )
+          ),
+          Effect.onExit((exit) => Exit.isFailure(exit) ? Scope.close(owner, exit) : Effect.void)
+        )
+      )
+    }))
+
 const startProcessWithStrategy = Effect.fnUntraced(function*(
   logic: ProcessLogic<any, any, any, any, any, any>,
   strategy: ProcessRuntimeStrategy,
@@ -47,15 +80,17 @@ const startProcessWithStrategy = Effect.fnUntraced(function*(
       runtime
     }
   if (strategy === "generic") {
-    return yield* startGenericInternal(logic, internalOptions)
+    return yield* ownedByScope((ownership) => startGenericInternal(logic, { ...internalOptions, ...ownership }))
   }
   if (strategy === "compiled") {
     if (logic.execution?._tag !== "Compiled") {
       return yield* Effect.die(new Error("Machine cannot force the compiled runtime for generic process logic"))
     }
-    return yield* startCompactCompiledInternal(logic, internalOptions)
+    return yield* ownedByScope((ownership) =>
+      startCompactCompiledInternal(logic, { ...internalOptions, ...ownership })
+    )
   }
-  return yield* startLogicInternal(logic, internalOptions)
+  return yield* ownedByScope((ownership) => startLogicInternal(logic, { ...internalOptions, ...ownership }))
 })
 
 /** @internal Test-only startup strategy selection. */
@@ -75,7 +110,7 @@ export const startProcessWithStrategyForTesting = <
 ): Effect.Effect<
   MachineRef<State, Event, Error, Output>,
   InitialError,
-  Requirements
+  Requirements | Scope.Scope
 > => startProcessWithStrategy(logic, strategy, options) as any
 
 export const startProcess: <
@@ -93,7 +128,7 @@ export const startProcess: <
 ) => Effect.Effect<
   MachineRef<State, Event, Error, Output>,
   InitialError,
-  Requirements
+  Requirements | Scope.Scope
 > = Effect.fnUntraced(function*<State, Event, Error, Requirements, Output, InitialError>(
   logic: ProcessLogic<State, Event, Error, Requirements, Output, InitialError>,
   options?: {
@@ -101,18 +136,22 @@ export const startProcess: <
   }
 ) {
   const runtime = yield* makeRuntime
-  return yield* startLogicInternal(
-    logic,
-    options === undefined
-      ? {
-        detached: true,
-        runtime
-      }
-      : {
-        ...options,
-        detached: true,
-        runtime
-      }
+  return yield* ownedByScope((ownership) =>
+    startLogicInternal(
+      logic,
+      options === undefined
+        ? {
+          detached: true,
+          runtime,
+          ...ownership
+        }
+        : {
+          ...options,
+          detached: true,
+          runtime,
+          ...ownership
+        }
+    )
   )
 })
 
@@ -155,17 +194,25 @@ const prepareProcessWithStrategy = Effect.fnUntraced(function*<
       inspectionRoot: true,
       origin: { _tag: "Root" }
     }
-  const initialize = strategy === "generic"
-    ? startGenericInternal(logic, internalOptions)
-    : strategy === "compiled"
-    ? logic.execution?._tag === "Compiled"
-      ? startCompactCompiledInternal(logic, internalOptions)
-      : Effect.die(new Error("Machine cannot force the compiled runtime for generic process logic"))
-    : startLogicInternal(logic, internalOptions)
+  const initialize = (ownership: Pick<StartInternalOptions, "onStop">) => {
+    const startOptions = { ...internalOptions, ...ownership }
+    return strategy === "generic"
+      ? startGenericInternal(logic, startOptions)
+      : strategy === "compiled"
+      ? logic.execution?._tag === "Compiled"
+        ? startCompactCompiledInternal(logic, startOptions)
+        : Effect.die(new Error("Machine cannot force the compiled runtime for generic process logic"))
+      : startLogicInternal(logic, startOptions)
+  }
+  // `start` is one-shot: the Scope that first evaluates it owns the machine.
   const start = yield* Effect.cached(
-    initialize.pipe(
+    ownedByScope(initialize).pipe(
       Effect.onExit((exit) => Deferred.done(started, exit))
-    ) as Effect.Effect<MachineRef<State, Event, Error, Output, Emitted>, InitialError, Requirements>
+    ) as Effect.Effect<
+      MachineRef<State, Event, Error, Output, Emitted>,
+      InitialError,
+      Requirements | Scope.Scope
+    >
   )
   return {
     id: options?.id ?? sessionId,
@@ -193,7 +240,7 @@ export const prepareProcess: <
     readonly id?: string
   }
 ) => Effect.Effect<
-  PreparedProcess<State, Event, Error, Output, Emitted, InitialError, Requirements>
+  PreparedProcess<State, Event, Error, Output, Emitted, InitialError, Requirements | Scope.Scope>
 > =
   ((logic: ProcessLogic<any, any, any, any, any, any>, options?: { readonly id?: string }) =>
     prepareProcessWithStrategy(logic, "auto", options)) as any
@@ -214,5 +261,5 @@ export const prepareProcessWithStrategyForTesting = <
     readonly id?: string
   }
 ): Effect.Effect<
-  PreparedProcess<State, Event, Error, Output, Emitted, InitialError, Requirements>
+  PreparedProcess<State, Event, Error, Output, Emitted, InitialError, Requirements | Scope.Scope>
 > => prepareProcessWithStrategy(logic, strategy, options) as any

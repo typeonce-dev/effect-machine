@@ -511,10 +511,10 @@ export { ProbeUnavailableError } from "../internal/testing/machine/probe.js"
  *     Idle: {}
  *   }
  * })
- * const program = Effect.gen(function*() {
+ * const program = Effect.scoped(Effect.gen(function*() {
  *   const ref = yield* Machine.start(machine)
  *   return yield* MachineTest.probe(machine, ref)
- * })
+ * }))
  * ```
  *
  * @category runtime testing

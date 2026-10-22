@@ -1,5 +1,5 @@
 import { assert } from "@effect/vitest"
-import { Cause, Effect, Fiber, Stream } from "effect"
+import { Cause, Effect, Fiber, type Scope, Stream } from "effect"
 import { isDeepStrictEqual } from "node:util"
 import { Machine } from "../../../src/index.js"
 import { MachineTest } from "../../../src/testing/index.js"
@@ -63,7 +63,7 @@ const waitForBoundary = (
  */
 export const verifyManagedExecution = Effect.fn(function*(options: {
   readonly machine: Machine.Machine.Any
-  readonly open: Effect.Effect<Machine.MachineRef<any, any, any, any>, unknown, never>
+  readonly open: Effect.Effect<Machine.MachineRef<any, any, any, any>, unknown, Scope.Scope>
   readonly initial: DifferentialBoundary
   readonly steps: ReadonlyArray<DifferentialStep>
   readonly label: string

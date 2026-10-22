@@ -24,7 +24,12 @@ if (machineRuntimePath === undefined) {
   throw new Error("Effect Machine benchmark could not locate the internal runtime module")
 }
 const machineRuntime = await import(pathToFileURL(machineRuntimePath).href)
-const { Effect, Fiber, Option, Schema, Stream } = effect
+const { Effect, Fiber, Option, Schema, Scope, Stream } = effect
+
+// Benchmarks own started machines explicitly and stop them through `ref.stop`;
+// one long-lived Scope stands in for the enclosing program.
+const benchmarkScope = Scope.makeUnsafe()
+const startMachine = (machine, ...args) => Machine.start(machine, ...args).pipe(Scope.provide(benchmarkScope))
 
 const invocationLifecycleMachine = benchmarkApi.effectLifecycle?.(Effect.void, Schema.Void)
 const invocationLifecycleBenchmarks = invocationLifecycleMachine === undefined ? [] : [true, false].map((enabled) => ({
@@ -35,7 +40,7 @@ const invocationLifecycleBenchmarks = invocationLifecycleMachine === undefined ?
   expected: () => 1,
   start: () => undefined,
   run: () => Effect.runPromise(Effect.gen(function*() {
-    const ref = yield* Machine.start(invocationLifecycleMachine)
+    const ref = yield* startMachine(invocationLifecycleMachine)
     yield* ref.join
     return 1
   }).pipe(Effect.withTracerEnabled(enabled))),
@@ -327,14 +332,14 @@ const planParallelCounterBatch = (size) =>
     })
   )
 
-export const startCounter = () => Effect.runPromise(Machine.start(counterMachine))
+export const startCounter = () => Effect.runPromise(startMachine(counterMachine))
 
 export const stopCounter = (ref) => Effect.runPromise(ref.stop)
 
 export const startObservedCounter = () =>
   Effect.runPromise(
     Effect.gen(function*() {
-      const ref = yield* Machine.start(counterMachine)
+      const ref = yield* startMachine(counterMachine)
       const observer = yield* ref.changes.pipe(Stream.runDrain, Effect.forkDetach)
       yield* Effect.yieldNow
       return { ref, observer }
@@ -374,7 +379,7 @@ const waitForCounterChild = (parent) =>
 export const startChildCounter = () =>
   Effect.runPromise(
     Effect.gen(function*() {
-      const parent = yield* Machine.start(counterParentMachine)
+      const parent = yield* startMachine(counterParentMachine)
       yield* waitForCounterChild(parent)
       return parent
     })
@@ -412,13 +417,13 @@ export const runCounterBurst = (ref, size) =>
     })
   )
 
-const startHierarchicalCounter = () => Effect.runPromise(Machine.start(hierarchicalCounterMachine))
-const startParallelCounter = () => Effect.runPromise(Machine.start(parallelCounterMachine))
+const startHierarchicalCounter = () => Effect.runPromise(startMachine(hierarchicalCounterMachine))
+const startParallelCounter = () => Effect.runPromise(startMachine(parallelCounterMachine))
 
 const startObservedHierarchicalCounter = () =>
   Effect.runPromise(
     Effect.gen(function*() {
-      const ref = yield* Machine.start(hierarchicalCounterMachine)
+      const ref = yield* startMachine(hierarchicalCounterMachine)
       const observer = yield* ref.changes.pipe(Stream.runDrain, Effect.forkDetach)
       yield* Effect.yieldNow
       return { ref, observer }
@@ -464,7 +469,7 @@ export const startCounters = (count) =>
   Effect.runPromise(
     Effect.forEach(
       Array.from({ length: count }),
-      () => Machine.start(counterMachine),
+      () => startMachine(counterMachine),
       { concurrency: 1 }
     )
   )
@@ -483,7 +488,7 @@ export const startChildCounters = (count) =>
       Array.from({ length: count }),
       () =>
         Effect.gen(function*() {
-          const parent = yield* Machine.start(counterParentMachine)
+          const parent = yield* startMachine(counterParentMachine)
           yield* waitForCounterChild(parent)
           return parent
         }),
@@ -525,7 +530,7 @@ const startRawProcesses = (count) =>
   Effect.runPromise(
     Effect.forEach(
       Array.from({ length: count }),
-      () => machineRuntime.startProcess(rawProcessLogic),
+      () => machineRuntime.startProcess(rawProcessLogic).pipe(Scope.provide(benchmarkScope)),
       { concurrency: 1 }
     )
   )
@@ -534,7 +539,10 @@ const startCompiledRawProcesses = (count) =>
   Effect.runPromise(
     Effect.forEach(
       Array.from({ length: count }),
-      () => machineRuntime.startProcessWithStrategyForTesting(rawCompiledProcessLogic, "compiled"),
+      () =>
+        machineRuntime.startProcessWithStrategyForTesting(rawCompiledProcessLogic, "compiled").pipe(
+          Scope.provide(benchmarkScope)
+        ),
       { concurrency: 1 }
     )
   )
@@ -543,7 +551,7 @@ const startIndependentCounterPairs = (count) =>
   Effect.runPromise(
     Effect.forEach(
       Array.from({ length: count }),
-      () => Effect.all([Machine.start(counterMachine), Machine.start(counterMachine)], { concurrency: 1 }),
+      () => Effect.all([startMachine(counterMachine), startMachine(counterMachine)], { concurrency: 1 }),
       { concurrency: 1 }
     )
   )
@@ -556,7 +564,7 @@ const startObservedChildCounters = (count) =>
       Array.from({ length: count }),
       () =>
         Effect.gen(function*() {
-          const parent = yield* Machine.start(counterParentMachine)
+          const parent = yield* startMachine(counterParentMachine)
           yield* waitForCounterChild(parent)
           const observer = yield* parent.childChanges(CounterChild).pipe(
             Stream.runDrain,
@@ -575,7 +583,7 @@ const startSnapshotObservedChildCounters = (count) =>
       Array.from({ length: count }),
       () =>
         Effect.gen(function*() {
-          const parent = yield* Machine.start(counterSnapshotParentMachine)
+          const parent = yield* startMachine(counterSnapshotParentMachine)
           yield* waitForCounterChild(parent)
           return parent
         }),

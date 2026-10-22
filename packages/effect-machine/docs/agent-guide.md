@@ -81,13 +81,16 @@ through the exported descriptor:
 ```ts
 import { Effect } from "effect"
 
-const program = Effect.gen(function*() {
+const program = Effect.scoped(Effect.gen(function*() {
   const counter = yield* Machine.start(CounterMachine)
 
   yield* counter.send(CounterEvents.Start())
   yield* counter.send(CounterEvents.Increment())
-})
+}))
 ```
+
+`Machine.start` requires a `Scope`. Closing it stops the machine and everything
+it owns; use `ref.stop` to stop earlier.
 
 ## Make impossible states unrepresentable
 

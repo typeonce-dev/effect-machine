@@ -1997,7 +1997,8 @@ export type RuntimeOutcome<State, Error = never, Output = never> =
  *
  * Subscribe to `emissions` before evaluating `start` when initial-entry
  * emissions must be observed. `start` is one-shot: concurrent and repeated
- * evaluations share the same initialization and running reference.
+ * evaluations share the same initialization and running reference, and the
+ * `Scope` of the first evaluation owns the machine.
  *
  * @category models
  * @since 0.11.0
@@ -2023,7 +2024,7 @@ export interface Prepared<out State, in Event, out Error, out Output, out Emitte
    */
   readonly inspection: Stream.Stream<Inspection.Event>
 
-  /** Initializes this machine once and returns its running reference. */
+  /** Initializes this machine once, owned by the first evaluating `Scope`, and returns its running reference. */
   readonly start: Effect.Effect<MachineRef<State, Event, Error, Output, Emitted>, StartError, StartRequirements>
 }
 
@@ -9203,6 +9204,9 @@ export const waitFor: {
  * `prepared.start`. Ordinary callers can continue to use {@link start}, which
  * starts directly and does not allocate the prepared lifecycle boundary.
  *
+ * `prepared.start` is one-shot and scoped: the `Scope` that first evaluates it
+ * owns the machine, and closing that `Scope` is equivalent to `ref.stop`.
+ *
  * ```ts
  * const prepared = yield* Machine.prepare(machine)
  *
@@ -9271,7 +9275,8 @@ export const prepare: <
     | MachineSchemaDecodeError
     | StartupError
     | StoppedError,
-    ExcludeCompatibleRuntime<
+    | Scope.Scope
+    | ExcludeCompatibleRuntime<
       ExecutionServices<InitialR | R>,
       Machine.EventOf<Events>,
       Machine.EmittedEventOf<Emits>
@@ -9280,7 +9285,7 @@ export const prepare: <
 > = internal.prepare
 
 /**
- * Starts a machine.
+ * Starts a machine owned by the current `Scope`.
  *
  * **When to use**
  *
@@ -9293,6 +9298,13 @@ export const prepare: <
  * macrostep, executes closed machine commands, stops invokes for exited states,
  * publishes the new state, delivers emitted events, and then starts invokes
  * for entered states.
+ *
+ * The machine is a scoped resource, like `Effect.forkScoped`. Closing the
+ * `Scope` is equivalent to `ref.stop`: active invocations are interrupted,
+ * owned children stop, the snapshot becomes `stopped`, and later sends fail
+ * with `StoppedError`. An earlier `ref.stop` or terminal completion leaves the
+ * finalizer with nothing to do. Own a `Scope` explicitly, for example with
+ * `Scope.make` and `Scope.provide`, when the machine must outlive the caller.
  *
  * **Gotchas**
  *
@@ -9320,10 +9332,10 @@ export const prepare: <
  *     Idle: {}
  *   }
  * })
- * const state = Effect.gen(function*() {
+ * const state = Effect.scoped(Effect.gen(function*() {
  *   const ref = yield* Machine.start(machine)
  *   return yield* ref.state
- * })
+ * }))
  * ```
  *
  * @see {@link plan} for inspecting the same transition plan without executing it.
@@ -9386,7 +9398,8 @@ export const start: <
   | MachineSchemaDecodeError
   | StartupError
   | StoppedError,
-  ExcludeCompatibleRuntime<
+  | Scope.Scope
+  | ExcludeCompatibleRuntime<
     ExecutionServices<InitialR | R>,
     Machine.EventOf<Events>,
     Machine.EmittedEventOf<Emits>
@@ -9394,9 +9407,13 @@ export const start: <
 > = internal.start
 
 /**
- * Starts a fresh managed runtime from a decoded logical snapshot.
+ * Starts a fresh managed runtime from a decoded logical snapshot, owned by the
+ * current `Scope`.
  *
  * **Details**
+ *
+ * The resumed machine has the same scoped lifetime as {@link start}: closing
+ * the `Scope` is equivalent to `ref.stop`.
  *
  * `resume` validates and normalizes the supplied snapshot before publishing it
  * as the first state. It does not call the machine's initial function, replay
@@ -9436,12 +9453,12 @@ export const start: <
  *     Idle: {}
  *   }
  * })
- * const resumed = Effect.gen(function*() {
+ * const resumed = Effect.scoped(Effect.gen(function*() {
  *   const initial = yield* Machine.planInitial(machine)
  *   const encoded = yield* Machine.encodeSnapshot(machine, initial.state)
  *   const snapshot = yield* Machine.decodeSnapshot(machine, encoded)
  *   return yield* Machine.resume(machine, snapshot)
- * })
+ * }))
  * ```
  *
  * @see {@link decodeSnapshot} for the schema and transport boundary.
@@ -9498,7 +9515,8 @@ export const resume: <
     Machine.EmittedEventOf<Emits>
   >,
   MachineSchemaDecodeError,
-  ExcludeCompatibleRuntime<
+  | Scope.Scope
+  | ExcludeCompatibleRuntime<
     ExecutionServices<R>,
     Machine.EventOf<Events>,
     Machine.EmittedEventOf<Emits>
