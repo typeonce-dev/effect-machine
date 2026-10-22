@@ -5,9 +5,7 @@ import { Option } from "effect"
 import * as React from "react"
 import type { MachineContext, MachineStateProps } from "../MachineAtom.js"
 
-type AnyMachineAtom = AtomMachine.MachineAtom<any, never, any, any, any, any>
-
-export const useMachineAtom = <A extends AnyMachineAtom>(create: () => A): A => {
+export const useMachineAtom = <A extends AtomMachine.MachineAtom.Any>(create: () => A): A => {
   const [machine] = React.useState(create)
   useAtomMount(machine.ref)
   return machine
@@ -32,7 +30,7 @@ export const MachineState = <
   return Option.isSome(snapshot) ? props.children(snapshot.value) : props.inactive ?? null
 }
 
-export const createMachineContext = <Args extends [] | [unknown], A extends AnyMachineAtom>(
+export const createMachineContext = <Args extends [] | [unknown], A extends AtomMachine.MachineAtom.Any>(
   create: (...args: Args) => A
 ): MachineContext<Args, A> => {
   const Context = React.createContext<A | undefined>(undefined)
