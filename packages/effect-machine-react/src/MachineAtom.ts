@@ -10,8 +10,6 @@ import type { AtomMachine } from "@typeonce/effect-machine/reactivity"
 import type * as React from "react"
 import * as internal from "./internal/react.js"
 
-type AnyMachineAtom = AtomMachine.MachineAtom<any, never, any, any, any, any>
-
 /**
  * Creates one bridge per React owner and mounts its reference without subscribing
  * the owner to state changes. The factory is startup-only. Change the owner's
@@ -21,7 +19,7 @@ type AnyMachineAtom = AtomMachine.MachineAtom<any, never, any, any, any, any>
  * @category hooks
  * @since 0.29.0
  */
-export const useMachineAtom: <A extends AnyMachineAtom>(create: () => A) => A = internal.useMachineAtom
+export const useMachineAtom: <A extends AtomMachine.MachineAtom.Any>(create: () => A) => A = internal.useMachineAtom
 
 /** Props for a typed render of one active state path.
  * @category models
@@ -66,7 +64,7 @@ export const MachineState: <
  * @category models
  * @since 0.32.0
  */
-export interface MachineContext<Args extends [] | [unknown], A extends AnyMachineAtom> {
+export interface MachineContext<Args extends [] | [unknown], A extends AtomMachine.MachineAtom.Any> {
   readonly Provider: React.ComponentType<
     & { readonly children?: React.ReactNode }
     & (Args extends [] ? { readonly input?: never } : { readonly input: Args[0] })
@@ -82,6 +80,6 @@ export interface MachineContext<Args extends [] | [unknown], A extends AnyMachin
  * @category constructors
  * @since 0.32.0
  */
-export const createMachineContext: <Args extends [] | [unknown], A extends AnyMachineAtom>(
+export const createMachineContext: <Args extends [] | [unknown], A extends AtomMachine.MachineAtom.Any>(
   create: (...args: Args) => A
 ) => MachineContext<Args, A> = internal.createMachineContext

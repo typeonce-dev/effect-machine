@@ -159,6 +159,14 @@ function SubmitButton() {
 `useAtomSet` mounts the writable atom and does not subscribe the component to
 its value.
 
+Writes made while the machine is still starting, for example while a bound
+`Atom.runtime` layer is building after hydration, are held and delivered in
+write order once the machine is ready. The write result stays waiting until
+the event is delivered and fails with the startup error if startup fails.
+Writes after the machine stopped or completed fail with `StoppedError`. The
+same applies to `stop` and to child `send` and `stop`; a child command fails
+with `ChildNotActiveError` when the state that owns the child is not active.
+
 ## Query concrete event acceptance
 
 `AtomMachine.can` turns one concrete event input into a reusable machine
@@ -326,6 +334,27 @@ export const plantAtoms = AtomMachine.familyChild(CentralMachineAtom, {
     send: (plant) => plant.send
   }
 })
+```
+
+## Generic helpers
+
+Use `AtomMachine.MachineAtom.Any` and `AtomMachine.ChildMachineAtom.Any` to
+accept any bridge, including bridges for machines without events. Recover the
+exact types with the namespace extractors:
+
+```ts
+function StateView<A extends AtomMachine.MachineAtom.Any>(props: {
+  readonly machine: A
+  readonly render: (state: AtomMachine.MachineAtom.State<A>) => React.ReactNode
+}) {
+  const state = useAtomSuspense(props.machine.result).value
+  return props.render(state)
+}
+
+type AuthEvent = AtomMachine.MachineAtom.Event<typeof AuthMachineAtom>
+type EditorState = AtomMachine.ChildMachineAtom.State<
+  AtomMachine.ChildOf<typeof AuthMachineAtom, typeof Editor>
+>
 ```
 
 ## Registry and rendering semantics
