@@ -117,6 +117,14 @@ const waitForCollection = async (ref: WeakRef<object>) => {
   return false
 }
 describe("AtomMachine", () => {
+  it("distinguishes machine bridges from child bridges", () => {
+    const Child = Machine.child("counter", makeCounterMachine())
+    const bridge = AtomMachine.make(makeCounterMachine())
+    assert.isTrue(AtomMachine.isMachineAtom(bridge))
+    assert.isFalse(AtomMachine.isMachineAtom(bridge.child(Child)))
+    assert.isFalse(AtomMachine.isMachineAtom({ ...bridge }))
+    assert.isFalse(AtomMachine.isMachineAtom(null))
+  })
   it.effect("observes prepared live inspection before atom startup", () =>
     Effect.scoped(Effect.gen(function*() {
       const registry = yield* makeRegistry

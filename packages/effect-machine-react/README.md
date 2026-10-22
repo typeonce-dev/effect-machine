@@ -42,13 +42,42 @@ renders `pending`; inactive paths render `inactive` (both null by default).
 Failures propagate to the nearest error boundary. Keep the owner above any
 Suspense boundary used by custom `useAtomSuspense` readers.
 
+`MachineState` also accepts a child bridge. Its paths and snapshot are the
+child's, and `inactive` also renders while the state that owns the child is not
+active:
+
+```tsx
+<MachineState machine={machine.child(QuantityChild)} path="" inactive={null}>
+  {(snapshot) => <NumberField value={snapshot.value.quantity} />}
+</MachineState>
+```
+
 Input is startup-only. Send an event to update a running workflow, or change the
 Provider's React `key` to start a new one. Machines without input have a Provider
 without an `input` prop.
 
+Per-owner capabilities, such as a router-bound navigation service, are layers,
+never input. Declare a second, `Layer`-typed factory parameter, and the Provider
+requires a `layer` prop of that type. Like input, the layer is read once when
+the Provider mounts:
+
+```tsx
+const SignIn = createMachineContext(
+  (input: SignInInput, navigation: Layer.Layer<Navigation>) =>
+    AtomMachine.bind(Atom.runtime(Layer.provideMerge(navigation, AppLayer)))
+      .make(SignInMachine, input)
+)
+
+<SignIn.Provider input={input} layer={navigationLayer(useRouter())}>
+  <SignInForm />
+</SignIn.Provider>
+```
+
 `useMachineAtom(() => makeMachine(input))` remains available for custom owners.
 Use `AtomMachine.select`, `selectSnapshot`, and `matches` for custom granular
-subscriptions. Derive narrower projections with `Atom.family`, `Atom.mapResult`,
+subscriptions, and read them with `useMachineResult(atom)`: like `MachineState`,
+it serves the planned value during hydration and keeps the last success while
+the machine starts, where `useAtomValue` would return `Initial` again. Derive narrower projections with `Atom.family`, `Atom.mapResult`,
 and `Atom.withEquality` rather than hook options. Read `.result` for the whole logical snapshot or `.snapshot` for
 runtime status; the bridge has no separate `.state` projection.
 

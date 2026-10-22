@@ -72,6 +72,9 @@ const preparedByMachineAtom = new WeakMap<
 
 const machineByMachineAtom = new WeakMap<object, Machine.Machine.Any>()
 
+export const isMachineAtom = (u: unknown): u is MachineAtom<any, never, any, any, any, any> =>
+  typeof u === "object" && u !== null && machineByMachineAtom.has(u)
+
 type WeakFamilyEntry<Value extends object> = {
   readonly ref: WeakRef<Value>
 }
