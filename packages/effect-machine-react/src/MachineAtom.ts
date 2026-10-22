@@ -36,14 +36,21 @@ export interface MachineStateProps<
 > {
   readonly machine: AtomMachine.MachineAtom<State, Event, Error, Output, StartError, Emitted>
   readonly path: Path
+  /** Rendered while the machine has no snapshot yet. Defaults to null. */
+  readonly pending?: React.ReactNode
+  /** Rendered while the path is not active. Defaults to null. */
   readonly inactive?: React.ReactNode
   readonly children: (state: Machine.Snapshot.At<State, NoInfer<Path>>) => React.ReactNode
 }
 
 /**
- * Subscribes only this renderer to a state path. Startup suspends and failures
- * propagate to the nearest error boundary. Inactive child states render
- * `inactive`, which defaults to null.
+ * Subscribes only this renderer to a state path without suspending. Server
+ * rendering and hydration render the machine's planned startup snapshot, and
+ * the same tree then receives live snapshots, so form inputs keep their DOM
+ * nodes, text and focus. Once a snapshot has rendered, the renderer keeps it
+ * while the machine is still starting. Before any snapshot exists it renders
+ * `pending`; an inactive path renders `inactive`. Both default to null.
+ * Startup and runtime failures propagate to the nearest error boundary.
  *
  * @category components
  * @since 0.32.0

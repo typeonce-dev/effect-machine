@@ -53,18 +53,18 @@ export const useAuthMachine = Auth.useMachine
 function AuthRoute({ input, attemptId }: Props) {
   return (
     <Auth.Provider key={attemptId} input={input}>
-      <Suspense fallback={<Loading />}>
-        <AuthCard />
-      </Suspense>
+      <AuthCard />
     </Auth.Provider>
   )
 }
 ```
 
 Input is startup-only. Send events to update the existing workflow; change the
-Provider's React key to create a new one. Keep the Provider above Suspense so
-suspension does not discard the owner. Supply an Atom RegistryProvider at the
-application boundary. The same factory used by two Providers creates isolated
+Provider's React key to create a new one. `MachineState` does not suspend, so
+the first paint needs no Suspense boundary. Custom readers that use
+`useAtomSuspense` still suspend during startup; keep the Provider above their
+Suspense boundary so suspension does not discard the owner. Supply an Atom
+RegistryProvider at the application boundary. The same factory used by two Providers creates isolated
 machines, even when their inputs are equal.
 
 `useMachineAtom(() => makeMachine(input))` remains available for custom owners.
@@ -88,8 +88,11 @@ function EditingFields() {
 ```
 
 `MachineState` subscribes only its renderer. The path determines the callback's
-snapshot type. Startup suspends, failures reach the nearest error boundary,
-and an inactive path renders `inactive` (null by default).
+snapshot type. It does not suspend: until the machine has a snapshot it renders
+`pending`, and an inactive path renders `inactive` (both null by default).
+Startup and runtime failures reach the nearest error boundary. Once a snapshot
+has rendered, the renderer keeps it while the machine is still starting, for
+example while a bound runtime layer builds after hydration.
 
 For custom hooks, `useAtomSuspense(AtomMachine.selectSnapshot(machine, path)).value`
 returns an Option of the selected snapshot.
@@ -366,6 +369,44 @@ after its final subscription and configured idle retention expire.
 `registry.dispose()` stops it immediately.
 
 `useMachineAtom` does not start a machine during server rendering because
-React effects do not run on the server. Reading a machine atom during server
-render follows `@effect/atom-react` server-read behavior, so choose an explicit
-client boundary when server startup would be undesirable.
+React effects do not run on the server. Server reads never start a machine
+either. Every bridge atom carries an Effect Atom server value, which
+`@effect/atom-react` hooks read during server rendering and hydration, and
+`Atom.getServerValue` reads directly:
+
+| Atom                                                  | Server value                                                                                                  |
+| ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| `ref`, `send`, `stop`                                 | `Initial`                                                                                                     |
+| `snapshot`                                            | `Success({ status: "active", state })`, waiting                                                               |
+| `result`                                              | `Success(state)`, waiting                                                                                     |
+| `select`, `selectSnapshot`, `matches`, `can`          | the projection of `state`, waiting                                                                            |
+| `child(Child).result` and child projections           | `Success(Option.some(childState))` when the planned state invokes `Child`, otherwise `Success(Option.none())` |
+| `family` and `familyChild` projections                | the server value of the projected bridge atom                                                                 |
+
+`state` is the machine's planned startup state: the state `Machine.planInitial`
+settles into with the bridge's input, without running startup commands,
+invocations, or services. A resumed bridge uses its resumed snapshot. Children
+spawned at runtime or through child families are `Option.none()`. When the
+startup state cannot be planned synchronously, for example because the input
+is invalid, every server value is `Initial`. Each bridge plans at most once,
+on its first server read.
+
+## Server rendering and hydration
+
+Render state slots with `MachineState` and no Suspense boundary:
+
+```tsx
+<Onboarding.Provider input={input}>
+  <MachineState machine={Onboarding.useMachine()} path="Editing">
+    {(editing) => <input value={editing.value.email} onChange={onChange} />}
+  </MachineState>
+</Onboarding.Provider>
+```
+
+The server renders the planned `Editing` snapshot. Hydration renders the same
+markup, then the Provider mounts the machine and the same component tree
+receives live snapshots. The input keeps its DOM node, typed text, and focus.
+
+Do not wrap hydrated forms in a Suspense boundary that a startup read can
+trigger. A suspended boundary replaces its server-rendered content with the
+fallback and later mounts new DOM nodes, discarding typed text and focus.

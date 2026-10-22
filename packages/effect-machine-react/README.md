@@ -6,7 +6,6 @@ React ownership and typed state rendering for
 ```tsx
 import { createMachineContext, MachineState } from "@typeonce/effect-machine-react"
 import { AtomMachine } from "@typeonce/effect-machine/reactivity"
-import { Suspense } from "react"
 import { AuthMachine } from "./auth-machine"
 
 const Auth = createMachineContext(AtomMachine.factory(AuthMachine))
@@ -14,9 +13,7 @@ const Auth = createMachineContext(AtomMachine.factory(AuthMachine))
 function AuthRoute({ input }: Props) {
   return (
     <Auth.Provider input={input}>
-      <Suspense fallback={<Loading />}>
-        <AuthForm />
-      </Suspense>
+      <AuthForm />
     </Auth.Provider>
   )
 }
@@ -37,9 +34,13 @@ including when two Providers receive equal inputs. Supply an Atom
 `AtomMachine.runtime(...)` before creating a factory when the machine needs them.
 
 The Provider owns the reference without subscribing to state changes.
-`MachineState` subscribes to its typed path and infers the callback snapshot.
-Inactive paths render `inactive` (null by default); startup suspends and failures
-propagate to the nearest error boundary. Keep the owner above Suspense.
+`MachineState` subscribes to its typed path and infers the callback snapshot
+without suspending. Server rendering and hydration render the machine's planned
+startup snapshot, and the same tree then receives live snapshots, so hydrated
+form inputs keep their DOM nodes, text, and focus. Before any snapshot exists it
+renders `pending`; inactive paths render `inactive` (both null by default).
+Failures propagate to the nearest error boundary. Keep the owner above any
+Suspense boundary used by custom `useAtomSuspense` readers.
 
 Input is startup-only. Send an event to update a running workflow, or change the
 Provider's React `key` to start a new one. Machines without input have a Provider

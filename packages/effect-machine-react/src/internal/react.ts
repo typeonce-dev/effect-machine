@@ -1,7 +1,9 @@
-import { useAtomMount, useAtomSuspense } from "@effect/atom-react"
+import { RegistryContext, useAtomMount } from "@effect/atom-react"
 import type { Machine } from "@typeonce/effect-machine"
 import { AtomMachine } from "@typeonce/effect-machine/reactivity"
-import { Option } from "effect"
+import { Cause, Option } from "effect"
+import { AsyncResult, Atom } from "effect/reactivity"
+import type { AtomRegistry } from "effect/reactivity"
 import * as React from "react"
 import type { MachineContext, MachineStateProps } from "../MachineAtom.js"
 
@@ -26,8 +28,39 @@ export const MachineState = <
     props.machine,
     props.path
   ])
-  const snapshot = useAtomSuspense(selected).value
-  return Option.isSome(snapshot) ? props.children(snapshot.value) : props.inactive ?? null
+  const result = useRetainedResult(React.useContext(RegistryContext), selected)
+  if (AsyncResult.isFailure(result)) throw Cause.squash(result.cause)
+  if (AsyncResult.isInitial(result)) return props.pending ?? null
+  return Option.isSome(result.value) ? props.children(result.value.value) : props.inactive ?? null
+}
+
+/**
+ * Reads a result atom through `useSyncExternalStore`, so server renders and
+ * hydration use the atom's server value. Once a renderer has a successful
+ * result, it keeps that result while the atom is `Initial` again, for example
+ * while the live machine starts after hydrating its planned snapshot. The
+ * rendered tree, and every DOM node in it, survives that switch.
+ */
+const useRetainedResult = <A, E>(
+  registry: AtomRegistry.AtomRegistry,
+  atom: Atom.Atom<AsyncResult.AsyncResult<A, E>>
+): AsyncResult.AsyncResult<A, E> => {
+  const store = React.useMemo(() => {
+    let retained: AsyncResult.Success<A, E> | undefined
+    const retain = (result: AsyncResult.AsyncResult<A, E>): AsyncResult.AsyncResult<A, E> => {
+      if (AsyncResult.isSuccess(result)) {
+        retained = result
+        return result
+      }
+      return AsyncResult.isInitial(result) && retained !== undefined ? retained : result
+    }
+    return {
+      subscribe: (onChange: () => void) => registry.subscribe(atom, onChange),
+      snapshot: () => retain(registry.get(atom)),
+      serverSnapshot: () => retain(Atom.getServerValue(atom, registry))
+    }
+  }, [registry, atom])
+  return React.useSyncExternalStore(store.subscribe, store.snapshot, store.serverSnapshot)
 }
 
 export const createMachineContext = <Args extends [] | [unknown], A extends AtomMachine.MachineAtom.Any>(
