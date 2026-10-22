@@ -192,11 +192,6 @@ export const parentProtocolMachine = Machine.make({
           target: "Complete",
           decoded: true,
           data: ({ output }) => (new ParentComplete({ result: output }))
-        },
-        onFailure: {
-          target: "Failed",
-          decoded: true,
-          data: ({ error }) => (new ParentFailed({ message: String(error) }))
         }
       },
       on: {

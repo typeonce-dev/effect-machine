@@ -632,6 +632,7 @@ const captureInvokeDefinition = (
     }
     return InvocationDefinition.capture(captured, path)
   })
+  InvocationDefinition.assertDistinctIds(capturedDefinitions, path)
   if (Array.isArray(invoke)) return Object.freeze(capturedDefinitions)
   return capturedDefinitions[0]
 }

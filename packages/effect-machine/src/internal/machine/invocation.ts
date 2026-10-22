@@ -8,8 +8,9 @@ import * as Cause from "effect/Cause"
 import * as Effect from "effect/Effect"
 import * as Stream from "effect/Stream"
 import type { ChildMachine, ChildOwner, Inspection, Logic, Machine } from "../../Machine.js"
+import * as ChildRegistry from "./childRegistry.js"
 import * as Configuration from "./configuration.js"
-import { InfiniteTransitionError, MachineSchemaDecodeError, StoppedError } from "./errors.js"
+import { ChildAlreadyExistsError, InfiniteTransitionError, MachineSchemaDecodeError, StoppedError } from "./errors.js"
 import * as InvocationDefinition from "./invocationDefinition.js"
 import * as InvocationEvent from "./invocationEvent.js"
 import * as Planner from "./planner.js"
@@ -33,7 +34,8 @@ export interface AnyConfig {
 export const makeKey = (path: string, id: string): string => `${path.length}:${path}${id}`
 
 /** @internal */
-export const makeChildId = (path: string, id: string): string => `Machine.invocation:${makeKey(path, id)}`
+export const makeChildId = (path: string, id: string): string =>
+  `${ChildRegistry.invocationChildIdPrefix}${makeKey(path, id)}`
 
 const oneShot = (effect: Effect.Effect<any, any, any>): Logic<void, never, any, any, any> => ({
   initial: () => Effect.void,
@@ -200,6 +202,11 @@ const startResolved = (
   sourceName?: string
 ): Effect.Effect<void, any, any> =>
   Effect.suspend(() => {
+    // Logic addresses and child descriptor ids are caller-chosen. Keep them out
+    // of the namespace reserved for runtime-owned invocation ids.
+    if (ChildRegistry.isReservedChildId(childId) && childId !== makeChildId(path, invokeId)) {
+      return Effect.fail(new ChildAlreadyExistsError({ id: invokeId }))
+    }
     const key = makeKey(path, invokeId)
     // Source construction keeps its startup failure boundary. Only the hosted
     // program is wrapped; child statecharts retain their execution descriptors.

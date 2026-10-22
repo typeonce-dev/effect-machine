@@ -6106,81 +6106,80 @@ describe("Machine", () => {
       })
       yield* Effect.all([first.stop, second.stop], { concurrency: "unbounded" })
     }))
-  it.effect("child invocation rejects duplicate active child addresses", () =>
-    Effect.gen(function*() {
-      const childStates = Machine.state({ states: { Idle } })
-      const child = Machine.make({
-        root: childStates,
-        events: Machine.eventsFromSchemas()
-      }).handle({
-        initial: {
-          target: "Idle",
-          decoded: true,
-          data: new Idle({ userId: "child" })
-        },
-        states: {
-          Idle: {}
-        }
-      })
-      const Child = Machine.child("child-machine", child)
-      const parentStates = Machine.state({ states: { Loading } })
-      const parent = Machine.make({
-        children: { source1: Child, source2: Child },
-        root: parentStates,
-        events: Machine.eventsFromSchemas()
-      }).handle({
-        initial: {
-          target: "Loading",
-          decoded: true,
-          data: new Loading({ requestId: "request-1" })
-        },
-        states: {
-          Loading: {
-            invoke: [{ src: "source1" }, { src: "source2" }]
-          }
-        }
-      })
-      const actor = yield* Machine.start(parent)
-      const error = yield* Effect.flip(actor.join)
-      assert.instanceOf(error, Machine.ChildAlreadyExistsError)
-    }))
-  it.effect("invokes reject duplicate lifecycle ids even when addresses differ", () =>
-    Effect.gen(function*() {
-      const First = Machine.childAddress("first")
-      const Second = Machine.childAddress("second")
-      let sourceEvaluations = 0
-      const source = (_input: undefined) => {
-        sourceEvaluations += 1
-        return Machine.logic({ initial: undefined, run: () => Effect.never })
+  it("child invocations in one state reject a shared child descriptor id", () => {
+    const childStates = Machine.state({ states: { Idle } })
+    const child = Machine.make({
+      root: childStates,
+      events: Machine.eventsFromSchemas()
+    }).handle({
+      initial: {
+        target: "Idle",
+        decoded: true,
+        data: new Idle({ userId: "child" })
+      },
+      states: {
+        Idle: {}
       }
-      const parentStates = Machine.state({ states: { Loading } })
-      const parent = Machine.make({
-        logic: { source1: source, source2: source },
-        root: parentStates,
-        events: Machine.eventsFromSchemas()
-      }).handle({
-        initial: {
-          target: "Loading",
-          decoded: true,
-          data: new Loading({ requestId: "request-1" })
-        },
-        states: {
-          Loading: {
-            invoke: [{ src: "source1", id: "worker", address: First, input: () => undefined }, {
-              src: "source2",
-              id: "worker",
-              address: Second,
-              input: () => undefined
-            }]
+    })
+    const Child = Machine.child("child-machine", child)
+    const parentStates = Machine.state({ states: { Loading } })
+    assert.throws(
+      () =>
+        Machine.make({
+          children: { source1: Child, source2: Child },
+          root: parentStates,
+          events: Machine.eventsFromSchemas()
+        }).handle({
+          initial: {
+            target: "Loading",
+            decoded: true,
+            data: new Loading({ requestId: "request-1" })
+          },
+          states: {
+            Loading: {
+              invoke: [{ src: "source1" }, { src: "source2" }] as any
+            }
           }
-        }
-      })
-      const actor = yield* Machine.start(parent)
-      const error = yield* Effect.flip(actor.join)
-      assert.instanceOf(error, Machine.ChildAlreadyExistsError)
-      assert.strictEqual(error.id, "worker")
-      assert.strictEqual(sourceEvaluations, 1)
-    }))
+        }),
+      /distinct ids; "child-machine" is declared twice/
+    )
+  })
+  it("invokes reject duplicate lifecycle ids even when addresses differ", () => {
+    const First = Machine.childAddress("first")
+    const Second = Machine.childAddress("second")
+    let sourceEvaluations = 0
+    const source = (_input: undefined) => {
+      sourceEvaluations += 1
+      return Machine.logic({ initial: undefined, run: () => Effect.never })
+    }
+    const parentStates = Machine.state({ states: { Loading } })
+    assert.throws(
+      () =>
+        Machine.make({
+          logic: { source1: source, source2: source },
+          root: parentStates,
+          events: Machine.eventsFromSchemas()
+        }).handle({
+          initial: {
+            target: "Loading",
+            decoded: true,
+            data: new Loading({ requestId: "request-1" })
+          },
+          states: {
+            Loading: {
+              invoke: [{ src: "source1", id: "worker", address: First, input: () => undefined }, {
+                src: "source2",
+                id: "worker",
+                address: Second,
+                input: () => undefined
+              }] as any
+            }
+          }
+        }),
+      /distinct ids; "worker" is declared twice/
+    )
+    assert.strictEqual(sourceEvaluations, 0)
+  })
   it.effect("start maps invoked child failures to machine events", () =>
     Effect.gen(function*() {
       const error = new InvokeError({ message: "boom" })

@@ -44,6 +44,25 @@ export const capture = (config: Record<PropertyKey, unknown>, path: string): Inv
   return Object.freeze(config) as unknown as InvocationDefinition
 }
 
+/** Lifecycle id that routes an invocation's outcomes within its owning state. */
+export const lifecycleId = (definition: InvocationDefinition): string =>
+  "child" in definition ? definition.child.id : definition.id
+
+/**
+ * Rejects one state's invocations when two share a lifecycle id. Distinct ids
+ * keep runtime-owned invocation child ids collision-free.
+ */
+export const assertDistinctIds = (definitions: ReadonlyArray<InvocationDefinition>, path: string): void => {
+  const seen = new Set<string>()
+  for (const definition of definitions) {
+    const id = lifecycleId(definition)
+    if (seen.has(id)) {
+      throw new Error(`Machine invocations for state "${path}" must have distinct ids; "${id}" is declared twice`)
+    }
+    seen.add(id)
+  }
+}
+
 /** Only captured state handlers cross this erased boundary. */
 export const definitions = (invoke: unknown): ReadonlyArray<InvocationDefinition> =>
   invoke === undefined
