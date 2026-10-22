@@ -86,9 +86,7 @@ const startProcessWithStrategy = Effect.fnUntraced(function*(
     if (logic.execution?._tag !== "Compiled") {
       return yield* Effect.die(new Error("Machine cannot force the compiled runtime for generic process logic"))
     }
-    return yield* ownedByScope((ownership) =>
-      startCompactCompiledInternal(logic, { ...internalOptions, ...ownership })
-    )
+    return yield* ownedByScope((ownership) => startCompactCompiledInternal(logic, { ...internalOptions, ...ownership }))
   }
   return yield* ownedByScope((ownership) => startLogicInternal(logic, { ...internalOptions, ...ownership }))
 })

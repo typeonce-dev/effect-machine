@@ -14,6 +14,8 @@ const program = Effect.scoped(Effect.gen(function*() {
   yield* ref.send(Events.Go())
 }))
 
-const scope = yield* Scope.make()
-const detached = yield* Machine.start(machine).pipe(Scope.provide(scope))
+const detached = Effect.gen(function*() {
+  const scope = yield* Scope.make()
+  return yield* Machine.start(machine).pipe(Scope.provide(scope))
+})
 ```
