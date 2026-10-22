@@ -644,4 +644,42 @@ describe("AtomMachine", () => {
     expect(bound.make).type.toBeCallableWith(complete)
     expect(bound.factory).type.toBeCallableWith(complete)
   })
+  it("exposes generic helper types for machine and child bridges", () => {
+    const machine = makeMachine()
+    const bridge = AtomMachine.make(machine)
+    const eventless = AtomMachine.make(
+      Machine.make({ root: States, events: Machine.events({}) }).handle({
+        initial: { target: "Idle", decoded: true, data: new Idle({}) },
+        states: { Idle: {} }
+      })
+    )
+    expect(eventless).type.toBeAssignableTo<AtomMachine.MachineAtom.Any>()
+    expect(bridge).type.toBeAssignableTo<AtomMachine.MachineAtom.Any>()
+    expect<AtomMachine.MachineAtom.State<typeof bridge>>().type.toBe<
+      Machine.Machine.Snapshot<Machine.Machine.States<typeof machine>>
+    >()
+    expect<AtomMachine.MachineAtom.Event<typeof bridge>>().type.toBe<Machine.Machine.EventInput<Tick>>()
+    expect<AtomMachine.MachineAtom.Event<typeof eventless>>().type.toBe<never>()
+    expect<Atom.Success<typeof bridge.result>>().type.toBe<AtomMachine.MachineAtom.State<typeof bridge>>()
+
+    const Child = Machine.child("child", machine)
+    const parent = AtomMachine.make(
+      Machine.make({ children: { source1: Child }, root: States, events: Machine.eventsFromSchemas() }).handle({
+        initial: { target: "Idle", decoded: true, data: new Idle({}) },
+        states: { Idle: { invoke: { src: "source1" } } }
+      })
+    )
+    const child = parent.child(Child)
+    expect(child).type.toBeAssignableTo<AtomMachine.ChildMachineAtom.Any>()
+    expect<AtomMachine.ChildMachineAtom.State<typeof child>>().type.toBe<
+      Machine.Machine.Snapshot<Machine.Machine.States<typeof machine>>
+    >()
+  })
+  it("types early command results without a readiness failure", () => {
+    const bridge = AtomMachine.make(makeMachine())
+    type StartError = Atom.Failure<typeof bridge.ref>
+    expect<Atom.Failure<typeof bridge.send>>().type.toBe<StartError | Machine.StoppedError>()
+    expect<Atom.Failure<typeof bridge.stop>>().type.toBe<StartError>()
+    expect(AtomMachine).type.not.toHaveProperty("NotReadyError")
+  })
 })

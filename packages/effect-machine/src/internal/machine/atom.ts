@@ -21,8 +21,6 @@ import type { EnsureExecutable } from "./readiness.js"
 import type { ExcludeCompatibleRuntime as ExcludeCompatibleMachineRuntime, IsAny } from "./requirements.js"
 import * as Topology from "./topology.js"
 
-export class NotReadyError extends Data.TaggedError("NotReadyError") {}
-
 export class ChildNotActiveError extends Data.TaggedError("ChildNotActiveError")<{
   readonly id: string
 }> {}
@@ -213,6 +211,100 @@ export const childEmissions = <Child extends Machine.ChildMachine.Any, StartErro
     )
   )
 
+// A write context exposes no registry, but a read through it does. Commands
+// written before a machine is ready wait on that registry for the ref.
+const registryAtom: Atom.Atom<AtomRegistry.AtomRegistry> = Atom.readable((get) => get.registry).pipe(
+  Atom.keepAlive
+)
+
+/**
+ * Ordered delivery of held commands for one bridge in one registry.
+ *
+ * Commands written while the machine ref is still `Initial` are held here and
+ * delivered in write order once it settles. While held commands remain, later
+ * commands join the same queue so they cannot overtake earlier writes.
+ */
+interface CommandQueue {
+  readonly pending: Array<Effect.Effect<void>>
+  draining: boolean
+}
+
+type CommandQueues = WeakMap<AtomRegistry.AtomRegistry, CommandQueue>
+
+const drainCommands = (queue: CommandQueue): Effect.Effect<void> =>
+  Effect.suspend(() => {
+    const next = queue.pending.shift()
+    if (next === undefined) {
+      queue.draining = false
+      return Effect.void
+    }
+    return Effect.andThen(next, drainCommands(queue))
+  })
+
+const getCommandQueue = (queues: CommandQueues, registry: AtomRegistry.AtomRegistry): CommandQueue => {
+  let queue = queues.get(registry)
+  if (queue === undefined) {
+    queue = { pending: [], draining: false }
+    queues.set(registry, queue)
+  }
+  return queue
+}
+
+/**
+ * Builds a command atom over a bridge ref.
+ *
+ * A write runs the command at once when the ref is ready and no earlier
+ * command is held. Otherwise the command is held until the ref settles, the
+ * write result stays waiting, and it settles with the command exit or with the
+ * startup failure.
+ */
+const makeCommandAtom = <Ref, StartError, E, W>(
+  ref: Atom.Atom<AsyncResult.AsyncResult<Ref, StartError>>,
+  queues: CommandQueues,
+  command: (ref: Ref, value: W) => Effect.Effect<void, E>
+): Atom.Writable<AsyncResult.AsyncResult<void, StartError | E>, W> =>
+  Atom.writable(
+    (get): AsyncResult.AsyncResult<void, StartError | E> => {
+      const current = AsyncResult.map(get(ref), () => undefined)
+      const queue = queues.get(get.registry)
+      if (queue === undefined || !queue.draining) {
+        return current
+      }
+      return Option.getOrElse(
+        Option.map(get.self<AsyncResult.AsyncResult<void, StartError | E>>(), AsyncResult.waiting),
+        () => AsyncResult.initial(true)
+      )
+    },
+    (ctx, value) => {
+      const current = ctx.get(ref)
+      const registry = ctx.get(registryAtom)
+      const queue = getCommandQueue(queues, registry)
+      if (AsyncResult.isInitial(current) || queue.draining) {
+        ctx.setSelf(AsyncResult.initial(true))
+        queue.pending.push(
+          AtomRegistry.getResult(registry, ref).pipe(
+            Effect.flatMap((ready) => command(ready, value)),
+            Effect.exit,
+            Effect.map((exit) => {
+              const result = AsyncResult.fromExit(exit)
+              ctx.setSelf(queue.pending.length === 0 ? result : AsyncResult.waiting(result))
+            })
+          )
+        )
+        if (!queue.draining) {
+          queue.draining = true
+          Effect.runFork(drainCommands(queue))
+        }
+      } else if (AsyncResult.isFailure(current)) {
+        ctx.setSelf(AsyncResult.map(current, () => undefined))
+      } else {
+        Effect.runCallback(command(current.value, value), {
+          onExit: (exit) => ctx.setSelf(AsyncResult.fromExit(exit))
+        })
+      }
+    }
+  )
+
 const makeRuntimeResultAtom = <State, Error, Output, StartError>(
   snapshot: Atom.Atom<AsyncResult.AsyncResult<Machine.RuntimeSnapshot<State, Error, Output>, StartError>>
 ): Atom.Atom<AsyncResult.AsyncResult<State, StartError | Error>> =>
@@ -338,44 +430,23 @@ const makeChildFromRefAtom = <Child extends Machine.ChildMachine.Any, StartError
     return AsyncResult.success(Option.some(Effect.runSync(handle.snapshot)))
   })
 
-  const send = Atom.writable<
-    AsyncResult.AsyncResult<void, StartError | NotReadyError | ChildNotActiveError | Machine.StoppedError>,
-    Machine.ChildMachine.Event<Child>
-  >(
-    (get) => AsyncResult.map(get(ref), () => undefined),
-    (ctx, event) => {
-      const result = ctx.get(ref)
-      if (AsyncResult.isInitial(result)) {
-        ctx.setSelf(AsyncResult.fail(new NotReadyError()))
-      } else if (AsyncResult.isFailure(result)) {
-        ctx.setSelf(AsyncResult.map(result, () => undefined))
-      } else if (Option.isNone(result.value)) {
-        ctx.setSelf(AsyncResult.fail(new ChildNotActiveError({ id: descriptor.id })))
-      } else {
-        Effect.runCallback(result.value.value.send(event as never), {
-          onExit: (exit) => ctx.setSelf(AsyncResult.fromExit(exit))
-        })
-      }
-    }
+  const commands: CommandQueues = new WeakMap()
+  const activeChild = (current: Option.Option<Ref>): Effect.Effect<Ref, ChildNotActiveError> =>
+    Option.isSome(current)
+      ? Effect.succeed(current.value)
+      : Effect.fail(new ChildNotActiveError({ id: descriptor.id }))
+
+  const send: ChildMachineAtom<Child, StartError>["send"] = makeCommandAtom(
+    ref,
+    commands,
+    (current, event: Machine.ChildMachine.Event<Child>) =>
+      Effect.flatMap(activeChild(current), (child) => child.send(event as never))
   )
 
-  const stop = Atom.writable<
-    AsyncResult.AsyncResult<void, StartError | NotReadyError | ChildNotActiveError>,
-    void
-  >(
-    (get) => AsyncResult.map(get(ref), () => undefined),
-    (ctx) => {
-      const result = ctx.get(ref)
-      if (AsyncResult.isInitial(result)) {
-        ctx.setSelf(AsyncResult.fail(new NotReadyError()))
-      } else if (AsyncResult.isFailure(result)) {
-        ctx.setSelf(AsyncResult.map(result, () => undefined))
-      } else if (Option.isNone(result.value)) {
-        ctx.setSelf(AsyncResult.fail(new ChildNotActiveError({ id: descriptor.id })))
-      } else {
-        Effect.runCallback(result.value.value.stop)
-      }
-    }
+  const stop: ChildMachineAtom<Child, StartError>["stop"] = makeCommandAtom(
+    ref,
+    commands,
+    (current, _: void) => Effect.flatMap(activeChild(current), (child) => child.stop)
   )
 
   const child = makeChildSelector<StartError>(ref as any)
@@ -453,40 +524,18 @@ const makeFromRefAtom = <State, Event, Error, Output, StartError, Emitted>(
     })
   })
 
-  const send = Atom.writable<
-    AsyncResult.AsyncResult<void, StartError | NotReadyError | Machine.StoppedError>,
-    Event
-  >(
-    (get) => AsyncResult.map(get(ref), () => undefined),
-    (ctx, event: Event) => {
-      const result = ctx.get(ref)
-      if (AsyncResult.isInitial(result)) {
-        ctx.setSelf(AsyncResult.fail(new NotReadyError()))
-      } else if (AsyncResult.isFailure(result)) {
-        ctx.setSelf(AsyncResult.map(result, () => undefined))
-      } else {
-        Effect.runCallback(result.value.send(event), {
-          onExit: (exit) =>
-            ctx.setSelf(
-              AsyncResult.fromExit(exit)
-            )
-        })
-      }
-    }
+  const commands: CommandQueues = new WeakMap()
+
+  const send: MachineAtom<State, Event, Error, Output, StartError, Emitted>["send"] = makeCommandAtom(
+    ref,
+    commands,
+    (handle, event: Event) => handle.send(event)
   )
 
-  const stop = Atom.writable<AsyncResult.AsyncResult<void, StartError | NotReadyError>, void>(
-    (get) => AsyncResult.map(get(ref), () => undefined),
-    (ctx) => {
-      const result = ctx.get(ref)
-      if (AsyncResult.isInitial(result)) {
-        ctx.setSelf(AsyncResult.fail(new NotReadyError()))
-      } else if (AsyncResult.isFailure(result)) {
-        ctx.setSelf(AsyncResult.map(result, () => undefined))
-      } else {
-        Effect.runCallback(result.value.stop)
-      }
-    }
+  const stop: MachineAtom<State, Event, Error, Output, StartError, Emitted>["stop"] = makeCommandAtom(
+    ref,
+    commands,
+    (handle, _: void) => handle.stop
   )
 
   const optionalRef = Atom.mapResult(ref, Option.some)
@@ -882,7 +931,7 @@ const resumeWithRuntime = (
   return makeFromRefAtom(ref as any, machine)
 }
 
-type FamilyBridge = MachineAtom<any, never, any, any, any, any> | ChildMachineAtom<any, any>
+type FamilyBridge = MachineAtom.Any | ChildMachineAtom.Any
 
 type FamilyOptions = {
   readonly atoms: Readonly<Record<string, (bridge: FamilyBridge) => Atom.Atom<any>>>
@@ -937,7 +986,7 @@ export const family = (
   )
 
 export const familyChild = (
-  parent: MachineAtom<any, never, any, any, any, any> | ChildMachineAtom<any, any>,
+  parent: FamilyBridge,
   options: FamilyOptions & { readonly child: (key: any) => Machine.ChildMachine.Any }
 ): Readonly<Record<string, (key: any) => Atom.Atom<any>>> =>
   makeFamily(
