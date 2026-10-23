@@ -93,7 +93,7 @@ const hydrate = async (container: HTMLElement, element: React.ReactNode) => {
 
 it("renders the planned snapshot on the server and hydrates into the live machine", async () => {
   const { counter, machine } = makeOnboarding()
-  const Onboarding = createMachineContext(AtomMachine.factory(machine))
+  const Onboarding = createMachineContext(({ input }: { input: string }) => AtomMachine.make(machine, input))
   let bridge: ReturnType<typeof Onboarding.useMachine> | undefined
   function EmailField() {
     bridge = Onboarding.useMachine()
@@ -237,7 +237,7 @@ it("renders pending until a client-only machine has a snapshot", async () => {
 
 it("renders nothing on the server for a machine that cannot be planned and fails on the client", async () => {
   const { counter, machine } = makeOnboarding()
-  const Onboarding = createMachineContext(AtomMachine.factory(machine))
+  const Onboarding = createMachineContext(({ input }: { input: string }) => AtomMachine.make(machine, input))
   let caught: unknown
   class Boundary extends React.Component<React.PropsWithChildren, { failed: boolean }> {
     state = { failed: false }

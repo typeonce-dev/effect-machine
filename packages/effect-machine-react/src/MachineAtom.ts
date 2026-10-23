@@ -139,27 +139,49 @@ export interface MachineContext<Args extends MachineContext.Args, A extends Atom
  */
 export declare namespace MachineContext {
   /**
-   * Parameters a bridge factory may declare: startup input, then a per-owner
-   * capability layer. Declare the input as `void` for a layer without input.
+   * Values a Provider passes to its bridge factory: the machine's startup
+   * `input` and a per-owner capability `layer`. A factory declares only the
+   * values it uses.
+   *
+   * @category models
+   * @since 0.44.0
+   */
+  export interface Options {
+    readonly input?: unknown
+    readonly layer?: Layer.Layer<any, any, any>
+  }
+
+  /**
+   * Parameters a bridge factory may declare: none, or one `Options` object.
    *
    * @category utility types
    * @since 0.43.0
    */
-  export type Args = [] | [input: unknown] | [input: unknown, layer: Layer.Layer<any, any, any>]
+  export type Args = [] | [options: Options]
 
   /**
-   * Provider props: `input` is required when the factory declares input and
-   * `layer` when it declares a layer. Both are rejected otherwise.
+   * Provider props mirror the factory's options: each declared option is a
+   * required prop of the same type, and undeclared options are rejected.
    *
    * @category utility types
    * @since 0.43.0
    */
   export type ProviderProps<Args extends MachineContext.Args> =
     & { readonly children?: React.ReactNode }
-    & (Args extends [] ? { readonly input?: never }
-      : [Args[0]] extends [void] ? { readonly input?: never }
-      : { readonly input: Args[0] })
-    & (Args extends [unknown, infer L] ? { readonly layer: L } : { readonly layer?: never })
+    & (Args extends [infer O] ? O & { readonly [K in Exclude<keyof Options, keyof O>]?: never }
+      : { readonly [K in keyof Options]?: never })
+
+  /**
+   * Rejects factory options other than `input` and `layer`, so a capability
+   * cannot be passed under another name.
+   *
+   * @category utility types
+   * @since 0.44.0
+   */
+  export type EnsureOptions<Args extends MachineContext.Args> = Args extends [infer O]
+    ? [Exclude<keyof O, keyof Options>] extends [never] ? unknown
+    : { readonly "createMachineContext options accept only input and layer": Exclude<keyof O, keyof Options> }
+    : unknown
 }
 
 /**
@@ -169,11 +191,12 @@ export declare namespace MachineContext {
  *
  * **Details**
  *
- * The factory's first parameter is the Provider's `input` prop. A second
- * parameter typed as a `Layer` is the Provider's `layer` prop: a per-owner
- * capability, such as a router-bound service, that the factory provides to the
- * machine through `AtomMachine.bind(Atom.runtime(...))`. Binding rejects a
- * machine whose services the runtime does not provide.
+ * The factory takes no parameters or one options object. Each option it
+ * declares is a Provider prop of the same name and type: `input` is the
+ * machine's startup input, and `layer` is a per-owner capability, such as a
+ * router-bound service, that the factory provides to the machine through
+ * `AtomMachine.bind(Atom.runtime(...))`. Binding rejects a machine whose
+ * services the runtime does not provide.
  *
  * Input and layer are read once, when the Provider mounts. Send an event to
  * update a running workflow, or change the Provider's React `key` to create a
@@ -182,10 +205,15 @@ export declare namespace MachineContext {
  * **Example**
  *
  * ```tsx
+ * const Auth = createMachineContext(AtomMachine.factory(AuthMachine))
+ *
+ * const Profile = createMachineContext(({ input }: { input: ProfileInput }) =>
+ *   AtomMachine.make(ProfileMachine, input)
+ * )
+ *
  * const SignIn = createMachineContext(
- *   (input: SignInInput, navigation: Layer.Layer<Navigation>) =>
- *     AtomMachine.bind(Atom.runtime(Layer.provideMerge(navigation, AppLayer)))
- *       .make(SignInMachine, input)
+ *   ({ input, layer }: { input: SignInInput; layer: Layer.Layer<Navigation> }) =>
+ *     AtomMachine.bind(Atom.runtime(Layer.provideMerge(layer, AppLayer))).make(SignInMachine, input)
  * )
  *
  * <SignIn.Provider input={input} layer={navigationLayer(router)}>...</SignIn.Provider>
@@ -195,5 +223,5 @@ export declare namespace MachineContext {
  * @since 0.32.0
  */
 export const createMachineContext: <Args extends MachineContext.Args, A extends AtomMachine.MachineAtom.Any>(
-  create: (...args: Args) => A
+  create: ((...args: Args) => A) & MachineContext.EnsureOptions<NoInfer<Args>>
 ) => MachineContext<Args, A> = internal.createMachineContext

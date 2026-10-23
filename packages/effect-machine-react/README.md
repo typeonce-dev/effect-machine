@@ -8,7 +8,7 @@ import { createMachineContext, MachineState } from "@typeonce/effect-machine-rea
 import { AtomMachine } from "@typeonce/effect-machine/reactivity"
 import { AuthMachine } from "./auth-machine"
 
-const Auth = createMachineContext(AtomMachine.factory(AuthMachine))
+const Auth = createMachineContext(({ input }: { input: AuthInput }) => AtomMachine.make(AuthMachine, input))
 
 function AuthRoute({ input }: Props) {
   return (
@@ -52,19 +52,21 @@ active:
 </MachineState>
 ```
 
+The factory takes one options object, and each option it declares is a
+Provider prop of the same name and type. A machine without input can pass
+`AtomMachine.factory(Machine)` directly; its Provider takes no `input` prop.
 Input is startup-only. Send an event to update a running workflow, or change the
-Provider's React `key` to start a new one. Machines without input have a Provider
-without an `input` prop.
+Provider's React `key` to start a new one.
 
 Per-owner capabilities, such as a router-bound navigation service, are layers,
-never input. Declare a second, `Layer`-typed factory parameter, and the Provider
+never input. Declare a `layer` option typed as a `Layer`, and the Provider
 requires a `layer` prop of that type. Like input, the layer is read once when
 the Provider mounts:
 
 ```tsx
 const SignIn = createMachineContext(
-  (input: SignInInput, navigation: Layer.Layer<Navigation>) =>
-    AtomMachine.bind(Atom.runtime(Layer.provideMerge(navigation, AppLayer)))
+  ({ input, layer }: { input: SignInInput; layer: Layer.Layer<Navigation> }) =>
+    AtomMachine.bind(Atom.runtime(Layer.provideMerge(layer, AppLayer)))
       .make(SignInMachine, input)
 )
 

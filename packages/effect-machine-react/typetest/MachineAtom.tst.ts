@@ -46,7 +46,7 @@ const withInput = Machine.make({
   root: ({ input }) => ({ count: input }),
   states: { Editing: {}, Closed: {} }
 })
-const InputContext = createMachineContext(AtomMachine.factory(withInput))
+const InputContext = createMachineContext(({ input }: { input: number }) => AtomMachine.make(withInput, input))
 const NoInputContext = createMachineContext(AtomMachine.factory(machine))
 type InputProps = React.ComponentProps<typeof InputContext.Provider>
 type NoInputProps = React.ComponentProps<typeof NoInputContext.Provider>
@@ -153,8 +153,8 @@ const Leaving = Machine.make({
   initial: { target: "Leaving" },
   states: { Leaving: { invoke: { src: "navigate", onDone: { target: "Done" } } }, Done: {} }
 })
-const LayerContext = createMachineContext((input: string, navigation: Layer.Layer<Navigation>) =>
-  AtomMachine.bind(Atom.runtime(navigation)).make(Leaving, input)
+const LayerContext = createMachineContext(({ input, layer }: { input: string; layer: Layer.Layer<Navigation> }) =>
+  AtomMachine.bind(Atom.runtime(layer)).make(Leaving, input)
 )
 type LayerProps = React.ComponentProps<typeof LayerContext.Provider>
 expect<LayerProps["layer"]>().type.toBe<Layer.Layer<Navigation>>()
@@ -164,13 +164,20 @@ expect<{ input: string; layer: Layer.Layer<Clock> }>().type.not.toBeAssignableTo
 expect<{ input: string; layer: Layer.Layer<Navigation> }>().type.toBeAssignableTo<LayerProps>()
 expect<{ layer: Layer.Layer<never> }>().type.not.toBeAssignableTo<InputProps>()
 expect<{ layer: Layer.Layer<never> }>().type.not.toBeAssignableTo<NoInputProps>()
-const LayerOnlyContext = createMachineContext((_: void, navigation: Layer.Layer<Navigation>) =>
-  AtomMachine.bind(Atom.runtime(navigation)).make(Leaving, "/")
+const LayerOnlyContext = createMachineContext(({ layer }: { layer: Layer.Layer<Navigation> }) =>
+  AtomMachine.bind(Atom.runtime(layer)).make(Leaving, "/")
 )
 type LayerOnlyProps = React.ComponentProps<typeof LayerOnlyContext.Provider>
 expect<{ layer: Layer.Layer<Navigation> }>().type.toBeAssignableTo<LayerOnlyProps>()
 expect<{ input: string; layer: Layer.Layer<Navigation> }>().type.not.toBeAssignableTo<LayerOnlyProps>()
 expect<{}>().type.not.toBeAssignableTo<LayerOnlyProps>()
 expect(
-  (_input: string, clock: Layer.Layer<Clock>) => AtomMachine.bind(Atom.runtime(clock)).make(Leaving, _input)
+  ({ input, layer }: { input: string; layer: Layer.Layer<Clock> }) =>
+    AtomMachine.bind(Atom.runtime(layer)).make(Leaving, input)
 ).type.toRaiseError()
+// A factory that takes input positionally would receive the options object.
+expect(createMachineContext).type.not.toBeCallableWith(AtomMachine.factory(withInput))
+// Capabilities travel as `layer`, never under another option name.
+expect(createMachineContext).type.not.toBeCallableWith(
+  ({ input }: { input: number; router: string }) => AtomMachine.make(withInput, input)
+)

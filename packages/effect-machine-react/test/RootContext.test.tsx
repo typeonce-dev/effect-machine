@@ -25,7 +25,7 @@ const counter = Machine.make({
     Closed: {}
   }
 })
-const Counter = createMachineContext(AtomMachine.factory(counter))
+const Counter = createMachineContext(({ input }: { input: number }) => AtomMachine.make(counter, input))
 afterEach(cleanup)
 it("keeps a provider's input and bridge stable until its React key changes", async () => {
   const registry = AtomRegistry.make({ defaultIdleTTL: 1 })
@@ -168,8 +168,8 @@ const leaving = Machine.make({
     Left: {}
   }
 })
-const Leave = createMachineContext((input: string, navigation: Layer.Layer<Navigation>) =>
-  AtomMachine.bind(Atom.runtime(navigation)).make(leaving, input)
+const Leave = createMachineContext(({ input, layer }: { input: string; layer: Layer.Layer<Navigation> }) =>
+  AtomMachine.bind(Atom.runtime(layer)).make(leaving, input)
 )
 it("provides each owner's capability layer to its machine", async () => {
   const registry = AtomRegistry.make()
@@ -208,7 +208,7 @@ it("reads the capability layer once when the owner mounts", async () => {
     Layer.succeed(Navigation, {
       push: (href) => Effect.sync(() => pushed.push(`${router}:${href}`))
     })
-  const NoInput = createMachineContext((_: void, layer: Layer.Layer<Navigation>) =>
+  const NoInput = createMachineContext(({ layer }: { layer: Layer.Layer<Navigation> }) =>
     AtomMachine.bind(Atom.runtime(layer)).make(leaving, "/home")
   )
   let bridge: ReturnType<typeof NoInput.useMachine> | undefined
