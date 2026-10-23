@@ -919,6 +919,87 @@ describe("machine planner and runtime strategies", () => {
       }
       assert.deepStrictEqual(results[0], results[1])
     }) as Effect.Effect<void, unknown, any>))
+  it.effect("commits each idle delivery before send returns in generic and compiled runtimes", () =>
+    Effect.gen(function*() {
+      const machine = makeFlatMachine()
+      const traces: Array<ReadonlyArray<unknown>> = []
+      for (const strategy of ["generic", "compiled"] as const) {
+        const ref = yield* openWithRuntimeStrategy(machine, strategy)
+        const trace: Array<unknown> = []
+        for (const event of [new Noop({}), new Increment({}), new Reenter({}), new Increment({}), new Finish({})]) {
+          Effect.runSync(ref.send(event))
+          const snapshot = Effect.runSync(ref.snapshot)
+          trace.push([snapshot.status, snapshot.state.state])
+        }
+        assert.strictEqual(yield* ref.join, 2)
+        traces.push(trace)
+      }
+      assert.deepStrictEqual(traces[0], traces[1])
+      assert.deepStrictEqual(traces[1], [
+        ["active", { path: "Count", value: new Count({ value: 0 }) }],
+        ["active", { path: "Count", value: new Count({ value: 1 }) }],
+        ["active", { path: "Count", value: new Count({ value: 1 }) }],
+        ["active", { path: "Count", value: new Count({ value: 2 }) }],
+        ["done", { path: "Done", value: new Done({ value: 2 }) }]
+      ])
+    }) as Effect.Effect<void, unknown, any>)
+  it.effect("commits raised events beside an active invocation before send returns in generic and compiled runtimes", () =>
+    Effect.gen(function*() {
+      let started: Deferred.Deferred<void> | undefined
+      const Internal = Machine.internalEventsFromSchemas(Select)
+      const machine = Machine.make({
+        effects: {
+          load: Effect.suspend(() => Deferred.succeed(started!, undefined)).pipe(Effect.andThen(Effect.never))
+        },
+        root: Machine.state({ states: { Count, Done: { schema: Done, type: "final", output: Schema.Number } } }),
+        events: Machine.eventsFromSchemas(Increment, Finish),
+        internalEvents: Internal
+      }).handle({
+        initial: { target: "Count", decoded: true, data: new Count({ value: 0 }) },
+        states: {
+          Count: {
+            invoke: { src: "load", id: "load" },
+            on: {
+              Increment: {
+                none: true,
+                resolve: ({ state }, enqueue) => {
+                  enqueue.raise(new Select({ value: state.value + 1 }))
+                  return undefined
+                }
+              },
+              Select: { target: "Count", decoded: true, data: ({ event }) => new Count({ value: event.value }) },
+              Finish: { target: "Done", decoded: true, data: ({ state }) => new Done({ value: state.value }) }
+            }
+          },
+          Done: { output: ({ state }) => state.value }
+        }
+      })
+      const traces: Array<ReadonlyArray<unknown>> = []
+      for (const strategy of ["generic", "compiled"] as const) {
+        started = yield* Deferred.make<void>()
+        const ref = yield* openWithRuntimeStrategy(machine, strategy)
+        // Delivery is synchronous once startup has settled and the machine is
+        // idle; events sent during startup queue behind it.
+        yield* Deferred.await(started)
+        yield* Effect.yieldNow
+        const retained = Effect.runSync(ref.snapshot)
+        const trace: Array<unknown> = []
+        for (const event of [new Increment({}), new Increment({})]) {
+          Effect.runSync(ref.send(event))
+          const snapshot = Effect.runSync(ref.snapshot)
+          trace.push([snapshot.status, snapshot.state.state])
+        }
+        trace.push(retained.state.state)
+        yield* ref.stop
+        traces.push(trace)
+      }
+      assert.deepStrictEqual(traces[0], traces[1])
+      assert.deepStrictEqual(traces[1], [
+        ["active", { path: "Count", value: new Count({ value: 1 }) }],
+        ["active", { path: "Count", value: new Count({ value: 2 }) }],
+        { path: "Count", value: new Count({ value: 0 }) }
+      ])
+    }) as Effect.Effect<void, unknown, any>)
   it.effect("matches acknowledged probe delivery in generic and compiled managed runtimes", () =>
     Effect.gen(function*() {
       const machine = makeFlatMachine()

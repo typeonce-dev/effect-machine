@@ -84,99 +84,130 @@ const hasInvokeCapability = (machine: Machine.Any): boolean => {
   return hasInvokes
 }
 
+const noQueuedMessages = Effect.succeed(Option.none())
+
 const makeChildlessCompiledDrain = (
   machine: Machine.Any,
   checkInitialFinal: boolean
-): (
-  context: internalRuntimeProtocol.CompiledProcessContext<any, any>
-) => Effect.Effect<Option.Option<any>, any, any> => {
+): Pick<internalRuntimeProtocol.OwnedCompiledProcessDrain<any, any, any, any, any>, "run" | "runSync"> => {
   const executionPlan = ExecutionPlan.compileExecutionPlan(machine)
-  return (context) => {
+  const start = (context: internalRuntimeProtocol.CompiledProcessContext<any, any>): {
+    readonly loop: Effect.Effect<Option.Option<any>, any, any>
+    readonly drainSync: () => Effect.Effect<Option.Option<any>, any, any> | undefined
+  } => {
     let current = context.state()
     if (checkInitialFinal && internalPlanner.isFinalState(machine, current)) {
-      return internalPlanner.getFinalOutputEffect(
+      const output = internalPlanner.getFinalOutputEffect(
         machine,
         current,
         internalPlanner.InitialEvent
       ).pipe(Effect.map(Option.some))
+      return { loop: output, drainSync: () => output }
     }
 
     let configuration = context.executionState
     let liveRuntime: Runtime<unknown, unknown> | undefined
-    let loop: Effect.Effect<Option.Option<any>, any, any>
-    loop = Effect.suspend(() => {
-      const pending = context.pollMessage()
-      if (Option.isNone(pending)) {
-        context.executionState = undefined
-        return Effect.succeed(Option.none())
-      }
-
-      const message = pending.value
-      const acknowledged = internalRuntimeProtocol.isAcknowledgedMessage(message)
-      const event = acknowledged ? message.event : message
-      const before = current
-
-      let planned
-      try {
-        planned = executionPlan.plan(
-          configuration ?? executionPlan.fromConfiguration(Configuration.normalizeConfigurationSync(machine, current)),
-          event,
-          acknowledged,
-          context.scope
-        )
-      } catch (error) {
-        return failPlanning(error)
-      }
-      configuration = planned.next
-      context.executionState = configuration
-      if (planned.microsteps.length === 0) {
-        if (acknowledged) {
-          context.completeMessage({ before, plan: acknowledgedPlan(planned, executionPlan.snapshot), after: current })
+    // Commits queued messages whose transitions need no effectful work. Returns
+    // the drain continuing from the first message that does, or `undefined`
+    // once the mailbox is empty. Only this drain commits a childless machine's
+    // state, so the compact execution state stays valid in the process context
+    // while the machine is idle and the next send does not re-derive it.
+    const drainSync = (): Effect.Effect<Option.Option<any>, any, any> | undefined => {
+      while (true) {
+        const pending = context.pollMessage()
+        if (Option.isNone(pending)) {
+          return undefined
         }
-        return loop
-      }
 
-      const next = executionPlan.snapshot(planned.next)
-      const beforeCommit = planned.commands.length === 0
-        ? undefined
-        : CommandRuntime.runCommands(planned.commands, context.scope)
-      const afterCommit = planned.emittedEvents.length === 0
-        ? undefined
-        : CommandRuntime.runEmittedEvents(
-          planned.emittedEvents,
-          liveRuntime ??= CommandRuntime.makeLiveRuntime(machine, context.scope)
-        )
-      const commit = (): Effect.Effect<void> | undefined => {
-        const notification = context.commit(next)
-        current = next
-        return notification
-      }
-      const continueAfterCommit = (): Effect.Effect<Option.Option<any>, any, any> => {
-        const continued = Effect.suspend(() => {
+        const message = pending.value
+        const acknowledged = internalRuntimeProtocol.isAcknowledgedMessage(message)
+        const event = acknowledged ? message.event : message
+        const before = current
+
+        let planned
+        try {
+          planned = executionPlan.plan(
+            configuration ??
+              executionPlan.fromConfiguration(Configuration.normalizeConfigurationSync(machine, current)),
+            event,
+            acknowledged,
+            context.scope
+          )
+        } catch (error) {
+          return failPlanning(error)
+        }
+        configuration = planned.next
+        context.executionState = configuration
+        if (planned.microsteps.length === 0) {
+          if (acknowledged) {
+            context.completeMessage({ before, plan: acknowledgedPlan(planned, executionPlan.snapshot), after: current })
+          }
+          continue
+        }
+
+        const next = executionPlan.snapshot(planned.next)
+        const beforeCommit = planned.commands.length === 0
+          ? undefined
+          : CommandRuntime.runCommands(planned.commands, context.scope)
+        const afterCommit = planned.emittedEvents.length === 0
+          ? undefined
+          : CommandRuntime.runEmittedEvents(
+            planned.emittedEvents,
+            liveRuntime ??= CommandRuntime.makeLiveRuntime(machine, context.scope)
+          )
+        const commit = (): Effect.Effect<void> | undefined => {
+          const notification = context.commit(next)
+          current = next
+          return notification
+        }
+        const complete = (): void => {
           if (acknowledged) {
             context.completeMessage({ before, plan: acknowledgedPlan(planned, executionPlan.snapshot), after: next })
           }
-          return planned.done ? Effect.succeed(Option.some(planned.output)) : loop
-        })
-        return afterCommit === undefined ? continued : afterCommit.pipe(Effect.andThen(continued))
-      }
-      const commitAndContinue = (): Effect.Effect<Option.Option<any>, any, any> => {
-        const notification = commit()
-        const continued = continueAfterCommit()
-        const effect = notification === undefined ? continued : notification.pipe(Effect.andThen(continued))
-        return notification === undefined && afterCommit === undefined
-          ? effect
-          : context.runAfterChanges(effect)
-      }
+        }
+        const continueAfterCommit = (): Effect.Effect<Option.Option<any>, any, any> => {
+          const continued = Effect.suspend(() => {
+            complete()
+            return planned.done ? Effect.succeed(Option.some(planned.output)) : loop
+          })
+          return afterCommit === undefined ? continued : afterCommit.pipe(Effect.andThen(continued))
+        }
+        const commitAndContinue = (): Effect.Effect<Option.Option<any>, any, any> => {
+          const notification = commit()
+          const continued = continueAfterCommit()
+          const effect = notification === undefined ? continued : notification.pipe(Effect.andThen(continued))
+          return notification === undefined && afterCommit === undefined
+            ? effect
+            : context.runAfterChanges(effect)
+        }
 
-      if (beforeCommit === undefined) {
-        return commitAndContinue()
+        if (beforeCommit === undefined) {
+          if (afterCommit === undefined && !planned.done) {
+            const notification = commit()
+            if (notification === undefined) {
+              complete()
+              continue
+            }
+            return context.runAfterChanges(notification.pipe(Effect.andThen(continueAfterCommit())))
+          }
+          return commitAndContinue()
+        }
+        return context.runAfterChanges(
+          beforeCommit.pipe(Effect.andThen(Effect.suspend(commitAndContinue)))
+        )
       }
-      return context.runAfterChanges(
-        beforeCommit.pipe(Effect.andThen(Effect.suspend(commitAndContinue)))
-      )
-    })
-    return internalRuntimeProtocol.provideMachineRuntime(loop, context.scope)
+    }
+    const loop: Effect.Effect<Option.Option<any>, any, any> = Effect.suspend(() => drainSync() ?? noQueuedMessages)
+    return { loop, drainSync }
+  }
+  return {
+    run: (context) => internalRuntimeProtocol.provideMachineRuntime(start(context).loop, context.scope),
+    runSync: (context) => {
+      const remaining = start(context).drainSync()
+      return remaining === undefined
+        ? undefined
+        : internalRuntimeProtocol.provideMachineRuntime(remaining, context.scope)
+    }
   }
 }
 
@@ -436,12 +467,9 @@ const makeProcessLogic = (
       childless: !hasInvokes,
       ...(entry._tag === "Initial" ? { initial: makeInitial } : {}),
       ...(makeCompiledInitial === undefined ? {} : { initialSync: makeCompiledInitial }),
-      drain: {
-        _tag: "Owned",
-        run: hasInvokes
-          ? makeInvokingCompiledDrain(machine, entry._tag === "Resume")
-          : makeChildlessCompiledDrain(machine, entry._tag === "Resume")
-      }
+      drain: hasInvokes
+        ? { _tag: "Owned", run: makeInvokingCompiledDrain(machine, entry._tag === "Resume") }
+        : { _tag: "Owned", ...makeChildlessCompiledDrain(machine, entry._tag === "Resume") }
     },
     initial: (scope) =>
       entry._tag === "Resume"

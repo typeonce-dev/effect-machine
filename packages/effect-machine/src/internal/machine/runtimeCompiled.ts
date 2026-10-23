@@ -8,6 +8,7 @@ import * as Exit from "effect/Exit"
 import * as Fiber from "effect/Fiber"
 import * as Option from "effect/Option"
 import * as PubSub from "effect/PubSub"
+import type { SchedulerDispatcher } from "effect/Scheduler"
 import * as Stream from "effect/Stream"
 import type * as Take from "effect/Take"
 import type { Inspection } from "../../Machine.js"
@@ -54,6 +55,7 @@ import {
   publishInspectedSent,
   type RuntimeSnapshot,
   sendMachineTarget,
+  snapshotObserver,
   type StartInternalOptions,
   type StartProcess,
   stopAcknowledgedMessage,
@@ -95,6 +97,13 @@ class CompiledProcess implements MachineRef<any, any, any, any> {
   ): Effect.Effect<AcknowledgedDelivery<unknown>, unknown | StoppedError> {
     return this.sendAcknowledgedEffect(event)
   }
+  [snapshotObserver](observer: () => void): () => void {
+    const observers = this.snapshotObservers ??= new Set()
+    observers.add(observer)
+    return () => {
+      observers.delete(observer)
+    }
+  }
 
   private readonly mailbox: CompactProcessMailbox<unknown> = {
     items: undefined,
@@ -121,6 +130,8 @@ class CompiledProcess implements MachineRef<any, any, any, any> {
   private worker: Fiber.Fiber<any, never> | undefined
   private interruptRequested = false
   private offerRevision = 0
+  private snapshotObservers: Set<() => void> | undefined
+  private changesFlushScheduled = false
   private inFlightMessage: ProcessMessage<unknown> | undefined
   private readonly externalEmissions: EmissionRuntime | undefined
   private emissionsPubSub: LazyEmissions
@@ -419,7 +430,7 @@ class CompiledProcess implements MachineRef<any, any, any, any> {
       // raised events, and eventless transitions. If it is known active and
       // neither startup hooks nor emitted work queued an event, there is no
       // first drain to perform. Future sends observe an idle run state and
-      // schedule the ordinary compiled worker.
+      // start the ordinary compiled worker.
       if (
         initialized.done === false && self.execution.childless &&
         self.lifecycle === "Active" && self.mailbox.items === undefined
@@ -562,7 +573,7 @@ class CompiledProcess implements MachineRef<any, any, any, any> {
 
   private offerMessage(message: ProcessMessage<unknown>): Effect.Effect<void, StoppedError> {
     return Effect.uninterruptible(
-      Effect.suspend(() => {
+      Effect.withFiber((fiber) => {
         if (this.mailbox.closed || this.lifecycle !== "Active") {
           return Effect.fail(new StoppedError())
         }
@@ -574,29 +585,61 @@ class CompiledProcess implements MachineRef<any, any, any, any> {
         if (this.runState === "Draining") {
           return Effect.void
         }
+        // An idle machine drains in the sender's turn, so a transition that
+        // completes synchronously is committed before `send` returns. Sends
+        // that arrive while draining only enqueue.
         this.runState = "Draining"
-        const scheduled = Effect.yieldNow.pipe(
-          Effect.andThen(Effect.provideContext(this.drainRuntime(), this.services))
-        )
-        const fork = this.options.detached === true
-          ? Effect.forkDetach(scheduled, { startImmediately: true })
-          : Effect.forkChild(scheduled, { startImmediately: true })
-        return fork.pipe(
-          Effect.flatMap((fiber) =>
-            Effect.sync(() => {
-              this.worker = fiber
-              if (!this.interruptRequested) {
-                return false
-              }
-              this.interruptRequested = false
-              return true
-            }).pipe(
-              Effect.flatMap((interrupt) => interrupt ? this.interruptAndFinish(fiber) : Effect.void)
-            )
-          ),
-          Effect.asVoid
-        )
+        const drain = this.execution.drain
+        if (drain._tag === "Owned" && drain.runSync !== undefined) {
+          let remaining: Effect.Effect<Option.Option<unknown>, unknown, unknown> | undefined
+          try {
+            remaining = drain.runSync(this.compiledContext!)
+          } catch (error) {
+            remaining = Effect.die(error)
+          }
+          // Snapshot observers may stop the machine while it drains.
+          if (remaining !== undefined || this.hasTerminationRequest()) {
+            return this.startWorker(remaining)
+          }
+          this.runState = "Idle"
+          this.scheduleChangesFlush(fiber.currentDispatcher)
+          return Effect.void
+        }
+        return this.startWorker(undefined)
       })
+    )
+  }
+
+  /**
+   * Starts the worker immediately, so it runs in the sender's turn until its
+   * first asynchronous boundary. `first` replaces the first drain pass when the
+   * sender has already drained synchronously up to effectful work.
+   */
+  private startWorker(
+    first: Effect.Effect<Option.Option<unknown>, unknown, unknown> | undefined
+  ): Effect.Effect<void> {
+    const drain = Effect.provideContext(this.drainRuntime(first), this.services)
+    const fork = this.options.detached === true
+      ? Effect.forkDetach(drain, { startImmediately: true })
+      : Effect.forkChild(drain, { startImmediately: true })
+    return fork.pipe(
+      Effect.flatMap((fiber) =>
+        Effect.sync(() => {
+          // A drain that settled before the fork returned has already
+          // released its worker slot and must not be recorded as running.
+          if (fiber.pollUnsafe() === undefined) {
+            this.worker = fiber
+          }
+          if (!this.interruptRequested) {
+            return false
+          }
+          this.interruptRequested = false
+          return true
+        }).pipe(
+          Effect.flatMap((interrupt) => interrupt ? this.interruptAndFinish(fiber) : Effect.void)
+        )
+      ),
+      Effect.asVoid
     )
   }
 
@@ -627,10 +670,14 @@ class CompiledProcess implements MachineRef<any, any, any, any> {
       this.options.onStop !== undefined ||
       this.inspector !== undefined ||
       this.current.changes !== undefined ||
+      this.externalEmissions !== undefined ||
+      (this.emissionsPubSub !== undefined && this.emissionsPubSub !== EmissionsClosed) ||
       this.current.terminalizing || this.current.snapshot.status !== "active"
     ) {
       return false
     }
+    // No emission stream was ever observed, so closing needs no PubSub shutdown.
+    this.emissionsPubSub = EmissionsClosed
     const snapshot = { status: "stopped" as const, state: this.current.snapshot.state }
     this.lifecycle = "TerminationRequested"
     this.termination = { _tag: "Stopped" }
@@ -642,6 +689,7 @@ class CompiledProcess implements MachineRef<any, any, any, any> {
       changes: undefined,
       snapshot
     }
+    this.notifySnapshotObservers()
     stopAcknowledgedMessage(this.inFlightMessage)
     this.inFlightMessage = undefined
     this.interruptRequested = false
@@ -700,11 +748,14 @@ class CompiledProcess implements MachineRef<any, any, any, any> {
     return stopped
   }
 
-  private drainRuntime(): Effect.Effect<void, never, any> {
+  private drainRuntime(
+    first?: Effect.Effect<Option.Option<unknown>, unknown, unknown>
+  ): Effect.Effect<void, never, any> {
     const self = this
     return Effect.uninterruptibleMask((restore) =>
       Effect.gen(function*() {
         let observedRevision = self.offerRevision
+        let pending = first
         while (true) {
           if (self.hasTerminationRequest()) {
             return yield* self.finishRequestedTermination()
@@ -712,6 +763,11 @@ class CompiledProcess implements MachineRef<any, any, any, any> {
 
           const exit = yield* restore(
             Effect.suspend(() => {
+              if (pending !== undefined) {
+                const continued = pending
+                pending = undefined
+                return continued
+              }
               const drain = self.execution.drain
               return drain._tag === "Process"
                 ? drain.run(self.processContext!)
@@ -928,6 +984,7 @@ class CompiledProcess implements MachineRef<any, any, any, any> {
         changes: this.current.changes
       }
       this.current = versioned
+      this.notifySnapshotObservers()
       return this.publishSnapshot(versioned).pipe(
         Effect.flatMap((published) => this.completeChanges(published)),
         Effect.asVoid
@@ -993,9 +1050,34 @@ class CompiledProcess implements MachineRef<any, any, any, any> {
         }
       }
     }
+    this.notifySnapshotObservers()
     return this.options.onSnapshot === undefined
       ? undefined
       : notifyActiveSnapshot(this.options.onSnapshot, activeSnapshot)
+  }
+
+  private notifySnapshotObservers(): void {
+    if (this.snapshotObservers !== undefined) {
+      for (const observer of this.snapshotObservers) {
+        observer()
+      }
+    }
+  }
+
+  /**
+   * Publishes the changes committed by consecutive synchronous drains once the
+   * sender yields, so a burst of sends reaches `changes` subscribers together,
+   * as `Queue` releases its takers. Any earlier flush leaves nothing to publish.
+   */
+  private scheduleChangesFlush(dispatcher: SchedulerDispatcher): void {
+    if (this.changesFlushScheduled || this.current.pendingChanges === undefined) {
+      return
+    }
+    this.changesFlushScheduled = true
+    dispatcher.scheduleTask(() => {
+      this.changesFlushScheduled = false
+      this.flushPendingChanges()
+    }, 0)
   }
 
   flushPendingChanges(): void {
