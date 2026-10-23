@@ -39,6 +39,29 @@ import { ChildMachineLogicTypeId } from "./symbols.js"
 /** @internal */
 export const activeSnapshotObserver: unique symbol = Symbol.for("effect/Machine/activeSnapshotObserver")
 
+/**
+ * Synchronous snapshot observation offered by local process references.
+ *
+ * The observer runs whenever the reference's snapshot changes, before the
+ * operation that changed it returns, and reads the latest value from
+ * `snapshot`. Unlike `changes`, it never coalesces or defers notification, so
+ * synchronous stores can mirror a local machine within the caller's turn.
+ * References without this capability, such as remote ones, are observed
+ * through `changes`.
+ *
+ * @internal
+ */
+export const snapshotObserver: unique symbol = Symbol.for("effect/Machine/snapshotObserver")
+
+/** @internal */
+export interface SnapshotObservable {
+  readonly [snapshotObserver]: (observer: () => void) => () => void
+}
+
+/** @internal */
+export const isSnapshotObservable = (value: unknown): value is SnapshotObservable =>
+  typeof value === "object" && value !== null && snapshotObserver in value
+
 /** @internal */
 const sendParentOverride: unique symbol = Symbol.for("effect/Machine/sendParentOverride")
 
@@ -245,6 +268,8 @@ export interface CompiledProcessContext<State, Event> {
   readonly ownedChildren: OwnedChildRuntime
   readonly poll: () => Option.Option<Event>
   readonly pollMessage: () => Option.Option<ProcessMessage<Event>>
+  /** Marks a message delivered without the mailbox as the one in flight. */
+  readonly beginMessage: (message: ProcessMessage<Event>) => void
   readonly state: () => State
   readonly completeMessage: (delivery: AcknowledgedDelivery<State>) => void
   readonly commit: (state: State) => Effect.Effect<void> | undefined
@@ -273,12 +298,29 @@ type CompiledProcessDrain<State, Event, Error, Requirements, Output> =
       context: ProcessContext<State, Event>
     ) => Effect.Effect<Option.Option<Output>, Error, Requirements>
   }
-  | {
-    readonly _tag: "Owned"
-    readonly run: (
-      context: CompiledProcessContext<State, Event>
-    ) => Effect.Effect<Option.Option<Output>, Error, Requirements>
-  }
+  | OwnedCompiledProcessDrain<State, Event, Error, Requirements, Output>
+
+/**
+ * A compiled drain that owns its planning loop.
+ *
+ * `runSync`, when present, drains in the caller without an Effect, starting
+ * with a message the idle runtime delivered directly instead of queueing: it
+ * commits messages whose transitions need no effectful work and returns the
+ * drain continuing from the first message that does, equivalent to `run` from
+ * that message, or `undefined` once the mailbox is empty.
+ *
+ * @internal
+ */
+export interface OwnedCompiledProcessDrain<State, Event, Error, Requirements, Output> {
+  readonly _tag: "Owned"
+  readonly run: (
+    context: CompiledProcessContext<State, Event>
+  ) => Effect.Effect<Option.Option<Output>, Error, Requirements>
+  readonly runSync?: (
+    context: CompiledProcessContext<State, Event>,
+    message: ProcessMessage<Event>
+  ) => Effect.Effect<Option.Option<Output>, Error, Requirements> | undefined
+}
 
 /**
  * The complete capability descriptor consumed by the compact process runtime.
@@ -354,6 +396,72 @@ export const closeCompactMailbox = (mailbox: CompactProcessMailbox<unknown>): vo
   mailbox.closed = true
   mailbox.items = undefined
   mailbox.index = 0
+}
+
+/**
+ * Mailbox for general process logic. An offer resumes a suspended receiver in
+ * the sender's turn, so a process waiting for its next message handles it
+ * before the send returns unless that handling suspends.
+ */
+export interface ProcessMailbox<Event> extends CompactProcessMailbox<Event> {
+  readonly receivers: Set<(effect: Effect.Effect<void>) => void>
+}
+
+export const makeProcessMailbox = <Event>(): ProcessMailbox<Event> => ({
+  items: undefined,
+  index: 0,
+  closed: false,
+  receivers: new Set()
+})
+
+/**
+ * Enqueues a message, runs `onAccepted`, and then resumes waiting receivers.
+ * Returns `false` without enqueueing when the mailbox is closed.
+ */
+export const offerProcessMailbox = <Event>(
+  mailbox: ProcessMailbox<Event>,
+  message: ProcessMessage<Event>,
+  onAccepted?: () => void
+): boolean => {
+  if (mailbox.closed) {
+    return false
+  }
+  offerCompactMailbox(mailbox, message)
+  onAccepted?.()
+  while (mailbox.items !== undefined && mailbox.receivers.size > 0) {
+    const receiver = mailbox.receivers.values().next().value!
+    mailbox.receivers.delete(receiver)
+    receiver(Effect.void)
+  }
+  return true
+}
+
+export const receiveProcessMailbox = <Event>(
+  mailbox: ProcessMailbox<Event>
+): Effect.Effect<ProcessMessage<Event>> =>
+  Effect.suspend(() => {
+    const message = pollCompactMailbox(mailbox)
+    if (Option.isSome(message)) {
+      return Effect.succeed(message.value)
+    }
+    if (mailbox.closed) {
+      return Effect.interrupt
+    }
+    return Effect.callback<void>((resume) => {
+      mailbox.receivers.add(resume)
+      return Effect.sync(() => {
+        mailbox.receivers.delete(resume)
+      })
+    }).pipe(Effect.andThen(receiveProcessMailbox(mailbox)))
+  })
+
+export const closeProcessMailbox = (mailbox: ProcessMailbox<unknown>): void => {
+  closeCompactMailbox(mailbox)
+  const receivers = Array.from(mailbox.receivers)
+  mailbox.receivers.clear()
+  for (const receiver of receivers) {
+    receiver(Effect.interrupt)
+  }
 }
 
 export interface ProcessLogic<

@@ -7,7 +7,6 @@ import * as Exit from "effect/Exit"
 import * as Fiber from "effect/Fiber"
 import * as Option from "effect/Option"
 import * as PubSub from "effect/PubSub"
-import * as Queue from "effect/Queue"
 import * as Stream from "effect/Stream"
 import * as SynchronizedRef from "effect/SynchronizedRef"
 import type * as Take from "effect/Take"
@@ -21,6 +20,7 @@ import {
   acknowledgedSend,
   childlessRuntime,
   classifyOutcome,
+  closeProcessMailbox,
   executionIsChildless,
   failAcknowledgedMessage,
   type InspectedOffer,
@@ -31,18 +31,22 @@ import {
   makeChildRuntime,
   makeEmissionRuntime,
   makeInspectedMessage,
+  makeProcessMailbox,
   messageCausation,
   messageEvent,
   noCausation,
   noInspectInitial,
   noParentSend,
   notifyActiveSnapshot,
+  offerProcessMailbox,
+  pollCompactMailbox,
   type ProcessAddress,
   type ProcessContext,
   type ProcessLogic,
   type ProcessMessage,
   type ProcessScope,
   publishInspectedSent,
+  receiveProcessMailbox,
   type RuntimeSnapshot,
   sendMachineTarget,
   type StartInternalOptions,
@@ -87,7 +91,7 @@ export const startGenericInternal: StartProcess = Effect.fnUntraced(
       : { ...options.activity, sessionId }
     let initialEntryPaths: ReadonlyArray<string> | undefined
     let initialMicrosteps: ReadonlyArray<unknown> | undefined
-    const queue = yield* Queue.unbounded<ProcessMessage<Event>>()
+    const mailbox = makeProcessMailbox<Event>()
     const emissions = options.emissions ?? makeEmissionRuntime()
     const termination = yield* Deferred.make<ProcessTermination>()
     const done = yield* Deferred.make<Output, Error | StoppedError>()
@@ -95,9 +99,12 @@ export const startGenericInternal: StartProcess = Effect.fnUntraced(
     let initializing = true
     let inFlightMessage: ProcessMessage<Event> | undefined
     const requestStop = Deferred.succeed(termination, { _tag: "Stopped" }).pipe(Effect.asVoid)
-    const offerDirect = (message: ProcessMessage<Event>): Effect.Effect<void, StoppedError> =>
-      Queue.offer(queue, message).pipe(
-        Effect.flatMap((accepted) => accepted ? Effect.void : Effect.fail(new StoppedError()))
+    const offerDirect = (
+      message: ProcessMessage<Event>,
+      onAccepted?: () => void
+    ): Effect.Effect<void, StoppedError> =>
+      Effect.suspend(() =>
+        offerProcessMailbox(mailbox, message, onAccepted) ? Effect.void : Effect.fail(new StoppedError())
       )
     const offerInspected: InspectedOffer<Event> | undefined = inspector === undefined ? undefined : (
       event,
@@ -111,9 +118,7 @@ export const startGenericInternal: StartProcess = Effect.fnUntraced(
           : deferred === undefined
           ? event
           : { [AcknowledgedMessageTypeId]: true as const, event, deferred }
-        return offerDirect(message).pipe(
-          Effect.tap(() => Effect.sync(() => publishInspectedSent(inspector, subject!, message)))
-        )
+        return offerDirect(message, () => publishInspectedSent(inspector, subject!, message))
       })
     const sendAcknowledged:
       | ((event: Event) => Effect.Effect<AcknowledgedDelivery<State>, Error | StoppedError>)
@@ -480,14 +485,7 @@ export const startGenericInternal: StartProcess = Effect.fnUntraced(
           ))
         )
       return Effect.uninterruptible(
-        Effect.sync(() => {
-          while (true) {
-            const pending = Queue.takeUnsafe(queue)
-            if (pending === undefined || Exit.isFailure(pending)) break
-            stopAcknowledgedMessage(pending.value)
-          }
-        }).pipe(
-          Effect.andThen(Queue.shutdown(queue)),
+        Effect.sync(() => closeProcessMailbox(mailbox)).pipe(
           Effect.andThen(closeChildren(exit)),
           Effect.andThen(setAndPublishSnapshot(snapshot)),
           Effect.andThen(closeEmissionsAndInspect),
@@ -563,14 +561,14 @@ export const startGenericInternal: StartProcess = Effect.fnUntraced(
         "receiveMessage" | "pollMessage" | "completeMessage"
       >
       | undefined = logic.execution?._tag !== "Compiled" ? undefined : {
-        receiveMessage: Queue.take(queue).pipe(
+        receiveMessage: receiveProcessMailbox(mailbox).pipe(
           Effect.tap((message) =>
             Effect.sync(() => {
               inFlightMessage = isAcknowledgedMessage(message) ? message : undefined
             })
           )
         ),
-        pollMessage: Queue.poll(queue).pipe(
+        pollMessage: Effect.sync(() => pollCompactMailbox(mailbox)).pipe(
           Effect.tap((message) =>
             Effect.sync(() => {
               if (Option.isSome(message)) {
@@ -585,8 +583,8 @@ export const startGenericInternal: StartProcess = Effect.fnUntraced(
         }
       }
     const receive = inspector === undefined || logic.execution?._tag === "Compiled"
-      ? Queue.take(queue).pipe(Effect.map(messageEvent))
-      : Queue.take(queue).pipe(
+      ? receiveProcessMailbox(mailbox).pipe(Effect.map(messageEvent))
+      : receiveProcessMailbox(mailbox).pipe(
         Effect.tap((message) =>
           Effect.sync(() => {
             inFlightMessage = message
@@ -595,8 +593,8 @@ export const startGenericInternal: StartProcess = Effect.fnUntraced(
         Effect.map(messageEvent)
       )
     const poll = inspector === undefined || logic.execution?._tag === "Compiled"
-      ? Queue.poll(queue).pipe(Effect.map(Option.map(messageEvent)))
-      : Queue.poll(queue).pipe(
+      ? Effect.sync(() => pollCompactMailbox(mailbox)).pipe(Effect.map(Option.map(messageEvent)))
+      : Effect.sync(() => pollCompactMailbox(mailbox)).pipe(
         Effect.tap((message) =>
           Effect.sync(() => {
             if (Option.isSome(message)) inFlightMessage = message.value

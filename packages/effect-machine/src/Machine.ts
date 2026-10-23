@@ -493,6 +493,10 @@ export interface Runtime<in Events, in Emits> {
 /**
  * Minimal typed target accepted by inter-machine send commands.
  *
+ * `send` reports whether the event was accepted for delivery. It promises
+ * nothing about when the target processes it; a local {@link MachineRef}
+ * strengthens that guarantee.
+ *
  * @category models
  * @since 0.12.0
  */
@@ -2058,10 +2062,17 @@ export interface Prepared<out State, in Event, out Error, out Output, out Emitte
  *
  * **Gotchas**
  *
- * `send` reports whether an event was accepted for delivery. Errors that occur
- * while asynchronously processing an accepted event are observed through
- * `snapshot`, `changes`, or `join`. Sending after termination fails with
- * `StoppedError`.
+ * `send` reports whether an event was accepted for delivery. A running
+ * machine reference is local, so an idle machine processes an accepted event
+ * in the sender's turn: work that completes without suspending is reflected
+ * by `snapshot` when `send` returns. Work that suspends continues in the
+ * background, and an event sent while the machine is processing is queued
+ * behind the current work. `changes` subscribers receive every committed
+ * snapshot in order once the sender yields, with consecutive sends delivered
+ * together. This guarantee belongs to `MachineRef`; a `MachineTarget` only
+ * promises delivery. Errors that occur while processing an accepted event are
+ * observed through `snapshot`, `changes`, or `join`. Sending after
+ * termination fails with `StoppedError`.
  *
  * @category models
  * @since 0.4.0
@@ -2096,7 +2107,11 @@ export interface MachineRef<out State, in Event, out Error = never, out Output =
   /** Stops this machine instance and its owned child processes. */
   readonly stop: Effect.Effect<void>
 
-  /** Accepts an event for asynchronous processing by the running machine. */
+  /**
+   * Accepts an event for processing by this local machine. An idle machine
+   * processes it in the sender's turn until the work first suspends, so
+   * `snapshot` reflects it when `send` returns.
+   */
   readonly send: (event: Event) => Effect.Effect<void, StoppedError>
 
   /**

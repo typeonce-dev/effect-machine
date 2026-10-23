@@ -629,6 +629,62 @@ describe("AtomMachine", () => {
         value: new Count({ value: 2 })
       })
     })))
+  it.effect("commits a sent event to mounted projections before the write returns", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const registry = yield* makeRegistry
+      const bridge = AtomMachine.make(makeCounterMachine())
+      const count = AtomMachine.select(bridge, "Count")
+      yield* mount(registry, bridge.snapshot)
+      yield* mount(registry, count)
+      yield* AtomRegistry.getResult(registry, bridge.snapshot)
+      const observed: Array<number> = []
+      yield* Effect.acquireRelease(
+        Effect.sync(() =>
+          registry.subscribe(count, (result) => {
+            if (AsyncResult.isSuccess(result) && Option.isSome(result.value)) {
+              observed.push(result.value.value.value)
+            }
+          })
+        ),
+        (release) => Effect.sync(release)
+      )
+      const read = () => {
+        const result = registry.get(count)
+        return AsyncResult.isSuccess(result) ? Option.getOrUndefined(result.value)?.value : undefined
+      }
+      const values: Array<number | undefined> = []
+      registry.set(bridge.send, new Finish({ by: 1 }))
+      values.push(read())
+      registry.set(bridge.send, new Finish({ by: 2 }))
+      values.push(read())
+      assert.deepStrictEqual(values, [1, 3])
+      yield* Effect.sleep(0)
+      assert.deepStrictEqual(read(), 3)
+      assert.deepStrictEqual(observed, [1, 3])
+    })))
+  it.effect("commits an event sent to an invoked child to its projections before the write returns", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const registry = yield* makeRegistry
+      const Child = Machine.child("counter", makeCounterMachine())
+      const parent = Machine.make({
+        children: { counter: Child },
+        root: Machine.state({ states: { Count } }),
+        events: Machine.eventsFromSchemas(Finish)
+      }).handle({
+        initial: { target: "Count", decoded: true, data: new Count({ value: 0 }) },
+        states: { Count: { invoke: { src: "counter", onDone: { none: true } } } }
+      })
+      const childAtoms = AtomMachine.make(parent).child(Child)
+      const count = AtomMachine.selectChild(childAtoms, "Count")
+      yield* mount(registry, count)
+      yield* waitForResult(registry, count, Option.isSome)
+      const read = () => {
+        const result = registry.get(count)
+        return AsyncResult.isSuccess(result) ? Option.getOrUndefined(result.value)?.value : undefined
+      }
+      registry.set(childAtoms.send, new Finish({ by: 2 }))
+      assert.strictEqual(read(), 2)
+    })))
   it.effect("creates fresh inferred bridges from reusable constructors", () =>
     Effect.scoped(Effect.gen(function*() {
       const registry = yield* makeRegistry

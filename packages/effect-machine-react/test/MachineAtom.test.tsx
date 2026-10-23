@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { RegistryContext, useAtomSet, useAtomSuspense } from "@effect/atom-react"
-import { act, cleanup, render, screen, waitFor } from "@testing-library/react"
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { Effect, Equal, Layer, Option, Schema } from "effect"
 import { AsyncResult, Atom, AtomRegistry } from "effect/reactivity"
 import * as React from "react"
@@ -279,6 +279,66 @@ describe("useMachineAtom", () => {
     )
     await waitFor(() => assert.strictEqual(screen.getByTestId("value").textContent, "5"))
     assert.strictEqual(screen.getByTestId("active").textContent, "true")
+    registry.dispose()
+  })
+  it("keeps a controlled input bound to machine state in sync within the input event", async () => {
+    class Editing extends Schema.TaggedClass<Editing>("ControlledEditing")("Editing", {
+      value: Schema.String
+    }) {}
+    class Changed extends Schema.TaggedClass<Changed>("ControlledChanged")("Changed", {
+      value: Schema.String
+    }) {}
+    const machine = Machine.make({
+      root: Machine.state({ states: { Editing } }),
+      events: Machine.eventsFromSchemas(Changed)
+    }).handle({
+      initial: { target: "Editing", decoded: true, data: new Editing({ value: "" }) },
+      states: {
+        Editing: {
+          on: {
+            Changed: { target: "Editing", decoded: true, data: ({ event }) => new Editing({ value: event.value }) }
+          }
+        }
+      }
+    })
+    const registry = AtomRegistry.make({ defaultIdleTTL: 1000 })
+    const makeOwned = () => AtomMachine.make(machine)
+    function Field({ owned }: { readonly owned: ReturnType<typeof makeOwned> }) {
+      const editing = useAtomSuspense(AtomMachine.select(owned, "Editing")).value
+      const send = useAtomSet(owned.send)
+      return (
+        <input
+          data-testid="field"
+          value={Option.getOrThrow(editing).value}
+          onChange={(event) => send(new Changed({ value: event.target.value }))}
+        />
+      )
+    }
+    function Owner() {
+      const owned = useMachineAtom(makeOwned)
+      return (
+        <React.Suspense fallback="starting">
+          <Field owned={owned} />
+        </React.Suspense>
+      )
+    }
+    const view = render(
+      <RegistryContext.Provider value={registry}>
+        <Owner />
+      </RegistryContext.Provider>
+    )
+    const field = await waitFor(() => screen.getByTestId("field") as HTMLInputElement)
+    // React restores a controlled input to its rendered value when the
+    // handler leaves state unchanged, so each value must survive its event.
+    const values: Array<string> = []
+    for (const value of ["ac", "abc", "abbc"]) {
+      fireEvent.change(field, { target: { value } })
+      values.push(field.value)
+    }
+    assert.deepStrictEqual(values, ["ac", "abc", "abbc"])
+    await act(() => new Promise<void>((resolve) => setTimeout(resolve, 0)))
+    assert.strictEqual(field.value, "abbc")
+    view.unmount()
     registry.dispose()
   })
   it("does not start the machine during server rendering", () => {

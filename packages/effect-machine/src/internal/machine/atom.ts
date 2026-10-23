@@ -20,6 +20,7 @@ import * as internalMachine from "./machine.js"
 import * as PlannedSnapshot from "./plannedSnapshot.js"
 import type { EnsureExecutable } from "./readiness.js"
 import type { ExcludeCompatibleRuntime as ExcludeCompatibleMachineRuntime, IsAny } from "./requirements.js"
+import { isSnapshotObservable, snapshotObserver } from "./runtimeProtocol.js"
 import * as Topology from "./topology.js"
 
 export class ChildNotActiveError extends Data.TaggedError("ChildNotActiveError")<{
@@ -481,6 +482,22 @@ const makeChildRefAtom = <Child extends Machine.ChildMachine.Any, StartError>(
     return AsyncResult.success(current)
   }).pipe(Atom.withServerValueInitial)
 
+/**
+ * Mirrors a machine's snapshot into an atom. A local reference notifies
+ * synchronously, so a write to `send` from an event handler is visible before
+ * the handler returns, as controlled inputs require. Other references are
+ * mirrored from `changes`. Returns the cancellation.
+ */
+const observeSnapshots = <State, Error, Output>(
+  handle: Machine.MachineRef<State, any, Error, Output, any>,
+  onSnapshot: (snapshot: Machine.RuntimeSnapshot<State, Error, Output>) => void
+): () => void =>
+  isSnapshotObservable(handle)
+    ? handle[snapshotObserver](() => onSnapshot(Effect.runSync(handle.snapshot)))
+    : Effect.runCallback(
+      handle.changes.pipe(Stream.runForEach((snapshot) => Effect.sync(() => onSnapshot(snapshot))))
+    )
+
 const makeChildFromRefAtom = <Child extends Machine.ChildMachine.Any, StartError>(
   ref: Atom.Atom<AsyncResult.AsyncResult<Option.Option<Machine.ChildMachine.Ref<Child>>, StartError>>,
   descriptor: Child,
@@ -508,12 +525,9 @@ const makeChildFromRefAtom = <Child extends Machine.ChildMachine.Any, StartError
     }
 
     const handle = result.value.value as unknown as Machine.MachineRef<State, any, Error, Output, any>
-    const cancel = Effect.runCallback(
-      handle.changes.pipe(
-        Stream.runForEach((snapshot) => Effect.sync(() => get.setSelf(AsyncResult.success(Option.some(snapshot)))))
-      )
+    get.addFinalizer(
+      observeSnapshots(handle, (snapshot) => get.setSelf(AsyncResult.success(Option.some(snapshot))))
     )
-    get.addFinalizer(cancel)
     return AsyncResult.success(Option.some(Effect.runSync(handle.snapshot)))
   }).pipe(
     Atom.withServerValue(stableServerValue(() => [], (): AsyncResult.AsyncResult<
@@ -609,20 +623,14 @@ const makeFromRefAtom = <State, Event, Error, Output, StartError, Emitted>(
     }
 
     const handle = result.value
-    const cancel = Effect.runCallback(
-      handle.changes.pipe(
-        Stream.runForEach((snapshot) =>
-          Effect.sync(() =>
-            get.setSelf(
-              AsyncResult.success(snapshot, {
-                waiting: snapshot.status === "active"
-              })
-            )
-          )
-        )
-      )
+    get.addFinalizer(
+      observeSnapshots(handle, (snapshot) =>
+        get.setSelf(
+          AsyncResult.success(snapshot, {
+            waiting: snapshot.status === "active"
+          })
+        ))
     )
-    get.addFinalizer(cancel)
 
     const current = Effect.runSync(handle.snapshot)
     return AsyncResult.success(current, {
