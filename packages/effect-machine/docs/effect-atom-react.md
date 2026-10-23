@@ -47,7 +47,9 @@ import { createMachineContext } from "@typeonce/effect-machine-react"
 import { AuthMachine } from "../machines/auth-machine"
 import { MachineAtoms } from "../lib/atom-runtime"
 
-export const Auth = createMachineContext(MachineAtoms.factory(AuthMachine))
+export const Auth = createMachineContext(({ input }: { input: AuthInput }) =>
+  MachineAtoms.make(AuthMachine, input)
+)
 export const useAuthMachine = Auth.useMachine
 
 function AuthRoute({ input, attemptId }: Props) {
@@ -59,6 +61,9 @@ function AuthRoute({ input, attemptId }: Props) {
 }
 ```
 
+The factory takes one options object, and each option it declares is a
+Provider prop of the same name and type. A machine without input can pass
+`MachineAtoms.factory(Machine)` directly, and its Provider takes no `input`.
 Input is startup-only. Send events to update the existing workflow; change the
 Provider's React key to create a new one. `MachineState` does not suspend, so
 the first paint needs no Suspense boundary. Custom readers that use
@@ -135,9 +140,9 @@ once. `Atom.runtime` builds layers through the registry's memo map: the shared
 own capability layer. Use `Layer.provideMerge(ownerLayer, AppLayer)` when the
 owner layer itself needs application services.
 
-To share the owner-bound machine with a subtree, declare the capability as the
-second, `Layer`-typed parameter of a `createMachineContext` factory. The first
-parameter is the startup input; `OnboardingMachine` has none, so it is `void`:
+To share the owner-bound machine with a subtree, declare the capability as a
+`layer` option of a `createMachineContext` factory. `OnboardingMachine` has no
+input, so the factory declares only `layer`:
 
 ```tsx
 import { createMachineContext } from "@typeonce/effect-machine-react"
@@ -148,9 +153,9 @@ const navigationLayer = (router: Router) =>
   })
 
 export const Onboarding = createMachineContext(
-  (_: void, navigation: Layer.Layer<Navigation>) =>
+  ({ layer }: { layer: Layer.Layer<Navigation> }) =>
     AtomMachine
-      .bind(Atom.runtime(Layer.provideMerge(navigation, AppLayer)))
+      .bind(Atom.runtime(Layer.provideMerge(layer, AppLayer)))
       .make(OnboardingMachine)
 )
 
@@ -164,13 +169,15 @@ function OnboardingRoute() {
 ```
 
 The Provider requires a `layer` prop of exactly the declared `Layer` type, and
-an `input` prop when the first parameter is the machine's input, as in
-`(input: SignInInput, navigation: Layer.Layer<Navigation>)`. A factory without
-a layer parameter has a Provider without a `layer` prop. Like `input`, the
-layer is read once, when the Provider mounts: a new router instance does not
-rebuild the running machine. Change the Provider's React `key` to create a new
-owner with a new layer. Binding still checks the machine's requirements, so a
-layer type that omits `Navigation` is a compile error.
+an `input` prop when the factory also declares input, as in
+`({ input, layer }: { input: SignInInput; layer: Layer.Layer<Navigation> })`.
+Options other than `input` and `layer` are rejected, so a capability cannot
+travel under another name. A factory without a `layer` option has a Provider
+without a `layer` prop. Like `input`, the layer is read once, when the Provider
+mounts: a new router instance does not rebuild the running machine. Change the
+Provider's React `key` to create a new owner with a new layer. Binding still
+checks the machine's requirements, so a layer type that omits `Navigation` is a
+compile error.
 
 ## Render state-owned data
 

@@ -83,11 +83,15 @@ export const createMachineContext = <Args extends MachineContext.Args, A extends
     readonly children?: React.ReactNode
   }): React.ReactNode => {
     // Input and layer belong to this committed owner. A new React key creates a new owner.
-    const machine = useMachineAtom(() =>
-      create(
-        ...("layer" in props ? [props.input, props.layer] : "input" in props ? [props.input] : []) as Args
-      )
-    )
+    const machine = useMachineAtom(() => {
+      const options: { input?: unknown; layer?: unknown } = {}
+      if ("input" in props) options.input = props.input
+      if ("layer" in props) options.layer = props.layer
+      // A factory without parameters, such as `AtomMachine.factory(machine)`
+      // for a machine without input, is called without an options object.
+      const declaresOptions = create.length > 0 || "input" in options || "layer" in options
+      return create(...(declaresOptions ? [options] : []) as Args)
+    })
     return React.createElement(Context.Provider, { value: machine }, props.children)
   }
   const useMachine = (): A => {
