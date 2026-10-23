@@ -644,7 +644,11 @@ class CompiledProcess implements MachineRef<any, any, any, any> {
           this.interruptRequested = false
           return true
         }).pipe(
-          Effect.flatMap((interrupt) => interrupt ? this.interruptAndFinish(fiber) : Effect.void)
+          // The worker started in the sender's turn and may be waiting for
+          // the sender to finish, such as an invocation its transition
+          // interrupts, so the sender must not wait for the interruption.
+          // Whoever requested the stop already awaits completion.
+          Effect.flatMap((interrupt) => interrupt ? Effect.forkDetach(this.interruptAndFinish(fiber)) : Effect.void)
         )
       ),
       Effect.asVoid
