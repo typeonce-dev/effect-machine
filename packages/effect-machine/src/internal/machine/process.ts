@@ -154,14 +154,25 @@ const makeChildlessCompiledDrain = (
   // once the mailbox is empty. Only this drain commits a childless machine's
   // state, so the compact execution state stays valid in the process context
   // while the machine is idle and the next send does not re-derive it.
-  const drainSync = (context: Context): Effect.Effect<Option.Option<any>, any, any> | undefined => {
+  const drainSync = (
+    context: Context,
+    first?: internalRuntimeProtocol.ProcessMessage<any>
+  ): Effect.Effect<Option.Option<any>, any, any> | undefined => {
+    let delivered = first
     while (true) {
-      const pending = context.pollMessage()
-      if (Option.isNone(pending)) {
-        return undefined
+      let message: internalRuntimeProtocol.ProcessMessage<any>
+      if (delivered !== undefined) {
+        message = delivered
+        delivered = undefined
+        context.beginMessage(message)
+      } else {
+        const pending = context.pollMessage()
+        if (Option.isNone(pending)) {
+          return undefined
+        }
+        message = pending.value
       }
 
-      const message = pending.value
       const acknowledged = internalRuntimeProtocol.isAcknowledgedMessage(message)
       const event = acknowledged ? message.event : message
       const before = context.state()
@@ -208,8 +219,14 @@ const makeChildlessCompiledDrain = (
   return {
     run: (context) =>
       internalRuntimeProtocol.provideMachineRuntime(initialOutput(context) ?? loop(context), context.scope),
-    runSync: (context) => {
-      const remaining = initialOutput(context) ?? drainSync(context)
+    runSync: (context, message) => {
+      // A machine resumed in a final state reports its output instead; the
+      // message stays in flight, so termination settles it as stopped.
+      const output = initialOutput(context)
+      if (output !== undefined) {
+        context.beginMessage(message)
+      }
+      const remaining = output ?? drainSync(context, message)
       return remaining === undefined
         ? undefined
         : internalRuntimeProtocol.provideMachineRuntime(remaining, context.scope)

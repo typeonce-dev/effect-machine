@@ -577,23 +577,31 @@ class CompiledProcess implements MachineRef<any, any, any, any> {
         if (this.mailbox.closed || this.lifecycle !== "Active") {
           return Effect.fail(new StoppedError())
         }
-        offerCompactMailbox(this.mailbox, message)
         const inspector = this.inspector
         const subject = this.inspectionSubject
         if (inspector !== undefined && subject !== undefined) publishInspectedSent(inspector, subject, message)
         this.offerRevision += 1
-        if (this.runState === "Draining") {
+        // Initialization drains whatever it queued once it finishes, and an
+        // idle machine has an empty mailbox, so it receives the message directly.
+        const drain = this.execution.drain
+        const context = this.compiledContext
+        const runSync = this.runState === "Idle" && context !== undefined && drain._tag === "Owned"
+          ? drain.runSync
+          : undefined
+        if (runSync === undefined) {
+          offerCompactMailbox(this.mailbox, message)
+        }
+        if (this.runState !== "Idle") {
           return Effect.void
         }
         // An idle machine drains in the sender's turn, so a transition that
         // completes synchronously is committed before `send` returns. Sends
         // that arrive while draining only enqueue.
         this.runState = "Draining"
-        const drain = this.execution.drain
-        if (drain._tag === "Owned" && drain.runSync !== undefined) {
+        if (runSync !== undefined) {
           let remaining: Effect.Effect<Option.Option<unknown>, unknown, unknown> | undefined
           try {
-            remaining = drain.runSync(this.compiledContext!)
+            remaining = runSync(context!, message)
           } catch (error) {
             remaining = Effect.die(error)
           }
@@ -1004,6 +1012,10 @@ class CompiledProcess implements MachineRef<any, any, any, any> {
     return message
   }
 
+  beginCompiledMessage(message: ProcessMessage<unknown>): void {
+    this.inFlightMessage = isAcknowledgedMessage(message) ? message : undefined
+  }
+
   completeCompiledMessage(delivery: AcknowledgedDelivery<unknown>): void {
     succeedAcknowledgedMessage(this.inFlightMessage, delivery)
     this.inFlightMessage = undefined
@@ -1183,6 +1195,10 @@ class CompiledProcessContextImpl implements CompiledProcessContext<unknown, unkn
 
   pollMessage(): Option.Option<ProcessMessage<unknown>> {
     return this.process.pollCompiledMessage()
+  }
+
+  beginMessage(message: ProcessMessage<unknown>): void {
+    this.process.beginCompiledMessage(message)
   }
 
   state(): unknown {

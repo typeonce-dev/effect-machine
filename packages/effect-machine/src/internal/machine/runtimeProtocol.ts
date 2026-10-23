@@ -268,6 +268,8 @@ export interface CompiledProcessContext<State, Event> {
   readonly ownedChildren: OwnedChildRuntime
   readonly poll: () => Option.Option<Event>
   readonly pollMessage: () => Option.Option<ProcessMessage<Event>>
+  /** Marks a message delivered without the mailbox as the one in flight. */
+  readonly beginMessage: (message: ProcessMessage<Event>) => void
   readonly state: () => State
   readonly completeMessage: (delivery: AcknowledgedDelivery<State>) => void
   readonly commit: (state: State) => Effect.Effect<void> | undefined
@@ -301,8 +303,9 @@ type CompiledProcessDrain<State, Event, Error, Requirements, Output> =
 /**
  * A compiled drain that owns its planning loop.
  *
- * `runSync`, when present, drains in the caller without an Effect: it commits
- * queued messages whose transitions need no effectful work and returns the
+ * `runSync`, when present, drains in the caller without an Effect, starting
+ * with a message the idle runtime delivered directly instead of queueing: it
+ * commits messages whose transitions need no effectful work and returns the
  * drain continuing from the first message that does, equivalent to `run` from
  * that message, or `undefined` once the mailbox is empty.
  *
@@ -314,7 +317,8 @@ export interface OwnedCompiledProcessDrain<State, Event, Error, Requirements, Ou
     context: CompiledProcessContext<State, Event>
   ) => Effect.Effect<Option.Option<Output>, Error, Requirements>
   readonly runSync?: (
-    context: CompiledProcessContext<State, Event>
+    context: CompiledProcessContext<State, Event>,
+    message: ProcessMessage<Event>
   ) => Effect.Effect<Option.Option<Output>, Error, Requirements> | undefined
 }
 
