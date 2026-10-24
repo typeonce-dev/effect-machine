@@ -746,10 +746,13 @@ export const startGenericInternal: StartProcess = Effect.fnUntraced(
       }
     }
 
+    // The worker starts in the caller's turn and runs until it first suspends,
+    // so a process started while an event is processed, such as an
+    // invocation, begins its work before that event's sender continues.
     const forkRuntime = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
       detached === true
-        ? Effect.forkDetach(effect)
-        : Effect.forkChild(effect)
+        ? Effect.forkDetach(effect, { startImmediately: true })
+        : Effect.forkChild(effect, { startImmediately: true })
 
     const pendingTermination = yield* Deferred.poll(termination)
     const worker = Option.isNone(pendingTermination)
@@ -790,7 +793,6 @@ export const startGenericInternal: StartProcess = Effect.fnUntraced(
     )
 
     yield* forkRuntime(runFiber)
-    yield* Effect.yieldNow
 
     return ref
   }

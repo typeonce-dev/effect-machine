@@ -236,35 +236,44 @@ const startResolved = (
       ...(descriptor === undefined ? undefined : { descriptor }),
       ...(activityKind === undefined ? undefined : { activityKind }),
       sendParent: (isCurrent, event) => isCurrent() ? scope.self.send(event) : Effect.void,
-      onOutcome: (isCurrent, outcome, activitySessionId) => {
-        if (outcome._tag === "Stopped" || !isCurrent()) return Effect.void
-        if (outcome._tag === "Done") {
-          if (onDone === undefined) {
-            return scope.failCause(Cause.die(
-              new Error(
-                `Invocation "${invokeId}" completed without the required onDone handler`
+      // The work starts while the event that entered its state is processed,
+      // and its outcome is handled in a later turn, even when the work
+      // completes without suspending. The entered state is therefore always
+      // observed before the outcome leaves it, and the outcome of a state that
+      // was exited in between is discarded.
+      onOutcome: (isCurrent, outcome, activitySessionId) =>
+        Effect.andThen(
+          Effect.yieldNow,
+          Effect.suspend(() => {
+            if (outcome._tag === "Stopped" || !isCurrent()) return Effect.void
+            if (outcome._tag === "Done") {
+              if (onDone === undefined) {
+                return scope.failCause(Cause.die(
+                  new Error(
+                    `Invocation "${invokeId}" completed without the required onDone handler`
+                  )
+                ))
+              }
+              return sendLifecycle(
+                scope,
+                InvocationEvent.done(path, invokeId, outcome.output),
+                activityKind === undefined ? undefined : activitySessionId
               )
-            ))
-          }
-          return sendLifecycle(
-            scope,
-            InvocationEvent.done(path, invokeId, outcome.output),
-            activityKind === undefined ? undefined : activitySessionId
-          )
-        }
-        if (
-          outcome._tag === "Failure" &&
-          onFailure !== undefined &&
-          (descriptor === undefined || !isFrameworkFailure(outcome.error))
-        ) {
-          return sendLifecycle(
-            scope,
-            InvocationEvent.failure(path, invokeId, outcome.error),
-            activityKind === undefined ? undefined : activitySessionId
-          )
-        }
-        return scope.failCause(outcome.cause)
-      },
+            }
+            if (
+              outcome._tag === "Failure" &&
+              onFailure !== undefined &&
+              (descriptor === undefined || !isFrameworkFailure(outcome.error))
+            ) {
+              return sendLifecycle(
+                scope,
+                InvocationEvent.failure(path, invokeId, outcome.error),
+                activityKind === undefined ? undefined : activitySessionId
+              )
+            }
+            return scope.failCause(outcome.cause)
+          })
+        ),
       ...(onSnapshot === undefined ? undefined : {
         onSnapshot: (isCurrent: () => boolean, snapshot: any) =>
           isCurrent()

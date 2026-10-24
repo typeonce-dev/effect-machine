@@ -330,6 +330,26 @@ through its own runtime, as described in
 Do not start a promise inside a transition callback. A transition has no
 lifetime in which to own that work. A state does.
 
+Invoked work starts while the event that entered its state is processed. It
+runs in the sender's turn until it first suspends, and its outcome is handled
+in a later turn, even when the work completes without suspending. A state that
+invokes work is therefore always observed before its outcome leaves it. Put a
+browser call that requires user activation, such as `window.open` or
+`navigator.clipboard.writeText`, in the first step of the invoked Effect:
+
+```ts
+effects: {
+  authenticate: Effect.gen(function*() {
+    // Runs inside the click that sent the event.
+    const popup = yield* Effect.sync(() => window.open("about:blank", "auth", "popup"))
+    return yield* signInWithPopup(popup)
+  })
+}
+```
+
+The sender also runs any synchronous work before that first suspension. Keep
+expensive synchronous computation behind a suspension or in a separate state.
+
 Give every invocation declared by one state a unique lifecycle ID. Give every
 logic or child process that can be active at the same time a unique runtime
 address as well:
