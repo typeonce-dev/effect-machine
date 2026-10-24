@@ -2065,9 +2065,14 @@ export interface Prepared<out State, in Event, out Error, out Output, out Emitte
  * `send` reports whether an event was accepted for delivery. A running
  * machine reference is local, so an idle machine processes an accepted event
  * in the sender's turn: work that completes without suspending is reflected
- * by `snapshot` when `send` returns. Work that suspends continues in the
- * background, and an event sent while the machine is processing is queued
- * behind the current work. `changes` subscribers receive every committed
+ * by `snapshot` when `send` returns. Work invoked by an entered state also
+ * starts in the sender's turn and runs until it first suspends, so browser
+ * APIs that require user activation, such as `window.open`, can run in the
+ * first step of an invoked Effect. Work that suspends continues in the
+ * background, and its outcome is handled in a later turn, even when the work
+ * completes without suspending, so the entered state is always observed
+ * before the outcome leaves it. An event sent while the machine is processing
+ * is queued behind the current work. `changes` subscribers receive every committed
  * snapshot in order once the sender yields, with consecutive sends delivered
  * together. This guarantee belongs to `MachineRef`; a `MachineTarget` only
  * promises delivery. Errors that occur while processing an accepted event are
@@ -2110,7 +2115,8 @@ export interface MachineRef<out State, in Event, out Error = never, out Output =
   /**
    * Accepts an event for processing by this local machine. An idle machine
    * processes it in the sender's turn until the work first suspends, so
-   * `snapshot` reflects it when `send` returns.
+   * `snapshot` reflects it when `send` returns. Work invoked by an entered
+   * state starts in the same turn; its outcome is handled in a later turn.
    */
   readonly send: (event: Event) => Effect.Effect<void, StoppedError>
 

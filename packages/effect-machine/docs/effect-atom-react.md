@@ -287,6 +287,13 @@ function SubmitButton() {
 `useAtomSet` mounts the writable atom and does not subscribe the component to
 its value.
 
+A write to a ready machine is processed inside the event handler, and work
+invoked by the entered state starts there too. A browser call that requires
+user activation, such as `window.open`, `navigator.clipboard.writeText`, or
+`HTMLMediaElement.play`, can therefore run in the first step of the invoked
+Effect. A write held while the machine is still starting is delivered later,
+outside the user's gesture.
+
 Writes made while the machine is still starting, for example while a bound
 `Atom.runtime` layer is building after hydration, are held and delivered in
 write order once the machine is ready. The write result stays waiting until
