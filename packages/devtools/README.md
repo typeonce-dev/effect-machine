@@ -17,6 +17,8 @@ When pinning a release instead of using `latest`, use the same explicit version 
 
 The current release requires Node.js 22.19 or newer and stable Effect `^4.0.0`.
 
+The CLI brings its own TypeScript parser and Vite server, so a project does not need to install either. They are regular dependencies with ranges (`typescript` `>=5.9.0 <7.0.0`, `vite` `^8.1.5`), so a package manager can reuse a compatible version the project already has. The project can use any TypeScript version, including TypeScript 7. Devtools only parses source files with the JavaScript compiler API, which TypeScript 7 does not ship, so it keeps its own 5.9–6.x copy in that case.
+
 ## Run the visualizer
 
 Start it from the project that contains the machines:
