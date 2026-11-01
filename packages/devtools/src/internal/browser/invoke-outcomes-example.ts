@@ -259,7 +259,6 @@ export const invokeOutcomesMachine = Machine.make({
               resolve: ({ select, snapshot }) =>
                 snapshot.state === "ready"
                   ? select.ready({ data: new Completed({ source: "process", result: "ready" }), decoded: true })
-                  // oxlint-disable-next-line effect-machine/no-conditional-none-branch -- `Machine.can` does not query snapshot outcomes; the titled branch documents the wait.
                   : select.waiting()
             }
           }

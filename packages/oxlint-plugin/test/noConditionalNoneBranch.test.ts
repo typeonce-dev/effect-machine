@@ -56,6 +56,11 @@ tester.run("no-conditional-none-branch", rule, {
       submit,
       `{ branches: "submit", resolve: ({ state, select }) => state.ok ? select.review() : ((select) => select.incomplete())(other) }`
     ),
+    // Invocation outcomes and eventless transitions are not events that `Machine.can` queries.
+    `import { Machine } from "@typeonce/effect-machine"
+Machine.make({ branches: { snapshot: { ready: { target: "Ready" }, waiting: { none: true } } } }).handle({ states: { Watching: { invoke: { src: "worker", onSnapshot: { branches: "snapshot", resolve: ({ snapshot, select }) => snapshot.ready ? select.ready() : select.waiting() } } } } })`,
+    `import { Machine } from "@typeonce/effect-machine"
+Machine.make({ branches: { ${submit} } }).handle({ states: { Editing: { always: { branches: "submit", resolve: ({ state, select }) => state.ok ? select.review() : select.incomplete() } } } })`,
     // Without a Machine import nothing is a machine definition.
     `const Machine = { make: (_: unknown) => ({ handle: (_: unknown) => undefined }) }
 Machine.make({ branches: { ${submit} } }).handle({ states: { Editing: { on: { Submitted: { branches: "submit", resolve: ({ state, select }) => state.ok ? select.review() : select.incomplete() } } } } })`,

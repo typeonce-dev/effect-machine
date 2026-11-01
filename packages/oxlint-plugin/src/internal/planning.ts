@@ -65,7 +65,8 @@ const isStateConfig = (
   return isStateConfig(stateCollection.parent.parent, bindings)
 }
 
-const isEventHandlerProperty = (
+/** Whether a property declares one event handler in a state's `on` record. */
+export const isEventHandlerProperty = (
   node: ESTree.Node,
   bindings: MachineBindings
 ): boolean => {
