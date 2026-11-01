@@ -207,7 +207,7 @@ const evaluate = (
   return runWorker(request).pipe(
     Effect.flatMap((message) => {
       if (message._tag !== "InspectedMachines") {
-        return Effect.fail(new Error(`Unexpected worker response: ${message._tag}`))
+        return Effect.fail(new Error(`Unexpected worker response: ${String(message._tag)}`))
       }
       return Effect.forEach(
         message.results,

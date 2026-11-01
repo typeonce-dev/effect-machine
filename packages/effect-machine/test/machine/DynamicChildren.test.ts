@@ -48,7 +48,7 @@ describe("dynamic child machines", () => {
         initial: {
           target: "PlantActive",
           decoded: true,
-          data: ({ root: { input: input } }) => new PlantActive({ id: input.id, produced: input.production })
+          data: ({ root: { input } }) => new PlantActive({ id: input.id, produced: input.production })
         },
         root: ({ input }) => ({ input }),
         states: {
@@ -57,7 +57,7 @@ describe("dynamic child machines", () => {
               Produce: {
                 target: "PlantActive",
                 decoded: true,
-                data: ({ event, state }) => (new PlantActive({ ...state, produced: state.produced + event.amount }))
+                data: ({ event, state }) => (new PlantActive({ id: state.id, produced: state.produced + event.amount }))
               },
               Report: {
                 none: true,
@@ -120,7 +120,7 @@ describe("dynamic child machines", () => {
         initial: {
           target: "Commissioning",
           decoded: true,
-          data: ({ root: { input: input } }) => new Commissioning({ plants: input })
+          data: ({ root: { input } }) => new Commissioning({ plants: input })
         },
         root: ({ input }) => ({ input }),
         states: {
@@ -332,7 +332,7 @@ describe("dynamic child machines", () => {
         initial: {
           target: "WorkerIdle",
           decoded: true,
-          data: ({ root: { input: input } }) => new WorkerIdle({ id: input.id })
+          data: ({ root: { input } }) => new WorkerIdle({ id: input.id })
         },
         root: ({ input }) => ({ input }),
         states: {

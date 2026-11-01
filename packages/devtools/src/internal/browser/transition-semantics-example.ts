@@ -241,7 +241,7 @@ export const transitionSemanticsMachine = Machine.make({
           initial: {
             target: "Workspace.Review.Checking",
             decoded: true,
-            data: ({}) => new Checking({ checks: ["types", "tests"] })
+            data: () => new Checking({ checks: ["types", "tests"] })
           },
           onDone: {
             target: "Workspace.Finished",

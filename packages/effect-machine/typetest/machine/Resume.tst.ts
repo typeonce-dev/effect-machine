@@ -20,7 +20,7 @@ const machine = Machine.make({
   initial: {
     target: "Idle",
     decoded: true,
-    data: ({ root: { input: input } }) => new Idle({ value: input.seed })
+    data: ({ root: { input } }) => new Idle({ value: input.seed })
   },
   root: ({ input }) => ({ input }),
   states: {

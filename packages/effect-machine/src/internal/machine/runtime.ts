@@ -234,11 +234,7 @@ const prepareProcessWithStrategy = Effect.fnUntraced(function*<
   const start = yield* Effect.cached(
     ownedByScope(initialize).pipe(
       Effect.onExit((exit) => Deferred.done(started, exit))
-    ) as Effect.Effect<
-      MachineRef<State, Event, Error, Output, Emitted>,
-      InitialError,
-      Requirements | Scope.Scope
-    >
+    )
   )
   return {
     id: options?.id ?? sessionId,

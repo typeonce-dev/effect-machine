@@ -68,7 +68,7 @@ describe("declared initial entry types", () => {
         opened: {
           initial: {
             target: "opened.idle",
-            data: ({}) => ({ count: 0 })
+            data: () => ({ count: 0 })
           },
           states: {
             idle: {},

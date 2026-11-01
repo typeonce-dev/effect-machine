@@ -1027,13 +1027,13 @@ export const highlightCode = (source, language) => {
   return tokens.map((token) => {
     let kind
     if (/^\s+$/u.test(token)) kind = undefined
-    else if (/^\/[/\*]/.test(token)) kind = "comment"
+    else if (/^\/[/*]/.test(token)) kind = "comment"
     else if (/^["'`]/.test(token)) kind = "string"
     else if (/^\d/.test(token)) kind = "number"
     else if (typeScriptKeywords.has(token)) kind = "keyword"
     else if (typeScriptTypes.has(token) || /^\p{Lu}/u.test(token)) kind = "type"
     else if (["class", "const", "function", "interface", "type"].includes(previous)) kind = "name"
-    else if (/^[{}()[\]<>.,:;?=|&+\-*\/!]$/.test(token)) kind = "punctuation"
+    else if (/^[{}()[\]<>.,:;?=|&+\-*/!]$/.test(token)) kind = "punctuation"
     if (!/^\s+$/u.test(token)) previous = token
     const escaped = escapeHtml(token)
     return kind === undefined ? escaped : `<span class="syntax-${kind}">${escaped}</span>`

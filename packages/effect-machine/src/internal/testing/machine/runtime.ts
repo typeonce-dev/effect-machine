@@ -1528,7 +1528,7 @@ export const runtimeCommands = <M extends AnyMachine>(
     ? Protocol.inputEventSchemas(machine).map((schema) => {
       const derived = toArbitraryWithReport(schema)
       reports.push(derived.report)
-      return derived.value as Arbitrary.Arbitrary<Machine.Machine.InputEvent<M>>
+      return derived.value
     })
     : []
   const eventArbitrary = options.eventArbitrary ?? (eventArbitraries.length === 0

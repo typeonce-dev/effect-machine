@@ -208,7 +208,9 @@ const historyMachine = Machine.make({
 })
 const historySnapshot = () =>
   ({
-    ...{ path: "" as const, value: undefined, state: { path: "Outside" as const, value: new Outside({}) } },
+    path: "" as const,
+    value: undefined,
+    state: { path: "Outside" as const, value: new Outside({}) },
     history: {
       "Workspace.recent": {
         mode: "shallow" as const,

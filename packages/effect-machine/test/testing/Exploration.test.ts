@@ -370,7 +370,7 @@ describe("MachineTest bounded exploration", () => {
         initial: {
           target: "counter",
           decoded: true,
-          data: ({ root: { input: input } }) => new Counter({ count: input.count })
+          data: ({ root: { input } }) => new Counter({ count: input.count })
         },
         root: ({ input }) => ({ input }),
         states: {

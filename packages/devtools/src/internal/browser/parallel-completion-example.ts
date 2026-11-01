@@ -136,7 +136,7 @@ export const parallelCompletionMachine = Machine.make({
       }
     },
     Order: {
-      initial: { payment: ({}) => ({ attempts: 0 }), fulfillment: ({}) => ({ warehouse: "north" }) },
+      initial: { payment: () => ({ attempts: 0 }), fulfillment: () => ({ warehouse: "north" }) },
       on: {
         CancelOrder: {
           target: "Cancelled",

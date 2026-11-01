@@ -158,7 +158,7 @@ export const machine = Machine.make({
               initial: {
                 target: "application.workflow.running.editing",
                 decoded: true,
-                data: ({}) => new Editing({})
+                data: () => new Editing({})
               },
               states: {
                 editing: {

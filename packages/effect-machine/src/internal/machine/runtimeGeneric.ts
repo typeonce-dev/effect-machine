@@ -223,13 +223,11 @@ export const startGenericInternal: StartProcess = Effect.fnUntraced(
         )
     const sendToTarget: ProcessScope<Event>["sendTo"] = inspector === undefined
       ? ((target: unknown, event: unknown) =>
-        isMachineTarget(target) ? target.send(event) : sendTo(target as ChildSelector, event)) as ProcessScope<
-          Event
-        >["sendTo"]
+        isMachineTarget(target) ? target.send(event) : sendTo(target as ChildSelector, event))
       : ((target: unknown, event: unknown) =>
         isMachineTarget(target)
           ? sendMachineTarget(target, event, subject, currentCausation())
-          : sendTo(target as ChildSelector, event, subject, currentCausation())) as ProcessScope<Event>["sendTo"]
+          : sendTo(target as ChildSelector, event, subject, currentCausation()))
 
     const scope: ProcessScope<Event> = {
       self,

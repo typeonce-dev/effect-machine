@@ -151,7 +151,7 @@ const compileIndexedExecutionDescriptor = (
       finalPaths.push(node.path)
     }
 
-    const config = toImpl(machine).handlers[node.path] as CapturedStateConfig | undefined
+    const config = toImpl(machine).handlers[node.path]
     if (!supportsIndexedStateConfig(config)) {
       return undefined
     }

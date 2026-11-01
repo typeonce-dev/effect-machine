@@ -690,7 +690,7 @@ const flattenHandlers = (
         throw new Error(`Machine choice state "${path}" requires a transition`)
       }
     }
-    handlers[path] = stateConfig as CapturedStateConfig
+    handlers[path] = stateConfig
     if (childConfig !== undefined) {
       const node = Topology.getStateNodeDefinition(path, states[key]!)
       if (node.states === undefined) {
@@ -821,9 +821,7 @@ const makeStateHelpers = (): Machine.StateAccessors<{ readonly "": Machine.State
     >["getSnapshot"],
     matches:
       ((snapshot: Machine.AtomicSnapshot<string, unknown>, path: string) =>
-        Option.isSome(Topology.getSnapshotByPath(snapshot, path))) as Machine.StateAccessors<
-          { readonly "": Machine.StateNodeConfig }
-        >["matches"]
+        Option.isSome(Topology.getSnapshotByPath(snapshot, path)))
   }
 }
 
@@ -870,7 +868,7 @@ const flattenEventProtocolInputs = <Kind extends Machine.EventProtocolKind>(
   inputs.flatMap((input) =>
     Protocol.isEventProtocol(input, kind)
       ? Protocol.eventProtocolSchemas(input)
-      : [input as Machine.TaggedSchema]
+      : [input]
   )
 
 export const events = <const Inputs extends ReadonlyArray<Machine.EventProtocolInput<"public">>>(
@@ -982,7 +980,7 @@ export const initialDefinition = <M extends Machine.Any>(
 
 export const inputEventSchemas = <M extends Machine.Any>(
   machine: M
-): Machine.InputEvents<M> => Protocol.inputEventSchemas(machine) as Machine.InputEvents<M>
+): Machine.InputEvents<M> => Protocol.inputEventSchemas(machine)
 
 export const transitionDefinitions = <M extends Machine.Any>(
   machine: M

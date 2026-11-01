@@ -83,7 +83,7 @@ const makeInputCounterMachine = () => {
     initial: {
       target: "Count",
       decoded: true,
-      data: ({ root: { input: input } }) => new Count({ value: input })
+      data: ({ root: { input } }) => new Count({ value: input })
     },
     root: ({ input }) => ({ input }),
     states: {

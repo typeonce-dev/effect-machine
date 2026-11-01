@@ -195,14 +195,14 @@ describe("Machine choice pseudo-states", () => {
       }).handle({
         initial: {
           target: "Root",
-          data: ({ root: { input: input } }) => ({ enabled: input.enabled })
+          data: ({ root: { input } }) => ({ enabled: input.enabled })
         },
         root: ({ input }) => ({ input }),
         states: {
           Root: {
             initial: {
               target: "Root.Flow",
-              data: ({ root: { input: input } }) => ({ score: input.score })
+              data: ({ root: { input } }) => ({ score: input.score })
             },
             states: {
               Flow: {

@@ -145,7 +145,7 @@ const makeMachine = (unsafeStart = false) =>
                 initial: {
                   target: "application.workflow.running.editing",
                   decoded: true,
-                  data: ({}) => new Editing({})
+                  data: () => new Editing({})
                 },
                 states: {
                   editing: {},
@@ -205,7 +205,7 @@ const lifecycleDefinition = Machine.make({
   root: LifecycleStates,
   events: Machine.eventsFromSchemas()
 })
-const makeLifecycleMachine = (unsafe: "always" | "done" | undefined = undefined) =>
+const makeLifecycleMachine = (unsafe?: "always" | "done") =>
   lifecycleDefinition.handle({
     initial: {
       target: "idle",

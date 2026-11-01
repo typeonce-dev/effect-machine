@@ -87,6 +87,8 @@ const reportFor = (ast: SchemaAST.AST): SchemaArbitraryReport => {
       case "Suspend":
         visit(ast.thunk(), path)
         break
+      default:
+        break
     }
     stack.delete(ast)
   }

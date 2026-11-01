@@ -26,7 +26,7 @@ describe("MachineTest exploration", () => {
     initial: {
       target: "counter",
       decoded: true,
-      data: ({ root: { input: input } }) => new Counter({ count: input.seed })
+      data: ({ root: { input } }) => new Counter({ count: input.seed })
     },
     root: ({ input }) => ({ input }),
     states: {

@@ -597,6 +597,7 @@ const addGeneratedHistory = (
           event: leaveEvent,
           target: historyPath
         }),
+        // oxlint-disable-next-line typescript/no-unnecessary-type-assertion -- TypeScript 6 infers `readonly string[]` without it.
         events: Object.freeze([mutationEvent, leaveEvent, leaveEvent]) as readonly [string, string, string]
       })
     })
@@ -1266,7 +1267,7 @@ const construction = (
       [
         requestedChild ?? (sourcePath === path
           ? state.node.states.find((child) => child._tag !== "History" && child._tag !== "Choice")!.key
-          : sourcePath!.slice(path.length + 1).split(".")[0]!)
+          : sourcePath.slice(path.length + 1).split(".")[0]!)
       ]
       : state.node.states.filter((child) => child._tag !== "History" && child._tag !== "Choice").map((child) =>
         child.key
@@ -1467,6 +1468,7 @@ export const compileModel = (model: FiniteModel): Machine.Machine.Any => {
   ]))
   const branches: Record<string, Readonly<Record<string, unknown>>> = Object.create(null)
   const handlers = makeHandlers(model.roots, undefined, byPath, transitions, branches)
+  // oxlint-disable-next-line typescript/no-unnecessary-type-assertion -- TypeScript 6 rejects the erased branch record without it.
   const machine = Machine.make({
     root: defined,
     branches,
@@ -1481,5 +1483,5 @@ export const compileModel = (model: FiniteModel): Machine.Machine.Any => {
       },
       states: handlers
     } as any
-  ) as Machine.Machine.Any
+  )
 }

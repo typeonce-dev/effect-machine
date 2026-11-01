@@ -74,10 +74,8 @@ const makeChildOwner = (scope: Runtime.ProcessScope<any>): ChildOwner<any> => ({
     child: Child & ChildMachine.Executable<Child> & ChildMachine.ParentCompatibility<Child, any>,
     ...options: ChildMachine.SpawnArgs<Child>
   ) => scope.spawn<Child>(child, ...options),
-  sendTo: ((descriptor: ChildMachine.Any, event: unknown) => scope.sendTo(descriptor, event)) as ChildOwner<
-    any
-  >["sendTo"],
-  stop: ((descriptor: ChildMachine.Any) => scope.stopChild(descriptor)) as ChildOwner<any>["stop"]
+  sendTo: (descriptor: ChildMachine.Any, event: unknown) => scope.sendTo(descriptor, event),
+  stop: (descriptor: ChildMachine.Any) => scope.stopChild(descriptor)
 })
 
 const resolveOne = (

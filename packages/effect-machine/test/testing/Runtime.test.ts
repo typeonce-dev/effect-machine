@@ -181,7 +181,7 @@ describe("MachineTest runtime commands", () => {
               return Effect.succeed({
                 model: next,
                 expected: {
-                  result: model.stopped ? "SendRejected" : "SendAccepted" as string,
+                  result: model.stopped ? "SendRejected" : "SendAccepted",
                   count: next.count,
                   status: model.stopped ? "stopped" as const : "active" as const
                 },
@@ -193,7 +193,7 @@ describe("MachineTest runtime commands", () => {
             case "Stop":
               return Effect.succeed({
                 model: { ...model, stopped: true },
-                expected: { result: "Stopped" as string, count: model.count, status: "stopped" as const },
+                expected: { result: "Stopped", count: model.count, status: "stopped" as const },
                 synchronize: model.stopped
                   ? MachineTest.RuntimeSynchronization.current
                   : MachineTest.RuntimeSynchronization.next
@@ -202,7 +202,7 @@ describe("MachineTest runtime commands", () => {
               return Effect.succeed({
                 model,
                 expected: {
-                  result: "ClockAdvanced" as string,
+                  result: "ClockAdvanced",
                   count: model.count,
                   status: model.stopped ? "stopped" as const : "active" as const
                 },
@@ -212,7 +212,7 @@ describe("MachineTest runtime commands", () => {
               return Effect.succeed({
                 model,
                 expected: {
-                  result: "Checkpoint" as string,
+                  result: "Checkpoint",
                   count: model.count,
                   status: model.stopped ? "stopped" as const : "active" as const
                 },
@@ -248,14 +248,14 @@ describe("MachineTest runtime commands", () => {
             const next = { count: model.count + command.event.amount, pending: model.pending + 1 }
             return Effect.succeed({
               model: next,
-              expected: { count: next.count, result: "SendAccepted" as string },
+              expected: { count: next.count, result: "SendAccepted" },
               synchronize: MachineTest.RuntimeSynchronization.none
             })
           }
           const next = { ...model, pending: 0 }
           return Effect.succeed({
             model: next,
-            expected: { count: next.count, result: "Checkpoint" as string },
+            expected: { count: next.count, result: "Checkpoint" },
             synchronize: MachineTest.RuntimeSynchronization.until<CounterSnapshot, any>((snapshot) =>
               snapshotCount(snapshot) === next.count
             )
@@ -312,7 +312,7 @@ describe("MachineTest runtime commands", () => {
         MachineTest.checkpointCommand("after timeout")
       ]
       const transcript = yield* MachineTest.runEnqueuedCommands(ref, commands, {
-        initialModel: { elapsed: 0, path: "Waiting" as "Waiting" | "TimedOut" },
+        initialModel: { elapsed: 0, path: "Waiting" },
         transition: (model, command) => {
           if (command._tag === "Advance") {
             const elapsed = model.elapsed + Number(command.duration)
@@ -768,7 +768,7 @@ describe("MachineTest causal runtime commands", () => {
       const ref = yield* Machine.start(timerMachine)
       const probe = yield* MachineTest.probe(timerMachine, ref)
       const transcript = yield* MachineTest.runCausalCommands(probe, [MachineTest.advanceCommand(1000)], {
-        initialModel: "Waiting" as "Waiting" | "TimedOut",
+        initialModel: "Waiting",
         transition: () =>
           Effect.succeed({
             model: "TimedOut" as const,

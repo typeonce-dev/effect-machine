@@ -642,7 +642,7 @@ export const configurationFromSnapshotEffect = Effect.fnUntraced(function*(
     values,
     outputs,
     history: yield* historyFromSnapshotEffect(machine, snapshot)
-  } as ActiveConfiguration
+  }
 })
 
 export const normalizeConfigurationEffect = <const States extends Machine.StateSchemas>(
@@ -838,7 +838,7 @@ export const configurationFromTargetPathEffect = Effect.fnUntraced(function*(
     values,
     outputs,
     history: current.history
-  } as ActiveConfiguration
+  }
 })
 
 export const configurationFromTargetSnapshotEffect = Effect.fnUntraced(function*(
@@ -911,7 +911,7 @@ export const configurationFromTargetSnapshotEffect = Effect.fnUntraced(function*
     values,
     outputs,
     history: new Map([...current.history, ...subtree.history])
-  } as ActiveConfiguration
+  }
 })
 
 export const normalizeTargetConfigurationEffect = <const States extends Machine.StateSchemas>(
@@ -929,7 +929,7 @@ export const normalizeTargetConfigurationEffect = <const States extends Machine.
         machine,
         current,
         snapshot,
-        target.values as Readonly<Record<string, unknown>> | undefined
+        target.values
       )
     }
     return configurationFromTargetPathEffect(
@@ -937,7 +937,7 @@ export const normalizeTargetConfigurationEffect = <const States extends Machine.
       current,
       target.path,
       target.value,
-      target.values as Readonly<Record<string, unknown>> | undefined
+      target.values
     )
   }
   if (isSnapshot(target)) {
@@ -1111,7 +1111,7 @@ export const normalizeTargetConfigurationSync = (
         machine,
         current,
         snapshot,
-        target.values as Readonly<Record<string, unknown>> | undefined
+        target.values
       )
     }
     return configurationFromTargetPathSync(
@@ -1119,7 +1119,7 @@ export const normalizeTargetConfigurationSync = (
       current,
       target.path,
       target.value,
-      target.values as Readonly<Record<string, unknown>> | undefined
+      target.values
     )
   }
   if (isSnapshot(target)) {
@@ -1364,10 +1364,7 @@ export const completeConfigurationEffect: <
   ) {
     yield* completeActiveFinalNodeEffect(machine, completed, path, event, outputs, completions)
   }
-  return { configuration: completed, completions } as {
-    readonly configuration: ActiveConfiguration
-    readonly completions: ReadonlyArray<FinalCompletion>
-  }
+  return { configuration: completed, completions }
 })
 
 const resolveFinalOutputSync = <const Events extends ReadonlyArray<Machine.TaggedSchema>>(

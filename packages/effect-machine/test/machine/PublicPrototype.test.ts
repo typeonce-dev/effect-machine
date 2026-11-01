@@ -25,6 +25,7 @@ it("uses the public pipeable and inspectable prototypes", () => {
   }
   assert.deepStrictEqual(inspectable.toJSON(), { _id: "Machine" })
   assert.strictEqual(JSON.stringify(machine), "{\"_id\":\"Machine\"}")
+  // oxlint-disable-next-line typescript/no-base-to-string -- the test checks the custom `toString` of the machine prototype.
   assert.strictEqual(String(machine), "{\"_id\":\"Machine\"}")
   assert.deepStrictEqual(inspectable[Symbol.for("nodejs.util.inspect.custom")]!(), { _id: "Machine" })
 })

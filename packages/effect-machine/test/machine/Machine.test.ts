@@ -570,7 +570,7 @@ describe("Machine", () => {
         initial: {
           target: "Idle",
           decoded: true,
-          data: ({ root: { input: input } }) => new Idle({ userId: input.userId })
+          data: ({ root: { input } }) => new Idle({ userId: input.userId })
         },
         root: ({ input }) => ({ input }),
         states: {
@@ -654,7 +654,7 @@ describe("Machine", () => {
       initial: {
         target: "Idle",
         decoded: true,
-        data: ({ root: { input: input } }) => new Idle({ userId: input.userId })
+        data: ({ root: { input } }) => new Idle({ userId: input.userId })
       },
       root: ({ input }) => ({ input }),
       states: {
@@ -1719,7 +1719,7 @@ describe("Machine", () => {
           initial: {
             target: "NonEmptyIdle",
             decoded: true,
-            data: ({ root: { input: input } }) => new NonEmptyIdle({ userId: input.userId })
+            data: ({ root: { input } }) => new NonEmptyIdle({ userId: input.userId })
           },
           root: ({ input }) => ({ input }),
           states: {
@@ -2284,11 +2284,9 @@ describe("Machine", () => {
           }
         })
         const error = yield* Machine.encodeSnapshot(machine, {
-          ...{
-            path: "" as const,
-            value: undefined,
-            state: { path: "NonEmptyIdle" as const, value: new NonEmptyIdle({ userId: "user-1" }) }
-          },
+          path: "" as const,
+          value: undefined,
+          state: { path: "NonEmptyIdle" as const, value: new NonEmptyIdle({ userId: "user-1" }) },
           completed: [{ path: "missing" as const, output: undefined }]
         }).pipe(Effect.flip)
         assert.instanceOf(error, Machine.MachineSchemaEncodeError)
@@ -2387,7 +2385,7 @@ describe("Machine", () => {
         initial: {
           target: "idle",
           decoded: true,
-          data: ({ root: { input: input } }) => new Idle({ userId: input.userId })
+          data: ({ root: { input } }) => new Idle({ userId: input.userId })
         },
         root: ({ input }) => ({ input }),
         states: {
@@ -5000,7 +4998,7 @@ describe("Machine", () => {
         initial: {
           target: "Idle",
           decoded: true,
-          data: ({ root: { input: input } }) => new Idle({ userId: input.userId })
+          data: ({ root: { input } }) => new Idle({ userId: input.userId })
         },
         root: ({ input }) => ({ input }),
         states: {
@@ -5043,7 +5041,7 @@ describe("Machine", () => {
       initial: {
         target: "Idle",
         decoded: true,
-        data: ({ root: { input: input } }) => new Idle({ userId: input.userId })
+        data: ({ root: { input } }) => new Idle({ userId: input.userId })
       },
       root: ({ input }) => ({ input }),
       states: {
@@ -5098,7 +5096,7 @@ describe("Machine", () => {
       initial: {
         target: "Idle",
         decoded: true,
-        data: ({ root: { input: input } }) => new Idle({ userId: input.userId })
+        data: ({ root: { input } }) => new Idle({ userId: input.userId })
       },
       root: ({ input }) => ({ input }),
       states: {
@@ -5139,7 +5137,7 @@ describe("Machine", () => {
         initial: {
           target: "Idle",
           decoded: true,
-          data: ({ root: { input: input } }) => new Idle({ userId: input.userId })
+          data: ({ root: { input } }) => new Idle({ userId: input.userId })
         },
         root: ({ input }) => ({ input }),
         states: {
@@ -5185,7 +5183,7 @@ describe("Machine", () => {
         initial: {
           target: "Idle",
           decoded: true,
-          data: ({ root: { input: input } }) => new Idle({ userId: input.userId })
+          data: ({ root: { input } }) => new Idle({ userId: input.userId })
         },
         root: ({ input }) => ({ input }),
         states: {
@@ -5305,7 +5303,7 @@ describe("Machine", () => {
         initial: {
           target: "Idle",
           decoded: true,
-          data: ({ root: { input: input } }) => new Idle({ userId: input.userId })
+          data: ({ root: { input } }) => new Idle({ userId: input.userId })
         },
         root: ({ input }) => ({ input }),
         states: {
@@ -5357,7 +5355,7 @@ describe("Machine", () => {
         initial: {
           target: "Idle",
           decoded: true,
-          data: ({ root: { input: input } }) => new Idle({ userId: input.userId })
+          data: ({ root: { input } }) => new Idle({ userId: input.userId })
         },
         root: ({ input }) => ({ input }),
         states: {
@@ -5441,7 +5439,7 @@ describe("Machine", () => {
         initial: {
           target: "Idle",
           decoded: true,
-          data: ({ root: { input: input } }) => new Idle({ userId: input.userId })
+          data: ({ root: { input } }) => new Idle({ userId: input.userId })
         },
         root: ({ input }) => ({ input }),
         states: {
@@ -5488,7 +5486,7 @@ describe("Machine", () => {
         initial: {
           target: "Idle",
           decoded: true,
-          data: ({ root: { input: input } }) => new Idle({ userId: input.userId })
+          data: ({ root: { input } }) => new Idle({ userId: input.userId })
         },
         root: ({ input }) => ({ input }),
         states: {
@@ -5522,7 +5520,7 @@ describe("Machine", () => {
         initial: {
           target: "Idle",
           decoded: true,
-          data: ({ root: { input: input } }) => new Idle({ userId: input.userId })
+          data: ({ root: { input } }) => new Idle({ userId: input.userId })
         },
         root: ({ input }) => ({ input }),
         states: {
@@ -5555,7 +5553,7 @@ describe("Machine", () => {
         initial: {
           target: "Idle",
           decoded: true,
-          data: ({ root: { input: input } }) => new Idle({ userId: input.userId })
+          data: ({ root: { input } }) => new Idle({ userId: input.userId })
         },
         root: ({ input }) => ({ input }),
         states: {
@@ -5623,7 +5621,7 @@ describe("Machine", () => {
         initial: {
           target: "Idle",
           decoded: true,
-          data: ({ root: { input: input } }) => new Idle({ userId: input.userId })
+          data: ({ root: { input } }) => new Idle({ userId: input.userId })
         },
         root: ({ input }) => ({ input }),
         states: {
@@ -5675,7 +5673,7 @@ describe("Machine", () => {
         initial: {
           target: "Idle",
           decoded: true,
-          data: ({ root: { input: input } }) => new Idle({ userId: input.userId })
+          data: ({ root: { input } }) => new Idle({ userId: input.userId })
         },
         root: ({ input }) => ({ input }),
         states: {
@@ -5720,7 +5718,7 @@ describe("Machine", () => {
         initial: {
           target: "Idle",
           decoded: true,
-          data: ({ root: { input: input } }) => new Idle({ userId: input.userId })
+          data: ({ root: { input } }) => new Idle({ userId: input.userId })
         },
         root: ({ input }) => ({ input }),
         states: {
@@ -5787,7 +5785,7 @@ describe("Machine", () => {
         initial: {
           target: "Idle",
           decoded: true,
-          data: ({ root: { input: input } }) => new Idle({ userId: input.userId })
+          data: ({ root: { input } }) => new Idle({ userId: input.userId })
         },
         root: ({ input }) => ({ input }),
         states: {
@@ -5970,7 +5968,7 @@ describe("Machine", () => {
         initial: {
           target: "Idle",
           decoded: true,
-          data: ({ root: { input: input } }) => {
+          data: ({ root: { input } }) => {
             starts += 1
             return new Idle({ userId: input.userId })
           }
@@ -6085,7 +6083,7 @@ describe("Machine", () => {
         initial: {
           target: "Idle",
           decoded: true,
-          data: ({ root: { input: input } }) => new Idle({ userId: input.userId })
+          data: ({ root: { input } }) => new Idle({ userId: input.userId })
         },
         root: ({ input }) => ({ input }),
         states: {
@@ -6198,7 +6196,7 @@ describe("Machine", () => {
         initial: {
           target: "Idle",
           decoded: true,
-          data: ({ root: { input: input } }) => new Idle({ userId: input.userId })
+          data: ({ root: { input } }) => new Idle({ userId: input.userId })
         },
         root: ({ input }) => ({ input }),
         states: {
@@ -6532,7 +6530,7 @@ describe("Machine", () => {
         initial: {
           target: "Idle",
           decoded: true,
-          data: ({ root: { input: input } }) => new Idle({ userId: input.userId })
+          data: ({ root: { input } }) => new Idle({ userId: input.userId })
         },
         root: ({ input }) => ({ input }),
         states: {
@@ -6600,7 +6598,7 @@ describe("Machine", () => {
         initial: {
           target: "Idle",
           decoded: true,
-          data: ({ root: { input: input } }) => new Idle({ userId: input.userId })
+          data: ({ root: { input } }) => new Idle({ userId: input.userId })
         },
         root: ({ input }) => ({ input }),
         states: {
@@ -6664,7 +6662,7 @@ describe("Machine", () => {
         initial: {
           target: "Idle",
           decoded: true,
-          data: ({ root: { input: input } }) => new Idle({ userId: input.userId })
+          data: ({ root: { input } }) => new Idle({ userId: input.userId })
         },
         root: ({ input }) => ({ input }),
         states: {
@@ -6746,7 +6744,7 @@ describe("Machine", () => {
         initial: {
           target: "Idle",
           decoded: true,
-          data: ({ root: { input: input } }) => new Idle({ userId: input.userId })
+          data: ({ root: { input } }) => new Idle({ userId: input.userId })
         },
         root: ({ input }) => ({ input }),
         states: {
@@ -6813,7 +6811,7 @@ describe("Machine", () => {
         initial: {
           target: "Idle",
           decoded: true,
-          data: ({ root: { input: input } }) => new Idle({ userId: input.userId })
+          data: ({ root: { input } }) => new Idle({ userId: input.userId })
         },
         root: ({ input }) => ({ input }),
         states: {
@@ -7133,7 +7131,7 @@ describe("Machine", () => {
         initial: {
           target: "Idle",
           decoded: true,
-          data: ({ root: { input: input } }) => new Idle({ userId: input.userId })
+          data: ({ root: { input } }) => new Idle({ userId: input.userId })
         },
         root: ({ input }) => ({ input }),
         states: {

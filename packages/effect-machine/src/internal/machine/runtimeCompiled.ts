@@ -269,7 +269,7 @@ class CompiledProcess implements MachineRef<any, any, any, any> {
             event,
             this.inspectionSubject,
             this.causation()
-          )) as ProcessScope<unknown>["sendTo"],
+          )),
       stopChild: this.childRuntime.stop,
       failCause: (cause: Cause.Cause<unknown>) => this.failCause(cause),
       inspectInitial: this.inspector === undefined
@@ -351,7 +351,7 @@ class CompiledProcess implements MachineRef<any, any, any, any> {
               event,
               self.inspectionSubject,
               self.causation()
-            )) as ProcessScope<unknown>["sendTo"],
+            )),
         stopChild: self.childRuntime.stop,
         failCause: (cause: Cause.Cause<unknown>) => self.failCause(cause),
         inspectInitial: self.inspector === undefined
