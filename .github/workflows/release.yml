@@ -36,12 +36,11 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm check
       - id: changesets
-        uses: changesets/action@v1
+        uses: changesets/action@v2.1.2
         with:
-          version: pnpm version-packages
-          publish: pnpm release
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          version-script: pnpm version-packages
+          publish-script: pnpm release
+          github-token: ${{ secrets.GITHUB_TOKEN }}
 
   deploy-website:
     needs: release

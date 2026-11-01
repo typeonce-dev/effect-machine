@@ -36,7 +36,7 @@
     "release": "pnpm build && changeset publish"
   },
   "devDependencies": {
-    "@changesets/cli": "2.31.0",
+    "@changesets/cli": "3.0.3",
     "@effect/vitest": "4.1.1",
     "@typeonce/oxlint-plugin-effect-machine": "workspace:*",
     "@types/node": "26.6.6",
@@ -45,7 +45,7 @@
     "oxlint": "1.90.0",
     "oxlint-tsgolint": "7.0.2005",
     "pagefind": "1.5.2",
-    "tinybench": "2.9.0",
+    "tinybench": "6.2.2",
     "tstyche": "7.2.5",
     "typedoc": "0.28.20",
     "typescript": "6.0.3",
