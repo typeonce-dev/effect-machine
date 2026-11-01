@@ -9,6 +9,12 @@ import { decodeEmitSync, decodeEventSync } from "./protocol.js"
 
 export type RuntimeCommand = Command
 
+/** Destination accepted by `Enqueue.sendTo`, erased over the child's event type. */
+export type SendToTarget = Extract<RuntimeCommand, { readonly _tag: "SendTo" }>["target"]
+
+/** Child accepted by `Enqueue.stop`, erased over the child's event type. */
+export type StopTarget = Extract<RuntimeCommand, { readonly _tag: "Stop" }>["child"]
+
 export interface Collected<Event> {
   readonly enqueue: Enqueue<Event, unknown>
   readonly commands: Array<RuntimeCommand>
@@ -31,11 +37,11 @@ export const makeCollector = <Event>(machine: Machine.Any): Collected<Event> => 
       emit: (event) => {
         emittedEvents.push(decodeEmitSync(machine, event))
       },
-      sendTo: (target: unknown, event: unknown) => {
-        commands.push({ _tag: "SendTo", target: target as any, event })
+      sendTo: (target: SendToTarget, event: unknown) => {
+        commands.push({ _tag: "SendTo", target, event })
       },
-      stop: (child: unknown) => {
-        commands.push({ _tag: "Stop", child: child as any })
+      stop: (child: StopTarget) => {
+        commands.push({ _tag: "Stop", child })
       }
     }
   }

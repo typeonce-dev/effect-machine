@@ -1183,16 +1183,17 @@ const hasPathIntersection = (left: ReadonlyArray<string>, right: ReadonlyArray<s
   return false
 }
 
-export const sortEvaluatedTransitions = <
-  const States extends Machine.StateSchemas,
-  Event,
-  E,
-  R,
-  Context
->(
+/** The fields conflict resolution reads, shared by the generic and indexed planners. */
+export interface ConflictCandidate {
+  readonly selection: { readonly sourcePath: string }
+  readonly update: { readonly path: string } | undefined
+  readonly exitPaths: ReadonlyArray<string>
+}
+
+export const sortEvaluatedTransitions = <Transition extends Pick<ConflictCandidate, "selection">>(
   machine: Machine.Any,
-  transitions: Iterable<EvaluatedTransition<States, Event, E, R, Context>>
-): ReadonlyArray<EvaluatedTransition<States, Event, E, R, Context>> =>
+  transitions: Iterable<Transition>
+): ReadonlyArray<Transition> =>
   Array.from(transitions)
     .sort((left, right) => compareDocumentOrder(machine, left.selection.sourcePath, right.selection.sourcePath))
 
@@ -1210,20 +1211,14 @@ const removePreemptedAncestorSelections = <
     )
   )
 
-export const removeConflictingTransitions = <
-  const States extends Machine.StateSchemas,
-  Event,
-  E,
-  R,
-  Context
->(
+export const removeConflictingTransitions = <Transition extends ConflictCandidate>(
   machine: Machine.Any,
-  transitions: ReadonlyArray<EvaluatedTransition<States, Event, E, R, Context>>
-): ReadonlyArray<EvaluatedTransition<States, Event, E, R, Context>> => {
-  const filtered: Array<EvaluatedTransition<States, Event, E, R, Context>> = []
+  transitions: ReadonlyArray<Transition>
+): ReadonlyArray<Transition> => {
+  const filtered: Array<Transition> = []
   for (const transition of sortEvaluatedTransitions(machine, transitions)) {
     let preempted = false
-    const transitionsToRemove = new Set<EvaluatedTransition<States, Event, E, R, Context>>()
+    const transitionsToRemove = new Set<Transition>()
     for (const selected of filtered) {
       const writesSameState = transition.update !== undefined && selected.update !== undefined &&
         transition.update.path === selected.update.path
