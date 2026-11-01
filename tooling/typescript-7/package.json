@@ -1,0 +1,12 @@
+{
+  "name": "@typeonce/effect-machine-typescript-7",
+  "private": true,
+  "type": "module",
+  "description": "Pins the native TypeScript 7 compiler for the compatibility lane without replacing the TypeScript 6 toolchain.",
+  "scripts": {
+    "typecheck": "tsc -p ../../packages/effect-machine/tsconfig.json --noEmit && tsc -p ../../packages/effect-machine-react/tsconfig.json --noEmit && tsc -p ../../packages/oxlint-plugin/tsconfig.json --noEmit && tsc -p ../../packages/devtools/tsconfig.json && tsc -p ../../tsconfig.tests.json"
+  },
+  "devDependencies": {
+    "typescript": "7.0.2"
+  }
+}

@@ -51,12 +51,26 @@ try {
     [join(repositoryRoot, "node_modules", "typescript", "bin", "tsc"), "-p", join(consumer, "tsconfig.json")],
     { cwd: consumer }
   )
+  // The consumer must also compile with the native TypeScript 7 compiler pinned
+  // by tooling/typescript-7. TSGO_BIN selects another native compiler binary.
   if (process.env.TSGO_BIN !== undefined) {
     run(process.env.TSGO_BIN, ["-p", join(consumer, "tsconfig.json")], { cwd: consumer })
+  } else {
+    run(
+      process.execPath,
+      [
+        join(repositoryRoot, "tooling", "typescript-7", "node_modules", "typescript", "bin", "tsc"),
+        "-p",
+        join(consumer, "tsconfig.json")
+      ],
+      { cwd: consumer }
+    )
   }
   run(process.execPath, [join(consumer, "runtime.mjs")], { cwd: consumer })
 
-  console.log("packed root, reactivity, cluster, and testing entrypoints passed strict consumer validation")
+  console.log(
+    "packed root, reactivity, cluster, and testing entrypoints passed strict consumer validation with TypeScript 6 and 7"
+  )
 } finally {
   await rm(destination, { recursive: true, force: true })
 }

@@ -33,7 +33,7 @@ const sendAndWaitForSnapshot = <State, Event, Error, Output>(
 const assertStateSnapshot = <Path extends string, Value>(
   actual:
     | Machine.Machine.AtomicSnapshot<Path, Value>
-    | Machine.Machine.CompoundSnapshot<"", undefined, Machine.Machine.AtomicSnapshot<Path, Value>>,
+    | Machine.Machine.CompoundSnapshot<"", undefined, NoInfer<Machine.Machine.AtomicSnapshot<Path, Value>>>,
   path: Path,
   value: Value
 ) => {
@@ -47,7 +47,7 @@ const assertStateSnapshot = <Path extends string, Value>(
 const assertCompoundStateSnapshot = <Path extends string, Value, Child>(
   actual:
     | Machine.Machine.CompoundSnapshot<Path, Value, Child>
-    | Machine.Machine.CompoundSnapshot<"", undefined, Machine.Machine.CompoundSnapshot<Path, Value, Child>>,
+    | Machine.Machine.CompoundSnapshot<"", undefined, NoInfer<Machine.Machine.CompoundSnapshot<Path, Value, Child>>>,
   path: Path,
   value: Value,
   state: Child
@@ -63,7 +63,7 @@ const assertCompoundStateSnapshot = <Path extends string, Value, Child>(
 const assertParallelStateSnapshot = <Path extends string, Value, States>(
   actual:
     | Machine.Machine.ParallelSnapshot<Path, Value, States>
-    | Machine.Machine.CompoundSnapshot<"", undefined, Machine.Machine.ParallelSnapshot<Path, Value, States>>,
+    | Machine.Machine.CompoundSnapshot<"", undefined, NoInfer<Machine.Machine.ParallelSnapshot<Path, Value, States>>>,
   path: Path,
   value: Value,
   states: States

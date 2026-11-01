@@ -76,6 +76,31 @@ understands imports, re-exports, and dynamic imports, and enforces:
 The checker has executable fixture tests and runs as part of `pnpm check`. Add
 new rules only with a failing fixture that demonstrates the boundary.
 
+## TypeScript compatibility
+
+The repository toolchain uses TypeScript 6. TypeDoc, tstyche, and the
+repository scripts load its JavaScript compiler API, so the root `typescript`
+dependency stays on 6.x.
+
+`pnpm check` also verifies the native TypeScript 7 compiler. The private
+`tooling/typescript-7` workspace package pins it in its own `node_modules`, so
+its `tsc` binary never replaces the TypeScript 6 `tsc` used by the root and the
+publishable packages:
+
+- `pnpm typecheck:ts7` type-checks every package project and
+  `tsconfig.tests.json` without emitting. Run it after `pnpm typecheck` or
+  `pnpm build`, because package references resolve to the TypeScript 6
+  declaration output.
+- `pnpm test:consumer` compiles the packed consumer fixture with TypeScript 6
+  and then with TypeScript 7. Set `TSGO_BIN` to an executable native compiler to
+  check another TypeScript 7 build.
+
+Type tests run only with TypeScript 6: tstyche 7.2 selects targets from
+TypeScript 5.4 up to, but not including, 7.0, because TypeScript 7 does not
+provide the in-process compiler API that tstyche uses. TypeScript 7 still
+compiles the public types through the package projects and the runtime tests,
+but type assertions are evaluated only with TypeScript 6.
+
 ## API reference data
 
 `pnpm docs:api` generates an Effect-compatible TypeDoc dataset under
