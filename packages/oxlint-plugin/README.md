@@ -111,8 +111,9 @@ Submitted: {
 Remove the unused `none` branch from the group after the change, or use
 `guard` on an ordinary transition. The rule recognizes `select.<key>()`,
 destructured selectors, ternaries, and `if` returns against a group declared in
-the same module's `make` call. An unconditional `none` selection and a resolver
-with `declinable: true` remain valid.
+the same module's `make` call. An unconditional `none` selection, a resolver
+with `declinable: true`, and resolvers for invocation outcomes and eventless
+transitions, which `Machine.can` does not query, remain valid.
 
 ### `effect-machine/no-async-planning-callback`
 
@@ -144,18 +145,20 @@ processes also require unique addresses while active.
 
 ```ts
 // Incorrect: both declarations explicitly use the same ID.
-invoke: ;
-;[
-  { src: "loadAccount", id: "load", ...accountOutcomes },
-  { src: "loadTimeout", id: "load", ...timeoutOutcomes }
-]
+const conflicting = {
+  invoke: [
+    { src: "loadAccount", id: "load", ...accountOutcomes },
+    { src: "loadTimeout", id: "load", ...timeoutOutcomes }
+  ]
+}
 
 // Correct: distinct registered source names supply distinct default IDs.
-invoke: ;
-;[
-  { src: "loadAccount", ...accountOutcomes },
-  { src: "loadTimeout", ...timeoutOutcomes }
-]
+const distinct = {
+  invoke: [
+    { src: "loadAccount", ...accountOutcomes },
+    { src: "loadTimeout", ...timeoutOutcomes }
+  ]
+}
 ```
 
 The rule resolves static literals, local bindings, `Machine.childAddress`, and

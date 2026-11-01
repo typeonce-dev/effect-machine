@@ -8,7 +8,7 @@ import {
   recordMachineDefinition,
   recordMachineImport
 } from "../imports.js"
-import { isPlanningCallback, type PlanningFunction } from "../planning.js"
+import { isEventHandlerProperty, isPlanningCallback, type PlanningFunction } from "../planning.js"
 
 const propertyKey = (node: ESTree.Node): string | undefined => {
   if (node.type !== "Property" || node.computed) return undefined
@@ -238,7 +238,7 @@ export const noConditionalNoneBranch: Rule = {
         if (declinable !== undefined && (isTrueLiteral(declinable.value) || declinable.value.type !== "Literal")) {
           return
         }
-        if (!isPlanningCallback(callback, bindings)) return
+        if (!isEventHandlerProperty(transition.parent, bindings) || !isPlanningCallback(callback, bindings)) return
 
         const handle = enclosingHandleCall(transition, bindings)
         const configuration = handle === undefined ? undefined : makeConfiguration(handle, bindings)
