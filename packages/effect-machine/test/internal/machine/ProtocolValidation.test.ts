@@ -37,7 +37,7 @@ describe("event validation across execution strategies", () => {
         const selected = ExecutionPlan.selectExecutionPlanForTesting(machine, strategy)
         assert.strictEqual(selected.strategy, strategy === "auto" ? "indexed-flat" : "generic")
         const state = selected.plan.fromConfiguration(
-          Configuration.normalizeConfigurationSync<Machine.Machine.States<typeof machine>>(machine, initial.state)
+          Configuration.normalizeConfigurationSync(machine, initial.state)
         )
         selected.plan.plan(state, events.Set({ value: 1 }), true)
         Object.assign(retained as object, { value: "invalid" })

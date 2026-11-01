@@ -4,7 +4,6 @@ import * as Option from "effect/Option"
 import { Prototype as PipeablePrototype } from "effect/Pipeable"
 import { hasProperty } from "effect/Predicate"
 import * as Schema from "effect/Schema"
-import type * as Scope from "effect/Scope"
 import type * as Stream from "effect/Stream"
 import type {
   ChildAddress,
@@ -26,7 +25,7 @@ import * as Activities from "./activities.js"
 import * as Configuration from "./configuration.js"
 import * as Construction from "./construction.js"
 import * as Declaration from "./declaration.js"
-import type { ChildAlreadyExistsError, PlanningError, StartupError } from "./errors.js"
+import type { PlanningError, StartupError } from "./errors.js"
 import type { CapturedStateConfig } from "./implementation.js"
 import * as InitialDeclaration from "./initialDeclaration.js"
 import * as InvocationDefinition from "./invocationDefinition.js"
@@ -59,18 +58,6 @@ export const InvokeTypeId: unique symbol = Symbol.for("effect/Machine/Invoke")
 const ChildMachineTypeId = "~effect/Machine/ChildMachine"
 type MachineRuntimeRequirement = internalRuntime.MachineRuntime
 
-type SpawnRequirements<Requirements> = Exclude<Requirements, Scope.Scope>
-type SpawnIdError<Options extends SpawnOptions> = "id" extends keyof Options ? Options extends {
-    readonly id?: infer Id
-  } ? [Id] extends [undefined] ? never : ChildAlreadyExistsError
-  : ChildAlreadyExistsError
-  : never
-type SpawnError<Options extends SpawnOptions> = SpawnIdError<Options>
-type SpawnResult<State, Event, Error, Requirements, Output, SpawnError, InitialError = never> = Effect.Effect<
-  MachineRef<State, Event, Error, Output>,
-  SpawnError | InitialError,
-  MachineRuntimeRequirement | SpawnRequirements<Requirements>
->
 const Proto = {
   ...Inspectable.BaseProto,
   ...PipeablePrototype,
@@ -829,7 +816,7 @@ const makeStateHelpers = (): Machine.StateAccessors<{ readonly "": Machine.State
         Option.map((snapshot) => ({ value: snapshot.value, parents }))
       )
     }) as Machine.StateAccessors<{ readonly "": Machine.StateNodeConfig }>["getWithParents"],
-    getSnapshot: Topology.getSnapshotByPath as unknown as Machine.StateAccessors<
+    getSnapshot: Topology.getSnapshotByPath as Machine.StateAccessors<
       { readonly "": Machine.StateNodeConfig }
     >["getSnapshot"],
     matches:
@@ -965,6 +952,8 @@ export const planInitial: (
   ...args: ReadonlyArray<any>
 ) => Effect.Effect<any, PlanningError | StartupError> = internalPlanner.planInitial
 
+// Erased boundary: compiled nodes are stored with string paths; the generic
+// machine type is the only source of their literal identifiers.
 export const stateNodes = <M extends Machine.Any>(
   machine: M
 ): ReadonlyArray<
@@ -1122,73 +1111,31 @@ export const childFamily = <M extends Machine.Any>(machine: M): ChildMachine.Fam
 
 export const childAddress = <Event = never>(id: string): ChildAddress<Event> => id as ChildAddress<Event>
 
-export const spawn: {
-  <ChildState, ChildEvent, ChildError, ChildRequirements, ChildOutput, ChildInitialError = never>(
-    logic: Logic<
-      ChildState,
-      ChildEvent,
-      ChildError,
-      ChildRequirements,
-      ChildOutput,
-      ChildInitialError
-    >
-  ): SpawnResult<ChildState, ChildEvent, ChildError, ChildRequirements, ChildOutput, never, ChildInitialError>
-  <
-    ChildState,
-    ChildEvent,
-    ChildError,
-    ChildRequirements,
-    ChildOutput,
-    Options extends SpawnOptions,
-    ChildInitialError = never
-  >(
-    logic: Logic<
-      ChildState,
-      ChildEvent,
-      ChildError,
-      ChildRequirements,
-      ChildOutput,
-      ChildInitialError
-    >,
-    options: Options & ChildAddress.OptionsCompatibility<Options, ChildEvent>
-  ): SpawnResult<
-    ChildState,
-    ChildEvent,
-    ChildError,
-    ChildRequirements,
-    ChildOutput,
-    SpawnError<Options>,
-    ChildInitialError
-  >
-} = ((logic: Logic<any, any, any, any, any, any>, options?: SpawnOptions) =>
+// The public `Machine` module declares the typed overloads and checks these
+// erased implementations against them structurally.
+export const spawn = (logic: Logic<any, any, any, any, any, any>, options?: SpawnOptions) =>
   Effect.flatMap(
     internalRuntime.MachineRuntime,
-    (runtime) => options === undefined ? runtime.spawn(logic) : (runtime.spawn as any)(logic, options)
-  )) as any
+    // `SpawnOptions` declares only `id`; an absent id spawns an anonymous child.
+    (runtime) => options?.id === undefined ? runtime.spawn(logic) : runtime.spawn(logic, { id: options.id })
+  )
 
-export const sendTo: {
-  <Child extends ChildMachine.Any>(
-    child: Child,
-    event: ChildMachine.Event<Child>
-  ): Effect.Effect<void, StoppedError, MachineRuntimeRequirement>
-  <Address extends ChildAddress<never>>(
-    id: Address,
-    event: ChildAddress.Event<Address>
-  ): Effect.Effect<void, StoppedError, MachineRuntimeRequirement>
-} = ((child: string | ChildMachine.Any, event: unknown) =>
+export const sendTo = (
+  child: string | ChildMachine.Any,
+  event: unknown
+): Effect.Effect<void, StoppedError, MachineRuntimeRequirement> =>
   Effect.flatMap(
     internalRuntime.MachineRuntime,
     (runtime) => runtime.sendTo(child, event)
-  )) as any
+  )
 
-export const stopChild: {
-  <Event>(child: ChildAddress<Event>): Effect.Effect<void, never, MachineRuntimeRequirement>
-  <Child extends ChildMachine.Any>(child: Child): Effect.Effect<void, never, MachineRuntimeRequirement>
-} = ((child: string | ChildMachine.Any) =>
+export const stopChild = (
+  child: string | ChildMachine.Any
+): Effect.Effect<void, never, MachineRuntimeRequirement> =>
   Effect.flatMap(
     internalRuntime.MachineRuntime,
     (runtime) => runtime.stopChild(child)
-  )) as any
+  )
 
 export const watch = <State, Event, Error = never, Output = never>(
   ref: MachineRef<State, Event, Error, Output>
