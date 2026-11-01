@@ -62,8 +62,7 @@ try {
       "@typeonce/effect-machine": `file:${coreArchive}`,
       "@typeonce/effect-machine-react": `file:${reactArchive}`,
       effect: reactPackage.devDependencies.effect,
-      react: "19.2.7",
-      scheduler: "0.27.0"
+      react: "19.2.7"
     }
   }, null, 2))
   await writeFile(
