@@ -513,7 +513,7 @@ describe("machine planner and runtime strategies", () => {
           Opened: {
             initial: {
               target: "Opened.Idle",
-              data: ({}) => ({ value: 1 })
+              data: () => ({ value: 1 })
             },
             states: {
               Idle: {}
@@ -660,7 +660,7 @@ describe("machine planner and runtime strategies", () => {
         initial: {
           target: "Complete",
           decoded: true,
-          data: ({ root: { input: input } }) => new Complete({ value: input.value })
+          data: ({ root: { input } }) => new Complete({ value: input.value })
         },
         root: ({ input }) => ({ input }),
         states: {
@@ -1188,7 +1188,7 @@ describe("machine planner and runtime strategies", () => {
         }).handle({
           initial: {
             target: "Flow",
-            data: ({ root: { input: input } }) => input
+            data: ({ root: { input } }) => input
           },
           root: ({ input }) => ({ input }),
           states: {

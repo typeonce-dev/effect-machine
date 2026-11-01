@@ -261,6 +261,7 @@ const nodeMetric = (node: ChartNode, selfLoops: number): NodeMetric => {
   }
 }
 
+// oxlint-disable-next-line typescript/no-unnecessary-type-assertion -- TypeScript 6 does not type the CommonJS default export as constructable.
 const ELK = ELKBundle as unknown as new(args?: ELKConstructorArguments) => ElkApi
 const elk = new ELK()
 
@@ -464,24 +465,22 @@ const makeGraph = (
   return {
     id: "chart-root",
     children: children(null),
-    edges: [
-      ...model.edges.map((edge): ElkExtendedEdge => {
-        const label = labelMetric(edge)
-        const edgeLayout = policy.edge(edge)
-        const runtimeTarget = edge.kind === "runtime" ? runtimeByEdgeId.get(edge.id) : undefined
-        return {
-          id: edge.id,
-          sources: [sourcePortId(edge)],
-          targets: [runtimeTarget === undefined ? targetPortId(edge) : runtimeTargetPortId(runtimeTarget)],
-          labels: [{ text: edge.accessibleLabel, width: label.width, height: label.height }],
-          layoutOptions: {
-            "elk.layered.priority.direction": edgeLayout.direction === "forward" ? "10" : "1",
-            "elk.layered.priority.shortness": "5",
-            "elk.layered.priority.straightness": "5"
-          }
+    edges: model.edges.map((edge): ElkExtendedEdge => {
+      const label = labelMetric(edge)
+      const edgeLayout = policy.edge(edge)
+      const runtimeTarget = edge.kind === "runtime" ? runtimeByEdgeId.get(edge.id) : undefined
+      return {
+        id: edge.id,
+        sources: [sourcePortId(edge)],
+        targets: [runtimeTarget === undefined ? targetPortId(edge) : runtimeTargetPortId(runtimeTarget)],
+        labels: [{ text: edge.accessibleLabel, width: label.width, height: label.height }],
+        layoutOptions: {
+          "elk.layered.priority.direction": edgeLayout.direction === "forward" ? "10" : "1",
+          "elk.layered.priority.shortness": "5",
+          "elk.layered.priority.straightness": "5"
         }
-      })
-    ],
+      }
+    }),
     layoutOptions: {
       "elk.algorithm": "layered",
       "elk.direction": "DOWN",
@@ -916,20 +915,20 @@ const normalizeEndpointDirection = (
   const validEndpoints = (route: ReadonlyArray<ChartPoint>): boolean =>
     isOutwardStep(route[0]!, route[1]!, side) && chartRouteLength(route.slice(0, 2)) >= 9 &&
     (!preserveOpposite ||
-      isOutwardStep(route.at(-1)!, route.at(-2)!, oppositeSide!) && chartRouteLength(route.slice(-2)) >= 9)
+      isOutwardStep(route.at(-1)!, route.at(-2)!, oppositeSide) && chartRouteLength(route.slice(-2)) >= 9)
 
   const tail = points.slice(1)
   const attached = compactPoints([start, ...tail])
   if (attached.length >= 2 && validEndpoints(attached)) return attached
 
   if (tail.length === 1 && preserveOpposite) {
-    tail.unshift(outwardPoint(end, oppositeSide!, 18))
+    tail.unshift(outwardPoint(end, oppositeSide, 18))
   }
   const stub = outwardPoint(start, side, 18)
   const endpointObstacles = [
     ...obstacles,
     routeNodeRect(node),
-    ...(preserveOpposite ? [routeNodeRect(opposite!)] : [])
+    ...(preserveOpposite ? [routeNodeRect(opposite)] : [])
   ]
   return endpointConnections(stub, tail[0]!, routeNodeRect(node), side)
     .map((connection) => compactPoints([start, ...connection, ...tail.slice(1)]))

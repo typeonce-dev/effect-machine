@@ -97,8 +97,8 @@ describe("chart route endpoints", () => {
       edge.kind === "transition" && edge.edge.source === "Failed" && edge.edge.target === "Working"
     )
     assert.isDefined(retry)
-    assert.isAtLeast(chartRouteLength(retry!.points.slice(0, 2)), 9)
-    assert.isAtLeast(chartRouteLength(retry!.points.slice(-2)), 9)
+    assert.isAtLeast(chartRouteLength(retry.points.slice(0, 2)), 9)
+    assert.isAtLeast(chartRouteLength(retry.points.slice(-2)), 9)
   })
 
   // Rotate the same geometry to exercise every side, then reverse the edge to

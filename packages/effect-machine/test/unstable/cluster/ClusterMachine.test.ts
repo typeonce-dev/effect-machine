@@ -167,6 +167,7 @@ const makeTestStorage = () => {
           entries.set(key, checkpoint)
           commits += 1
           return ClusterMachine.CommitResult.Committed()
+          // oxlint-disable-next-line typescript/unbound-method -- `refail` is a standalone combinator that does not use `this`.
         }).pipe(ClusterError.PersistenceError.refail)
       )
   })

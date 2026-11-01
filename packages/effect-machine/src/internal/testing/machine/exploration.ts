@@ -86,11 +86,10 @@ const stateContext = <M extends AnyMachine>(machine: M, trace: Trace<M>): Explor
 const scenarioWithEvent = <M extends AnyMachine>(
   trace: Trace<M>,
   event: Machine.Machine.InputEvent<M>
-): Scenario<M> =>
-  ({
-    ...trace.scenario,
-    events: [...trace.scenario.events, event]
-  }) as Scenario<M>
+): Scenario<M> => ({
+  ...trace.scenario,
+  events: [...trace.scenario.events, event]
+})
 
 interface ExplorationEdgeDraft<M extends AnyMachine> {
   readonly source: number

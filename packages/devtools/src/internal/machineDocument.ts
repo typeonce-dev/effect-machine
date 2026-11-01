@@ -7,9 +7,7 @@ const enabled = Machine.enabled as (
   snapshot: unknown
 ) => ReadonlyArray<PropertyKey>
 
-const inputEventSchemas = Machine.inputEventSchemas as (
-  machine: Machine.Machine.Any
-) => ReadonlyArray<Machine.Machine.TaggedSchema>
+const inputEventSchemas = Machine.inputEventSchemas
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value)

@@ -101,7 +101,7 @@ class StreamValue extends Schema.TaggedClass<StreamValue>("InvokeGalleryStreamVa
 const GalleryEvents = Machine.eventsFromSchemas(RunEffect, RunStream, RunTimer, RunProcess, RunChild, Reset)
 const GalleryInternalEvents = Machine.internalEventsFromSchemas(StreamValue)
 const processLogic = Machine.logic({
-  initial: "starting" as "starting" | "ready",
+  initial: "starting",
   run: () => Effect.fail("process stopped")
 })
 const GalleryStates = Machine.state({
@@ -156,7 +156,7 @@ export const invokeOutcomesMachine = Machine.make({
       initial: {
         target: "Gallery.Choose",
         decoded: true,
-        data: ({}) => new Choose({})
+        data: () => new Choose({})
       },
       on: {
         Reset: { target: "Gallery.Choose", decoded: true, data: () => (new Choose({})) }
@@ -259,6 +259,7 @@ export const invokeOutcomesMachine = Machine.make({
               resolve: ({ select, snapshot }) =>
                 snapshot.state === "ready"
                   ? select.ready({ data: new Completed({ source: "process", result: "ready" }), decoded: true })
+                  // oxlint-disable-next-line effect-machine/no-conditional-none-branch -- `Machine.can` does not query snapshot outcomes; the titled branch documents the wait.
                   : select.waiting()
             }
           }

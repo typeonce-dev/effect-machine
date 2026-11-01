@@ -218,7 +218,7 @@ type RefEmitted<Ref> = Ref extends Machine.MachineRef<any, any, any, any, infer 
 export const emissions = <State, Event, Error, Output, StartError, Emitted>(
   self: MachineAtom<State, Event, Error, Output, StartError, Emitted>
 ): Stream.Stream<Emitted, StartError, AtomRegistry.AtomRegistry> => {
-  const prepared = preparedByMachineAtom.get(self as object)
+  const prepared = preparedByMachineAtom.get(self)
   if (prepared === undefined) {
     return Atom.toStreamResult(self.ref).pipe(Stream.flatMap((ref) => ref.emissions))
   }
@@ -246,7 +246,7 @@ export const emissions = <State, Event, Error, Output, StartError, Emitted>(
 export const inspection = <State, Event, Error, Output, StartError, Emitted>(
   self: MachineAtom<State, Event, Error, Output, StartError, Emitted>
 ): Stream.Stream<Machine.Inspection.Event, StartError, AtomRegistry.AtomRegistry> => {
-  const prepared = preparedByMachineAtom.get(self as object)
+  const prepared = preparedByMachineAtom.get(self)
   if (prepared === undefined) return Stream.empty
   return Stream.unwrap(
     Effect.gen(function*() {
@@ -599,7 +599,7 @@ const makeChildSelector = <StartError>(
       family = (id) => atoms(id) as ChildMachineAtom<Machine.ChildMachine.Any, StartError>
       byMachine.set(machine, family)
     }
-    return family(descriptor.id) as ChildMachineAtom<Child, StartError>
+    return family(descriptor.id)
   }
 }
 

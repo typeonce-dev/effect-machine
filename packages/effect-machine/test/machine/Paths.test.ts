@@ -5,6 +5,7 @@ import { Machine } from "../../src/index.js"
 describe("declared state paths", () => {
   it("reserves the top-level root name for the root node", () => {
     const root = Machine.state({ states: { root: {}, Idle: {} } })
+    // oxlint-disable-next-line typescript/no-unnecessary-type-assertion -- TypeScript 6 rejects the reserved name, which this test checks at runtime.
     assert.throws(() => Machine.make({ root, events: Machine.events({}) } as never), /reserved for the root/)
   })
 

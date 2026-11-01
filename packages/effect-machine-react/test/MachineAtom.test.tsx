@@ -73,7 +73,7 @@ describe("useMachineAtom", () => {
     await waitFor(() => assert.strictEqual(screen.getByTestId("value").textContent, "0"))
     const initialOwnerRenders = ownerRenders
     const initialReaderRenders = readerRenders
-    await act(() => {
+    await act(async () => {
       registry.set(current!.send, new Increment({}))
     })
     await waitFor(() => assert.strictEqual(screen.getByTestId("value").textContent, "1"))
@@ -117,14 +117,14 @@ describe("useMachineAtom", () => {
     await waitFor(() => assert.strictEqual(screen.getByTestId("reached").textContent, "false"))
     assert.strictEqual(reachedThreshold(current!), reachedThreshold(current!))
     const initialReaderRenders = readerRenders
-    await act(() => {
+    await act(async () => {
       registry.set(current!.send, new Increment({}))
     })
     const active = registry.get(AtomMachine.select(current!, "Active"))
     assert.ok(AsyncResult.isSuccess(active))
     assert.strictEqual(Option.getOrThrow(active.value).value, 1)
     assert.strictEqual(readerRenders, initialReaderRenders)
-    await act(() => {
+    await act(async () => {
       registry.set(current!.send, new Increment({}))
     })
     await waitFor(() => assert.strictEqual(screen.getByTestId("reached").textContent, "true"))
@@ -327,6 +327,7 @@ describe("useMachineAtom", () => {
         <Owner />
       </RegistryContext.Provider>
     )
+    // oxlint-disable-next-line typescript/no-unnecessary-type-assertion -- TypeScript 6 types the queried element as `HTMLElement`.
     const field = await waitFor(() => screen.getByTestId("field") as HTMLInputElement)
     // React restores a controlled input to its rendered value when the
     // handler leaves state unchanged, so each value must survive its event.

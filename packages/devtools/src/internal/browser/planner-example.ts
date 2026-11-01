@@ -156,7 +156,7 @@ export const plannerMachine = Machine.make({
   initial: {
     target: "Idle",
     decoded: true,
-    data: ({ root: { input: input } }) => new Idle({ owner: input.owner })
+    data: ({ root: { input } }) => new Idle({ owner: input.owner })
   },
   root: ({ input }) => ({ input }),
   states: {

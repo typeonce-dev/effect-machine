@@ -140,7 +140,7 @@ describe("synchronous delivery to an idle machine", () => {
             Effect.forkChild({ startImmediately: true })
           )
           yield* ref.emissions.pipe(
-            Stream.runForEach((event) => Effect.sync(() => emitted.push((event as Published).value))),
+            Stream.runForEach((event) => Effect.sync(() => emitted.push(event.value))),
             Effect.forkChild({ startImmediately: true })
           )
           yield* ref.send(new Changed({ value: "a" }))

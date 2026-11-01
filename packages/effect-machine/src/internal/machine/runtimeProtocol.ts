@@ -106,7 +106,7 @@ export const succeedAcknowledgedMessage = <State>(
     if (message.deferred !== undefined) {
       Deferred.doneUnsafe(message.deferred, Effect.succeed(delivery as AcknowledgedDelivery<unknown>))
     }
-    message.inspection?.complete(delivery as AcknowledgedDelivery<unknown>)
+    message.inspection?.complete(delivery)
   }
 }
 
@@ -1013,7 +1013,7 @@ export const makeEmissionRuntime = (): EmissionRuntime => {
 
 export const childlessRuntime: ChildRuntime = {
   close: () => Effect.void,
-  spawn: (() => Effect.die(new Error("Childless machine logic cannot spawn a process"))) as ProcessSpawn,
+  spawn: (() => Effect.die(new Error("Childless machine logic cannot spawn a process"))),
   get: () => Effect.succeed(Option.none()),
   changes: () => noChildChanges,
   sendTo: () => Effect.void,
@@ -1222,7 +1222,7 @@ export const makeChildRuntimeSync = (
   ): Effect.Effect<MachineRef<any, any, any, any>, any, any> {
     const descriptor = typeof logicOrChild === "object" && logicOrChild !== null &&
         ChildMachineLogicTypeId in logicOrChild
-      ? logicOrChild as ChildMachine.Any
+      ? logicOrChild
       : undefined
     const logic = descriptor === undefined
       ? logicOrChild as ProcessLogic<any, any, any, any, any, any>

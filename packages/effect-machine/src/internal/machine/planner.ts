@@ -39,7 +39,7 @@ import * as Construction from "./construction.js"
 import { failPlanning, InfiniteTransitionError, MachineSchemaDecodeError, toStartupFailure } from "./errors.js"
 import { StoppedError } from "./errors.js"
 import type { PlanningError, StartupError } from "./errors.js"
-import { type CapturedStateConfig, toImpl } from "./implementation.js"
+import { toImpl } from "./implementation.js"
 import { isDataInitializer } from "./initialDeclaration.js"
 import { getStateInitializeValues, makeStateInitializeBuilder } from "./initialization.js"
 import * as InvocationDefinition from "./invocationDefinition.js"
@@ -452,7 +452,7 @@ export function resolveInitialConfiguration(
   for (const path of target.children?.keys() ?? []) {
     const node = getNode(machine, path)
     if (node.type !== "choice") continue
-    const choice = resolveChoiceTarget(machine, partial, makeChoiceTarget(path, node.parent!), event)
+    const choice = resolveChoiceTarget(machine, partial, makeChoiceTarget(path, node.parent), event)
     for (const routed of [choice.target, ...choice.additionalTargets]) {
       const resolved = isInitialTarget(routed) ?
         resolveInitialTarget(machine, partial, routed, event)
@@ -1058,7 +1058,7 @@ const selectInvocationTransition = <
   event: InvocationEvent.InvocationEvent
 ): ReadonlyArray<SelectedTransition<States, E, R, any>> => {
   if (!configuration.active.has(event.path)) return []
-  const config = toImpl(machine).handlers[event.path] as CapturedStateConfig | undefined
+  const config = toImpl(machine).handlers[event.path]
   const invoke = InvocationDefinition.definitions(config?.invoke).find((definition) => {
     const id = "child" in definition ? definition.child?.id : definition.id
     return String(id) === event.id
@@ -1243,14 +1243,14 @@ const choiceFromTarget = (
 
 const withChoiceValues = (target: unknown, values: Readonly<Record<string, unknown>>): unknown => {
   if (isChoiceTarget(target)) {
-    return makeChoiceTarget(target.path, target.parent, { ...values, ...(target.values ?? {}) })
+    return makeChoiceTarget(target.path, target.parent, { ...values, ...target.values })
   }
   if (isInitialTarget(target)) return { ...target, values: { ...values, ...target.values } }
   if (!isTarget(target) || Object.keys(values).length === 0) return target
   const snapshot = target[TargetSnapshotTypeId]
   return makeTarget(target.path, target.value, {
     ...(snapshot === undefined ? {} : { snapshot }),
-    values: { ...values, ...(target.values ?? {}) }
+    values: { ...values, ...target.values }
   })
 }
 

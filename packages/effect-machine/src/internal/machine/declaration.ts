@@ -161,7 +161,7 @@ export const invocation = (
     !(source.kind === "effects" && Effect.isEffect(source.value)) &&
     !(source.kind === "streams" && Stream.isStream(source.value))
   if (parameterized !== (typeof input === "function")) {
-    throw new Error(`Machine invocation "${src}" requires input exactly when its source takes an argument`)
+    throw new Error(`Machine invocation "${String(src)}" requires input exactly when its source takes an argument`)
   }
   const resolve = parameterized
     ? (context: unknown) =>

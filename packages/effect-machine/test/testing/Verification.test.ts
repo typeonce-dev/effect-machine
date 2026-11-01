@@ -430,7 +430,7 @@ const historyMachine = Machine.make({
           initial: {
             target: "workspace.editor.editing",
             decoded: true,
-            data: ({}) => new Editing({ revision: 0 })
+            data: () => new Editing({ revision: 0 })
           },
           states: {
             editing: {}
@@ -661,7 +661,7 @@ describe("MachineTest.verify", () => {
       assert.strictEqual(updateMicrostep.changed, false)
       assert.deepStrictEqual(updateMicrostep.exitPaths, [])
       assert.deepStrictEqual(updateMicrostep.entryPaths, [])
-      assert.strictEqual((updated.final.state.value as Counter).count, 1)
+      assert.strictEqual(updated.final.state.value.count, 1)
       yield* MachineTest.verify(counterMachine, updated)
       const noop = yield* MachineTest.run(counterMachine, { events: [new Noop({})] })
       const step = noop.steps[0]!

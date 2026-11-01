@@ -108,7 +108,7 @@ const assertValid = (
     else {
       assert.ok(transition.target !== undefined)
       assert.strictEqual("reenter" in transition, false)
-      assert.ok(stateOrder.get(transition.target!)! > stateOrder.get(transition.source)!)
+      assert.ok(stateOrder.get(transition.target)! > stateOrder.get(transition.source)!)
       if (transition.trigger.type === "always") assert.strictEqual(source.node._tag, "Atomic")
       else assert.ok(source.node._tag === "Compound" || source.node._tag === "Parallel")
     }

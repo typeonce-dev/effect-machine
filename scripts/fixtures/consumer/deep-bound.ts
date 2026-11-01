@@ -55,7 +55,7 @@ const childMachine = Machine.make({
   initial: {
     target: "Done",
     decoded: true,
-    data: ({ root: { input: input } }) => ChildState.cases.Done.make({ value: input.value })
+    data: ({ root: { input } }) => ChildState.cases.Done.make({ value: input.value })
   },
   root: ({ input }) => ({ input }),
   states: {

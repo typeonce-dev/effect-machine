@@ -39,4 +39,4 @@ export interface MachineInternal extends Machine.Any {
 }
 
 /** The single conversion from an erased public machine to its captured implementation. */
-export const toImpl = (machine: Machine.Any): MachineInternal => machine as MachineInternal
+export const toImpl = (machine: Machine.Any): MachineInternal => machine

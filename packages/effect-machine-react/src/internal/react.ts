@@ -99,5 +99,5 @@ export const createMachineContext = <Args extends MachineContext.Args, A extends
     if (machine === undefined) throw new Error("Machine context must be read inside its Provider")
     return machine
   }
-  return Object.freeze({ Provider, useMachine }) as MachineContext<Args, A>
+  return Object.freeze({ Provider, useMachine })
 }

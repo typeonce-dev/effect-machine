@@ -114,7 +114,7 @@ const normalizeTranscript = <M extends AnyMachine, Error, Output>(
   transcript: CausalRuntimeEvidence<M, Error, Output>
 ): RuntimeInvariantTranscript<M> => ({
   commands: transcript.commands,
-  initial: transcript.initial as RuntimeInvariantTranscript<M>["initial"],
+  initial: transcript.initial,
   records: transcript.records.map(({ actual, command, index }) => ({
     index,
     command,
@@ -122,7 +122,7 @@ const normalizeTranscript = <M extends AnyMachine, Error, Output>(
     snapshot: actual.snapshot as RuntimeInvariantRecord<M>["snapshot"],
     awaited: actual.awaited as RuntimeInvariantRecord<M>["awaited"]
   })),
-  final: transcript.final as RuntimeInvariantTranscript<M>["final"]
+  final: transcript.final
 })
 
 interface Observation<M extends AnyMachine, Context> {
@@ -479,7 +479,7 @@ export const assertPlannerRuntimeAgreement = <M extends AnyMachine, Error, Outpu
 
     if (violations.length > 0) {
       return yield* new PlannerRuntimeAgreementError({
-        evidence: evidence as CausalRuntimeEvidence<M, unknown, unknown>,
+        evidence: evidence,
         violations
       })
     }

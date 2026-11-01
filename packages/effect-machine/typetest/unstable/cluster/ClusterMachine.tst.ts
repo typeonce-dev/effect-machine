@@ -140,7 +140,7 @@ describe("ClusterMachine", () => {
       initial: {
         target: "Count",
         decoded: true,
-        data: ({ root: { input: input } }) => new Count({ value: input.value })
+        data: ({ root: { input } }) => new Count({ value: input.value })
       },
       root: ({ input }) => ({ input }),
       states: { Count: {} }

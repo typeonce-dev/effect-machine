@@ -101,6 +101,28 @@ provide the in-process compiler API that tstyche uses. TypeScript 7 still
 compiles the public types through the package projects and the runtime tests,
 but type assertions are evaluated only with TypeScript 6.
 
+## Formatting and linting
+
+`pnpm format` formats the repository with dprint, as Effect does. `pnpm lint`
+builds the local `@typeonce/oxlint-plugin-effect-machine` package and runs
+Oxlint with the configuration in `.oxlintrc.json`. Both run as part of
+`pnpm check`.
+
+Type-aware rules run through `oxlint-tsgolint`, which reads each file's nearest
+tsconfig. The root `tsconfig.json` references `tsconfig.tests.json` so tests get
+the repository's compiler options. Type tests, type-performance fixtures, and
+scripts belong to no tsconfig and skip type-aware rules.
+
+The repository's own Effect Machine rules check the devtools example machines
+and the machine fixtures under `packages/effect-machine/test`. Fix a finding
+rather than suppressing it. When code must keep the reported pattern, for
+example a cast that TypeScript 6 requires but the TypeScript 7 checker used by
+`oxlint-tsgolint` does not, suppress only that line and give the reason:
+
+```ts
+// oxlint-disable-next-line typescript/no-unnecessary-type-assertion -- TypeScript 6 infers `readonly string[]` without it.
+```
+
 ## API reference data
 
 `pnpm docs:api` generates an Effect-compatible TypeDoc dataset under

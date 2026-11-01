@@ -54,7 +54,7 @@ const makeMachine = () => {
       opened: {
         initial: {
           target: "opened.idle",
-          data: ({}) => ({ count: 1 })
+          data: () => ({ count: 1 })
         },
         states: {
           idle: {},
@@ -97,12 +97,12 @@ const makeParallelMachine = () => {
         }
       },
       dashboard: {
-        initial: { filters: ({}) => ({ id: "all" }), results: ({}) => ({ count: 2 }) },
+        initial: { filters: () => ({ id: "all" }), results: () => ({ count: 2 }) },
         states: {
           filters: {
             initial: {
               target: "dashboard.filters.ready",
-              data: ({}) => ({ enabled: true })
+              data: () => ({ enabled: true })
             },
             states: {
               ready: {}
@@ -229,7 +229,7 @@ const makeNestedMachine = () => {
           opened: {
             initial: {
               target: "main.opened.idle",
-              data: ({}) => ({ count: 3 })
+              data: () => ({ count: 3 })
             },
             states: {
               idle: {},

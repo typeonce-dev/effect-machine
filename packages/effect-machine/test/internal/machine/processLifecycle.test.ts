@@ -16,7 +16,7 @@ describe("machine process lifecycle", () => {
           initial: () => Effect.succeed({ state: 1, done: false, output: undefined }),
           drain: {
             _tag: "Process",
-            run: (context) =>
+            run: () =>
               Ref.update(drainCount, (count) => count + 1).pipe(
                 Effect.andThen(Deferred.succeed(drained, undefined)),
                 Effect.as(Option.none())
@@ -1257,6 +1257,9 @@ describe("machine process lifecycle", () => {
             assert.strictEqual(yield* Ref.get(cleanupCount), 1)
             assert.notStrictEqual(snapshot.status, "active")
             switch (snapshot.status) {
+              case "active":
+                assert.fail("the process must have finished")
+                break
               case "done":
                 assert.strictEqual(index % 2, 0)
                 assert.deepStrictEqual(joined, Exit.succeed(index))

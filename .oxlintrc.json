@@ -1,0 +1,93 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "jsPlugins": ["@typeonce/oxlint-plugin-effect-machine"],
+  "categories": {
+    "correctness": "error"
+  },
+  // Type-aware rules run through oxlint-tsgolint, with each file's nearest tsconfig.
+  "options": {
+    "typeAware": true
+  },
+  "rules": {
+    "typescript/no-unnecessary-type-assertion": "error",
+    "typescript/switch-exhaustiveness-check": ["error", { "considerDefaultExhaustiveForUnions": true }],
+    "typescript/no-floating-promises": "error",
+    "typescript/no-misused-promises": "error",
+    "eslint/no-unused-vars": [
+      "error",
+      { "argsIgnorePattern": "^_", "varsIgnorePattern": "^_", "ignoreRestSiblings": true }
+    ],
+    // Effect.gen bodies capture the instance as `self`.
+    "typescript/no-this-alias": ["error", { "allowedNames": ["self"] }],
+    // Unions such as `unknown | StoppedError` and `string | "dynamic"` document the intended values.
+    "typescript/no-redundant-type-constituents": "off",
+    // Runtime hot paths preallocate arrays, as Effect does.
+    "unicorn/no-new-array": "off"
+  },
+  "overrides": [
+    {
+      // Public and internal types keep phantom type parameters for variance and inference. `noUnusedLocals` checks the rest.
+      "files": ["packages/*/src/**"],
+      "rules": {
+        "eslint/no-unused-vars": "off"
+      }
+    },
+    {
+      // Type tests, type-performance fixtures, and scripts belong to no tsconfig, so type information would use the wrong compiler options.
+      "files": ["packages/*/typetest/**", "packages/*/perf/**", "scripts/**"],
+      "rules": {
+        "typescript/await-thenable": "off",
+        "typescript/no-array-delete": "off",
+        "typescript/no-base-to-string": "off",
+        "typescript/no-duplicate-type-constituents": "off",
+        "typescript/no-floating-promises": "off",
+        "typescript/no-for-in-array": "off",
+        "typescript/no-implied-eval": "off",
+        "typescript/no-meaningless-void-operator": "off",
+        "typescript/no-misused-promises": "off",
+        "typescript/no-misused-spread": "off",
+        "typescript/no-unnecessary-type-assertion": "off",
+        "typescript/no-unsafe-unary-minus": "off",
+        "typescript/no-useless-default-assignment": "off",
+        "typescript/require-array-sort-compare": "off",
+        "typescript/restrict-template-expressions": "off",
+        "typescript/switch-exhaustiveness-check": "off",
+        "typescript/unbound-method": "off"
+      }
+    },
+    {
+      // Type tests bind values only to check their types, and type-performance fixtures stay byte-stable for comparisons.
+      "files": ["packages/*/typetest/**", "packages/*/perf/types/**"],
+      "rules": {
+        "eslint/no-unused-vars": "off"
+      }
+    },
+    {
+      // Dogfood the Effect Machine rules on the example machines and machine fixtures.
+      "files": [
+        "packages/devtools/src/internal/browser/example-machine.ts",
+        "packages/devtools/src/internal/browser/*-example.ts",
+        "packages/effect-machine/test/examples/**",
+        "packages/effect-machine/test/fixtures/**"
+      ],
+      "rules": {
+        "effect-machine/no-async-planning-callback": "error",
+        "effect-machine/no-browser-api-in-planning": "error",
+        "effect-machine/no-conditional-none-branch": "error",
+        "effect-machine/no-conflicting-invocation-identity": "error",
+        "effect-machine/no-nondeterministic-planning": "error",
+        "effect-machine/no-redundant-resolve": "error",
+        "effect-machine/prefer-inline-handle": "error"
+      }
+    }
+  ],
+  "ignorePatterns": [
+    "**/dist/**",
+    "**/node_modules/**",
+    ".data/**",
+    ".agents/**",
+    "references/**",
+    // Intentionally unparsable fixture for devtools error reporting.
+    "packages/devtools/test/fixtures/broken-machine.mjs"
+  ]
+}

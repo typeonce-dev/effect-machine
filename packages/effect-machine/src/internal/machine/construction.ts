@@ -129,7 +129,7 @@ export const snapshot = (nodes: Machine.StateNodes, raw: unknown, path = ""): un
   const node = nodes.byPath.get(path)!
   target(nodes, path, config)
   const value = nodeValue(node, config)
-  if (node.type === "choice") return Topology.makeChoiceTarget(path, node.parent!)
+  if (node.type === "choice") return Topology.makeChoiceTarget(path, node.parent)
   if (node.type === "atomic" || node.type === "final") return { path, value }
   if (config.states === undefined) {
     throw new Error("Machine history fallback requires a complete explicit tree")

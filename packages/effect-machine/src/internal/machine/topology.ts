@@ -8,7 +8,7 @@ import * as Option from "effect/Option"
 import { hasProperty } from "effect/Predicate"
 import * as Schema from "effect/Schema"
 import type { Machine } from "../../Machine.js"
-import { type CapturedStateConfig, toImpl } from "./implementation.js"
+import { toImpl } from "./implementation.js"
 
 export const TargetTypeId = "~effect/Machine/Target"
 
@@ -111,6 +111,7 @@ export const makeTargetSelection = (
   updatePath?: string
 ): TargetSelection =>
   Object.freeze({
+    // oxlint-disable-next-line typescript/no-unnecessary-type-assertion -- TypeScript 6 widens the computed key to `symbol` without it.
     [TargetSelectionTypeId]: TargetSelectionTypeId as typeof TargetSelectionTypeId,
     kind,
     scope,
@@ -312,7 +313,7 @@ export const getStateNodeDefinition = (
     }
   }
   const schema = hasProperty(definition, "schema") && Schema.isSchema(definition.schema)
-    ? definition.schema as Machine.TaggedSchema
+    ? definition.schema
     : undefined
   const annotations = schema === undefined ? definition.annotations : Schema.resolveAnnotations(schema)
   if (definition.type === "parallel" && !hasProperty(definition, "states")) {
@@ -494,7 +495,7 @@ export const compileStateNodes = (states: Machine.StateSchemas): Machine.StateNo
   return {
     byPath,
     roots: compile(states, undefined)
-  } as Machine.StateNodes
+  }
 }
 
 const transitionBranches = (handler: unknown): ReadonlyArray<Machine.TransitionBranch> =>
@@ -512,7 +513,7 @@ export const transitionDefinitions = (
 ): ReadonlyArray<Machine.TransitionDefinition> => {
   const definitions: Array<Machine.TransitionDefinition> = []
   for (const node of machine.stateNodes.byPath.values()) {
-    const config = toImpl(machine).handlers[node.path] as CapturedStateConfig | undefined
+    const config = toImpl(machine).handlers[node.path]
     if (config === undefined) {
       continue
     }

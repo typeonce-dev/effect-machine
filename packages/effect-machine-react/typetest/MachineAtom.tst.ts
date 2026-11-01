@@ -41,7 +41,7 @@ const withInput = Machine.make({
 }).handle({
   initial: {
     target: "Editing",
-    data: ({}) => ({ draft: "" })
+    data: () => ({ draft: "" })
   },
   root: ({ input }) => ({ count: input }),
   states: { Editing: {}, Closed: {} }

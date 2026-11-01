@@ -104,7 +104,7 @@ export const parallelOwnerRoutingMachine = Machine.make({
   },
   states: {
     Print: {
-      initial: { Options: ({}) => ({}), Operation: ({}) => ({}) },
+      initial: { Options: () => ({}), Operation: () => ({}) },
       invoke: { src: "source1" },
       on: {
         PrintRequested: {
@@ -118,7 +118,7 @@ export const parallelOwnerRoutingMachine = Machine.make({
         Options: {
           initial: {
             target: "Print.Options.Ready",
-            data: ({}) => ({})
+            data: () => ({})
           },
           states: {
             Ready: {}
@@ -127,7 +127,7 @@ export const parallelOwnerRoutingMachine = Machine.make({
         Operation: {
           initial: {
             target: "Print.Operation.Active",
-            data: ({}) => ({})
+            data: () => ({})
           },
           states: {
             Active: {},

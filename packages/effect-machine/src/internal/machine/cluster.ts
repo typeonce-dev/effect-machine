@@ -252,7 +252,7 @@ export const make = <
               )
             }
             current = initial.state
-            emitted.push(...initial.emittedEvents as any)
+            emitted.push(...initial.emittedEvents)
           }
 
           if (!internalMachine.isFinal(rootMachine, current)) {
@@ -264,7 +264,7 @@ export const make = <
               )
             }
             current = planned.next
-            emitted.push(...planned.emittedEvents as any)
+            emitted.push(...planned.emittedEvents)
           }
 
           const encoded = yield* internalMachine.encodeSnapshot(rootMachine, current).pipe(

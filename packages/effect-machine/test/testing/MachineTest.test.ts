@@ -33,7 +33,7 @@ const makeTraceMachine = (onAction: () => void) => {
     initial: {
       target: "Ready",
       decoded: true,
-      data: ({ root: { input: input } }) => new Ready({ count: input.userId.length - input.userId.length })
+      data: ({ root: { input } }) => new Ready({ count: input.userId.length - input.userId.length })
     },
     root: ({ input }) => ({ input }),
     states: {

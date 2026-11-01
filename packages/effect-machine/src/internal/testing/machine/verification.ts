@@ -55,7 +55,7 @@ const validateLength = (name: "minEvents" | "maxEvents", value: number): void =>
 
 export const scenarios = <M extends AnyMachine>(
   machine: M,
-  options: ScenarioOptions<M> = {} as ScenarioOptions<M>
+  options: ScenarioOptions<M> = {}
 ): Scenarios<M> => {
   const eventSchemas = Protocol.inputEventSchemas(machine)
   const minEvents = options.minEvents ?? 0
@@ -82,7 +82,7 @@ export const scenarios = <M extends AnyMachine>(
         index,
         report: derived.report
       })
-      return derived.value as Arbitrary.Arbitrary<Machine.Machine.InputEvent<M>>
+      return derived.value
     })
     : []
 
@@ -542,7 +542,7 @@ export const coverage = <M extends AnyMachine>(
         missing: undefined,
         hits: undefined,
         misses: undefined,
-        observed: Array.from(eventCounts, ([tag, count]) => ({ tag, count })) as ReadonlyArray<EventCoverageItem<any>>,
+        observed: Array.from(eventCounts, ([tag, count]) => ({ tag, count })),
         diagnostics: declaredEvents.diagnostics
       },
     scenarios: {
@@ -585,7 +585,7 @@ export const coverage = <M extends AnyMachine>(
       targets: historyTargets,
       resolvedTargets: resolvedHistoryTargets
     }
-  } as Coverage<M>
+  }
 }
 
 type SnapshotObservationRole = "startup" | "event" | "microstep"
@@ -731,7 +731,7 @@ export const observedGraph: <M extends AnyMachine>(
         id,
         snapshot: group.snapshot,
         ...(group.encoded === undefined ? {} : { encoded: group.encoded }),
-        configuration: rawConfigurationPaths(machine, group.snapshot) as ReadonlyArray<StatePath<M>>,
+        configuration: rawConfigurationPaths(machine, group.snapshot),
         observations: {
           total: group.startup + group.event + group.microstep,
           startup: group.startup,
@@ -756,7 +756,7 @@ export const observedGraph: <M extends AnyMachine>(
           entryPaths: microstep.entryPaths as ReadonlyArray<StatePath<M>>,
           changed: microstep.changed
         }))
-      } as ObservedGraphEdge<M>)
+      })
     }
   })
   return {
@@ -767,7 +767,7 @@ export const observedGraph: <M extends AnyMachine>(
       new Set(startupSourceOccurrences.map((index) => nodesById.get(occurrenceIds[index]!)!))
     )
   }
-}) as any
+})
 
 export class VerificationError extends Data.TaggedError("MachineTestVerificationError")<{
   readonly violations: ReadonlyArray<VerificationViolation>
@@ -1774,7 +1774,7 @@ export const verify = <M extends AnyMachine>(
     validateSnapshotMetadata(starting, initialLocation, "initial starting state")
     validateTraceConfiguration(
       starting,
-      trace.initial.startingConfiguration as ReadonlyArray<string>,
+      trace.initial.startingConfiguration,
       initialLocation,
       "initial starting"
     )
@@ -1782,7 +1782,7 @@ export const verify = <M extends AnyMachine>(
       if (new Set(trace.initial.initialEntryPaths).size !== trace.initial.initialEntryPaths.length) {
         add("microsteps.unique", initialLocation, "initial entry paths contain duplicates")
       }
-      if (!samePaths(trace.initial.initialEntryPaths as ReadonlyArray<string>, starting.paths)) {
+      if (!samePaths(trace.initial.initialEntryPaths, starting.paths)) {
         add(
           "microsteps.order",
           initialLocation,
@@ -1808,7 +1808,7 @@ export const verify = <M extends AnyMachine>(
     validatePlanCompletion(trace.initial.plan, initialState, initialCompletions, initialLocation, "initial plan")
     validateTraceConfiguration(
       initialState,
-      trace.initial.configuration as ReadonlyArray<string>,
+      trace.initial.configuration,
       initialLocation,
       "initial"
     )
@@ -1817,7 +1817,7 @@ export const verify = <M extends AnyMachine>(
     }
     if (
       selected.has("microsteps") &&
-      !samePaths(trace.initial.initialEntryPaths as ReadonlyArray<string>, trace.initial.plan.initialEntryPaths)
+      !samePaths(trace.initial.initialEntryPaths, trace.initial.plan.initialEntryPaths)
     ) {
       add("microsteps.continuity", initialLocation, "initial trace entry paths differ from its plan")
     }
@@ -1830,7 +1830,7 @@ export const verify = <M extends AnyMachine>(
       validateSnapshotMetadata(before, location, `event ${eventIndex} before state`, true)
       validateTraceConfiguration(
         before,
-        step.beforeConfiguration as ReadonlyArray<string>,
+        step.beforeConfiguration,
         location,
         `event ${eventIndex} before`
       )
@@ -1875,7 +1875,7 @@ export const verify = <M extends AnyMachine>(
       validateSnapshotMetadata(after, location, `event ${eventIndex} after state`, true)
       validateTraceConfiguration(
         after,
-        step.afterConfiguration as ReadonlyArray<string>,
+        step.afterConfiguration,
         location,
         `event ${eventIndex} after`
       )
@@ -1889,7 +1889,7 @@ export const verify = <M extends AnyMachine>(
     const finalLocation: VerificationLocation = { eventIndex: finalEventIndex }
     const final = inspectSnapshot(trace.final, finalLocation, "trace final state")
     validateSnapshotMetadata(final, finalLocation, "trace final state", true)
-    validateTraceConfiguration(final, trace.finalConfiguration as ReadonlyArray<string>, finalLocation, "final")
+    validateTraceConfiguration(final, trace.finalConfiguration, finalLocation, "final")
     if (selected.has("microsteps") && !sameValue(previous.root, final.root)) {
       add("microsteps.continuity", finalLocation, "trace final state differs from its final planned state")
     }

@@ -31,7 +31,7 @@ describe("dynamic child machines", () => {
     initial: {
       target: "ChildIdle",
       decoded: true,
-      data: ({ root: { input: input } }) => new ChildIdle({ id: input.id })
+      data: ({ root: { input } }) => new ChildIdle({ id: input.id })
     },
     root: ({ input }) => ({ input }),
     states: { ChildIdle: { on: { ChildEvent: { none: true } } } }

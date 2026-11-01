@@ -75,7 +75,7 @@ const getBoundaryResultDecoder = (schema: Schema.Top): BoundaryResultDecoder => 
   if (cached !== undefined) {
     return cached
   }
-  const decoder = Schema.decodeUnknownResult(Schema.toType(schema)) as BoundaryResultDecoder
+  const decoder = Schema.decodeUnknownResult(Schema.toType(schema))
   boundaryResultDecoderCache.set(key, decoder)
   return decoder
 }
@@ -123,7 +123,7 @@ const getEventProtocolDefinition = (
   protocol: Machine.EventProtocol.Any,
   expectedKind?: Machine.EventProtocolKind
 ): EventProtocolDefinition => {
-  const definition = eventProtocolDefinitions.get(protocol as object)
+  const definition = eventProtocolDefinitions.get(protocol)
   if (definition === undefined) {
     throw new Error(
       "Machine expected an event protocol created with Machine.events, Machine.internalEvents, or Machine.emittedEvents"
@@ -285,7 +285,7 @@ export const makeEventProtocol = <
 ): Machine.EventProtocol<Kind, Schemas> => {
   const ownedSchemas = Object.freeze(Array.from(schemas)) as unknown as Schemas
   const protocol = eventConstructors(kind, ownedSchemas) as Machine.EventProtocol<Kind, Schemas>
-  eventProtocolDefinitions.set(protocol as object, { kind, schemas: ownedSchemas })
+  eventProtocolDefinitions.set(protocol, { kind, schemas: ownedSchemas })
   return Object.freeze(protocol) as Machine.EventProtocol<Kind, Schemas>
 }
 
@@ -333,7 +333,7 @@ const makeBoundarySync = <A>(
   options: DecodeBoundaryOptions
 ): A => {
   try {
-    return schema.make(input as never) as A
+    return schema.make(input) as A
   } catch (cause) {
     const issue = cause instanceof Error ? cause.cause : undefined
     throw new MachineSchemaDecodeError({
@@ -396,7 +396,7 @@ const decodeEventConstruction = (
   if (
     definition === undefined ||
     (boundary === "emission" ? definition.kind !== "emitted" : definition.kind === "emitted") ||
-    !constructors.has(definition.schema as object)
+    !constructors.has(definition.schema)
   ) {
     return Effect.fail(eventConstructionProtocolError(machine, construction, boundary))
   }
@@ -430,7 +430,7 @@ const decodeEventConstructionSync = (
   if (
     definition === undefined ||
     (boundary === "emission" ? definition.kind !== "emitted" : definition.kind === "emitted") ||
-    !constructors.has(definition.schema as object)
+    !constructors.has(definition.schema)
   ) {
     throw eventConstructionProtocolError(machine, construction, boundary)
   }
