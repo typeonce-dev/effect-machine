@@ -45,7 +45,7 @@
     "oxlint": "1.90.0",
     "oxlint-tsgolint": "7.0.2005",
     "pagefind": "1.5.2",
-    "tinybench": "2.9.0",
+    "tinybench": "6.2.2",
     "tstyche": "7.2.5",
     "typedoc": "0.28.20",
     "typescript": "6.0.3",

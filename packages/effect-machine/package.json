@@ -76,7 +76,7 @@
     "@effect/vitest": "4.1.1",
     "@types/node": "26.6.6",
     "effect": "4.1.1",
-    "tinybench": "2.9.0",
+    "tinybench": "6.2.2",
     "tstyche": "7.2.5",
     "typescript": "6.0.3",
     "vitest": "5.0.5"

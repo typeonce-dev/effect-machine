@@ -83,6 +83,7 @@ const bench = new Bench({
   warmupTime: configuration.warmupTimeMilliseconds,
   iterations: configuration.minimumIterations,
   warmupIterations: configuration.minimumWarmupIterations,
+  retainSamples: true,
   throws: true
 })
 const benchmarkDefinitions = new Map()
@@ -334,7 +335,7 @@ for (const implementation of runtimeReferenceImplementations) {
 }
 
 try {
-  await bench.warmup()
+  // Bench.run warms every task up before measuring it.
   await bench.run()
 } finally {
   for (const implementation of implementations) {
@@ -373,21 +374,26 @@ const benchmarks = bench.tasks.map((task) => {
   if (definition === undefined || result === undefined) {
     throw new Error(`Missing benchmark result for ${task.name}`)
   }
-  if (result.error !== undefined) {
+  if (result.state === "errored") {
     throw result.error
   }
+  if (result.state !== "completed" || result.latency.samples === undefined) {
+    throw new Error(`Benchmark ${task.name} did not complete: ${result.state}`)
+  }
   const operations = definition.operationsPerIteration
-  const medianBatchMilliseconds = percentile(result.samples, 0.5)
+  const { latency } = result
+  const samples = latency.samples
+  const medianBatchMilliseconds = percentile(samples, 0.5)
   return {
     ...definition,
     medianThroughput: operations * 1_000 / medianBatchMilliseconds,
-    meanThroughput: result.hz * operations,
-    meanNanosecondsPerOperation: result.mean * 1_000_000 / operations,
+    meanThroughput: operations * 1_000 / latency.mean,
+    meanNanosecondsPerOperation: latency.mean * 1_000_000 / operations,
     medianBatchMilliseconds,
-    p95BatchMilliseconds: percentile(result.samples, 0.95),
-    p99BatchMilliseconds: result.p99,
-    relativeMarginOfError: result.rme,
-    sampleCount: result.samples.length
+    p95BatchMilliseconds: percentile(samples, 0.95),
+    p99BatchMilliseconds: percentile(samples, 0.99),
+    relativeMarginOfError: latency.rme,
+    sampleCount: samples.length
   }
 })
 
