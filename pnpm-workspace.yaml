@@ -1,5 +1,6 @@
 packages:
   - "packages/*"
+  - "tooling/*"
 
 overrides:
   effect: 4.0.0
