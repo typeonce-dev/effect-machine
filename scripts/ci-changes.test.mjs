@@ -64,6 +64,38 @@ test("distinguishes performance dependencies from unrelated tooling", () => {
   })
 })
 
+test("detects a development version change behind an unchanged peer range", () => {
+  const withPeer = {
+    ...packageJson,
+    peerDependencies: { effect: "^4.0.0" }
+  }
+  assert.deepEqual(
+    classifyChanges({
+      beforePackageJson: withPeer,
+      afterPackageJson: {
+        ...withPeer,
+        devDependencies: { ...withPeer.devDependencies, effect: "4.1.0" }
+      },
+      changedFiles: ["packages/effect-machine/package.json"]
+    }),
+    {
+      runtimePerformance: true,
+      typePerformance: true
+    }
+  )
+  assert.deepEqual(
+    classifyChanges({
+      beforePackageJson: withPeer,
+      afterPackageJson: { ...withPeer, peerDependencies: { effect: "^4.1.0" } },
+      changedFiles: ["packages/effect-machine/package.json"]
+    }),
+    {
+      runtimePerformance: true,
+      typePerformance: true
+    }
+  )
+})
+
 test("classifies performance harness and classifier changes", () => {
   assert.deepEqual(classify(["scripts/type-performance.mjs"]), {
     runtimePerformance: false,

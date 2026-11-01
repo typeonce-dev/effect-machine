@@ -5,18 +5,16 @@ import { fileURLToPath } from "node:url"
 
 const performanceDependencies = new Set(["effect", "tinybench", "typescript"])
 
-const dependencyVersions = (packageJson) => ({
-  ...packageJson.dependencies,
-  ...packageJson.devDependencies,
-  ...packageJson.optionalDependencies,
-  ...packageJson.peerDependencies
-})
+const dependencySections = ["dependencies", "devDependencies", "optionalDependencies", "peerDependencies"]
 
-const relevantDependenciesChanged = (beforePackageJson, afterPackageJson) => {
-  const before = dependencyVersions(beforePackageJson)
-  const after = dependencyVersions(afterPackageJson)
-  return [...performanceDependencies].some((dependency) => before[dependency] !== after[dependency])
-}
+// Compare each section separately: an unchanged peer range must not hide a
+// changed development version of the same dependency.
+const relevantDependenciesChanged = (beforePackageJson, afterPackageJson) =>
+  [...performanceDependencies].some((dependency) =>
+    dependencySections.some((section) =>
+      beforePackageJson[section]?.[dependency] !== afterPackageJson[section]?.[dependency]
+    )
+  )
 
 export const classifyChanges = ({
   afterPackageJson,

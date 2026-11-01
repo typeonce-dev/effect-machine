@@ -153,8 +153,8 @@ export const acquireWatcher = (
 export const watcherOptions = (options: DevServer.Options): ChokidarOptions =>
   ({
     ignoreInitial: true,
-    interval: 200,
-    usePolling: options.watchPolling ?? false,
+    backend: options.watchPolling === true ? "polling" : "auto",
+    pollingInterval: 200,
     ignored: (file, stats) => isIgnored(file) || stats?.isFile() === true && !sourceExtension.test(file)
   }) satisfies ChokidarOptions
 
