@@ -34,6 +34,8 @@ export interface CapturedStateConfig {
  */
 export interface MachineInternal extends Machine.Any {
   readonly handlers: Readonly<Record<string, CapturedStateConfig | undefined>>
+  /** Startup constructor; callers decode its input first and validate its result. */
+  readonly initial: (...args: ReadonlyArray<unknown>) => unknown
 }
 
 /** The single conversion from an erased public machine to its captured implementation. */
