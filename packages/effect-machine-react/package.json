@@ -51,8 +51,7 @@
   "peerDependencies": {
     "@effect/atom-react": "^4.0.0",
     "effect": "^4.0.0",
-    "react": ">=19.0.0 <20.0.0",
-    "scheduler": ">=0.25.0 <0.28.0"
+    "react": ">=19.0.0 <20.0.0"
   },
   "devDependencies": {
     "@effect/atom-react": "4.0.0",
@@ -63,7 +62,6 @@
     "jsdom": "27.2.0",
     "react": "19.2.7",
     "react-dom": "19.2.7",
-    "scheduler": "0.27.0",
     "tstyche": "7.2.1",
     "typescript": "6.0.3",
     "vitest": "5.0.1"
