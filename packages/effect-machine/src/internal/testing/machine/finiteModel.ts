@@ -1456,6 +1456,8 @@ export const compileModel = (model: FiniteModel): Machine.Machine.Any => {
   const flattened = validateModel(model)
   const byPath = new Map(flattened.map((state) => [state.path, state]))
   const stateTree = makeStateTree(model.roots, undefined)
+  // Erased boundary: the public constructors infer literal state and event types,
+  // but a finite model builds its schema tree and handlers at runtime.
   const defined = Machine.state({ states: stateTree } as any)
   const eventSchemas = model.events.map((event) => Schema.TaggedStruct(event, {}))
   const initial = byPath.get(model.initial)!
@@ -1468,7 +1470,7 @@ export const compileModel = (model: FiniteModel): Machine.Machine.Any => {
   const machine = Machine.make({
     root: defined,
     branches,
-    events: Machine.eventsFromSchemas(...eventSchemas) as any
+    events: Machine.eventsFromSchemas(...eventSchemas)
   } as any)
   return machine.handle(
     {

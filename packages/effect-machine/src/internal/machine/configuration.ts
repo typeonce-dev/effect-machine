@@ -577,9 +577,9 @@ export const normalizeConfiguration = <const States extends Machine.StateSchemas
   state: Machine.Snapshot<States>
 ): ActiveConfiguration => configurationFromSnapshot(machine, state)
 
-export const normalizeConfigurationSync = <const States extends Machine.StateSchemas>(
+export const normalizeConfigurationSync = (
   machine: Machine.Any,
-  state: Machine.Snapshot<States>
+  state: Machine.AtomicSnapshot<string, unknown>
 ): ActiveConfiguration => {
   try {
     return configurationFromSnapshot(machine, state)
@@ -1095,10 +1095,11 @@ const configurationFromTargetSnapshotSync = (
   }
 }
 
-export const normalizeTargetConfigurationSync = <const States extends Machine.StateSchemas>(
+/** Applies a transition target, failing for anything other than a target builder result or snapshot. */
+export const normalizeTargetConfigurationSync = (
   machine: Machine.Any,
   current: ActiveConfiguration,
-  target: Machine.Snapshot<States> | Machine.Target<States, Machine.StateIdentifier<States>>
+  target: unknown
 ): ActiveConfiguration => {
   if (isTarget(target)) {
     const snapshot = target[TargetSnapshotTypeId]

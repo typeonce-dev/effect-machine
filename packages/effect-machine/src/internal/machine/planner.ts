@@ -48,6 +48,7 @@ import { decodeEventSync, decodeInputSync, decodeStateValueSync } from "./protoc
 import { InitialEventTypeId } from "./symbols.js"
 import {
   getNode,
+  type HistoryTarget,
   type InitialTarget as InitialTargetInstruction,
   isChoiceTarget,
   isCombinedTarget,
@@ -59,6 +60,7 @@ import {
   isStateUpdate,
   isTarget,
   makeChoiceTarget,
+  makeResolvedTarget,
   makeStateInput,
   makeTarget,
   TargetSnapshotTypeId
@@ -313,7 +315,7 @@ const completeHistoryConfiguration = (
             next = normalizeTargetConfigurationSync(
               machine,
               next,
-              (resolved?.target ?? routed) as Machine.Snapshot<any> | Machine.Target<any, any>
+              resolved?.target ?? routed
             )
             if (resolved !== undefined) {
               commands.push(...resolved.commands)
@@ -460,7 +462,7 @@ export function resolveInitialConfiguration(
       partial = normalizeTargetConfigurationSync(
         machine,
         partial,
-        (resolved?.target ?? routed) as Machine.Target<any, any>
+        resolved?.target ?? routed
       )
       if (resolved !== undefined) {
         commands.push(...resolved.commands)
@@ -494,10 +496,7 @@ export function resolveInitialTarget(
   const completed = resolveInitialConfiguration(machine, configuration, target, event)
   const snapshot = snapshotFromConfigurationAtPath(machine, completed.configuration, target.path)
   return {
-    target: makeTarget(target.path as any, snapshot.value as any, {
-      snapshot: snapshot as any,
-      values: target.values as any
-    }),
+    target: makeResolvedTarget(target.path, snapshot.value, { snapshot, values: target.values }),
     commands: completed.commands,
     raisedEvents: completed.raisedEvents,
     emittedEvents: completed.emittedEvents,
@@ -526,10 +525,7 @@ function resolveHistoryTarget(
     const values = Object.fromEntries(completed.configuration.values)
     if (target.parent !== "" && configuration.active.has("")) delete values[""]
     return {
-      target: makeTarget(target.parent as any, snapshot.value as any, {
-        snapshot: snapshot as any,
-        values: values as any
-      }),
+      target: makeResolvedTarget(target.parent, snapshot.value, { snapshot, values }),
       commands: completed.commands,
       raisedEvents: completed.raisedEvents,
       emittedEvents: completed.emittedEvents,
@@ -565,20 +561,18 @@ function resolveHistoryTarget(
       event
     )
   let fallbackConfiguration = choiceResolution === undefined
-    ? normalizeConfigurationSync(machine, collected.state as any)
+    ? normalizeConfigurationSync(machine, collected.state)
     : normalizeTargetConfigurationSync(machine, {
       active: new Set(),
       values: new Map(),
       outputs: new Map(),
       history: configuration.history
-    }, choiceResolution.target as any)
+    }, choiceResolution.target)
   for (const additionalTarget of choiceResolution?.additionalTargets ?? []) {
     fallbackConfiguration = normalizeTargetConfigurationSync(
       machine,
       fallbackConfiguration,
-      additionalTarget as
-        | Machine.Snapshot<any>
-        | Machine.Target<any, string>
+      additionalTarget
     )
   }
   if (!fallbackConfiguration.active.has(target.parent)) {
@@ -590,10 +584,7 @@ function resolveHistoryTarget(
   const values = Object.fromEntries(fallbackConfiguration.values)
   if (target.parent !== "" && configuration.active.has("")) delete values[""]
   return {
-    target: makeTarget(target.parent as any, snapshot.value as any, {
-      snapshot: snapshot as any,
-      values: values as any
-    }),
+    target: makeResolvedTarget(target.parent, snapshot.value, { snapshot, values }),
     commands: [...collected.commands, ...(choiceResolution?.commands ?? [])],
     raisedEvents: [...collected.raisedEvents, ...(choiceResolution?.raisedEvents ?? [])],
     emittedEvents: [...collected.emittedEvents, ...(choiceResolution?.emittedEvents ?? [])],
@@ -885,12 +876,7 @@ const selectAlwaysTransitions = <
             sourcePath: path,
             leafPath: leaf,
             trigger: { type: "always" },
-            transition: always as unknown as MicrostepTransition<
-              States,
-              E,
-              R,
-              ConstructionContext<Machine.AlwaysContext<States, Events, Emits, Machine.StateIdentifier<States>>>
-            >,
+            transition: always,
             context: {
               ...resolveMachineReferences(machine, configuration),
               state: configuration.values.get(path) as Machine.StateByIdentifier<
@@ -961,12 +947,7 @@ const selectDoneTransitions = <
         sourcePath: completion.path,
         leafPath: getActiveLeafPathFrom(machine, configuration, completion.path),
         trigger: { type: "done" },
-        transition: onDone as unknown as MicrostepTransition<
-          States,
-          E,
-          R,
-          ConstructionContext<Machine.DoneContext<States, Events, Emits, Machine.StateIdentifier<States>>>
-        >,
+        transition: onDone,
         context: makeDoneContext<States, Events, Emits, Machine.StateIdentifier<States>>(
           machine,
           configuration,
@@ -1042,29 +1023,14 @@ const selectEventTransitions = <
             sourcePath: path,
             leafPath: leaf,
             trigger: { type: "event", event: event._tag },
-            transition: transition as unknown as MicrostepTransition<
-              States,
-              E,
-              R,
-              ConstructionContext<
-                Machine.HandlerContext<
-                  States,
-                  Events,
-                  Emits,
-                  Machine.StateIdentifier<States>,
-                  Machine.TagOf<Events[number]>,
-                  E,
-                  R
-                >
-              >
-            >,
+            transition,
             context: makeTransitionContext<
               States,
               Events,
               Emits,
               Machine.StateIdentifier<States>,
               Machine.TagOf<Events[number]>
-            >(machine as any, configuration, path, event, capturedSnapshot())
+            >(machine, configuration, path, event, capturedSnapshot())
           })
           evaluatedSources.set(path, candidate)
         }
@@ -1127,19 +1093,14 @@ const selectInvocationTransition = <
     sourcePath: event.path,
     leafPath: getActiveLeafPathFrom(machine, configuration, event.path),
     trigger: { type: "invoke", id: event.id, outcome: event.type },
-    transition: transition as unknown as MicrostepTransition<States, E, R, any>,
+    transition,
     context
   })
   return candidate === undefined ? [] : [candidate]
 }
 
-export const getTargetNodePath = <const States extends Machine.StateSchemas>(
-  target:
-    | Machine.Snapshot<States>
-    | Machine.Target<States, Machine.StateIdentifier<States>>
-    | Machine.HistoryTarget<States, Machine.HistoryIdentifier<States>>
-    | Machine.ChoiceTarget<States, Machine.ChoiceIdentifier<States>>
-): string => {
+/** Reads the state path addressed by a transition result, failing for any other value. */
+export const getTargetNodePath = (target: unknown): string => {
   if (isHistoryTarget(target) || isChoiceTarget(target)) {
     return String(target.path)
   }
@@ -1304,6 +1265,12 @@ interface ResolvedChoiceTransition {
   readonly updates: ReadonlyArray<string>
 }
 
+/** A target resolved to concrete state paths, before configuration normalization. */
+type ResolvedTarget = Machine.Target<any, string> | Machine.AtomicSnapshot<string, unknown>
+
+/** A route selected by choice resolution; initial and history routes are resolved by the caller. */
+type ChoiceRoute = ResolvedTarget | HistoryTarget | InitialTargetInstruction
+
 function resolveChoiceTarget(
   machine: Machine.Any,
   configuration: ActiveConfiguration,
@@ -1311,7 +1278,7 @@ function resolveChoiceTarget(
   event: unknown
 ) {
   const pending: Array<unknown> = [initialTarget]
-  const resolvedTargets: Array<unknown> = []
+  const resolvedTargets: Array<ChoiceRoute> = []
   const commands: Array<RuntimeCommand> = []
   const raisedEvents: Array<unknown> = []
   const emittedEvents: Array<unknown> = []
@@ -1373,7 +1340,7 @@ function resolveChoiceTarget(
         throw new Error(`Machine choice resolver for "${node.path}" must return a target`)
       }
       validateDeclaredTransitionTarget(node.path, { type: "choice" }, choice.targets, collected.state)
-      const returnedPath = getTargetNodePath(collected.state as any)
+      const returnedPath = getTargetNodePath(collected.state)
       current = withChoiceValues(collected.state, extracted.values)
       const nested = choiceFromTarget(current)
       transitions.push({
@@ -1412,7 +1379,7 @@ const collectEvaluatedTransition = <
   Event,
   E,
   R,
-  Context
+  Context extends { readonly event?: unknown }
 >(
   machine: Machine.Any,
   state: ActiveConfiguration,
@@ -1471,11 +1438,11 @@ const collectEvaluatedTransition = <
       machine,
       constructionState,
       unresolvedTarget,
-      (selection.context as any).event
+      selection.context.event
     )
   const choiceResolvedTarget = choiceResolution?.target ?? unresolvedTarget
   const initialResolution = choiceResolvedTarget !== undefined && isInitialTarget(choiceResolvedTarget)
-    ? resolveInitialTarget(machine, constructionState, choiceResolvedTarget, (selection.context as any).event)
+    ? resolveInitialTarget(machine, constructionState, choiceResolvedTarget, selection.context.event)
     : undefined
   const routedTarget = initialResolution?.target ?? choiceResolvedTarget
   let historyResolution: {
@@ -1509,7 +1476,7 @@ const collectEvaluatedTransition = <
       machine,
       stateAtHistoryResolution,
       routedTarget,
-      (selection.context as any).event
+      selection.context.event
     )
   }
   const target: Machine.Snapshot<States> | Machine.Target<States, Machine.StateIdentifier<States>> | undefined =
@@ -1525,18 +1492,16 @@ const collectEvaluatedTransition = <
   const additionalTargetRaisedEvents: Array<unknown> = []
   const additionalTargetEmittedEvents: Array<unknown> = []
   const additionalTargetChoiceTransitions: Array<ResolvedChoiceTransition> = []
-  const additionalChoiceTargets: Array<
-    Machine.Snapshot<States> | Machine.Target<States, Machine.StateIdentifier<States>>
-  > = []
+  const additionalChoiceTargets: Array<ResolvedTarget> = []
   for (const additionalTarget of choiceResolution?.additionalTargets ?? []) {
     if (isInitialTarget(additionalTarget)) {
       const resolved = resolveInitialTarget(
         machine,
         state,
         additionalTarget,
-        (selection.context as any).event
+        selection.context.event
       )
-      additionalChoiceTargets.push(resolved.target as any)
+      additionalChoiceTargets.push(resolved.target)
       additionalTargetActions.push(...resolved.commands)
       additionalTargetRaisedEvents.push(...resolved.raisedEvents)
       additionalTargetEmittedEvents.push(...resolved.emittedEvents)
@@ -1544,16 +1509,16 @@ const collectEvaluatedTransition = <
       continue
     }
     if (!isHistoryTarget(additionalTarget)) {
-      additionalChoiceTargets.push(additionalTarget as any)
+      additionalChoiceTargets.push(additionalTarget)
       continue
     }
     const resolved = resolveHistoryTarget(
       machine,
       state,
       additionalTarget,
-      (selection.context as any).event
+      selection.context.event
     )
-    additionalChoiceTargets.push(resolved.target as any)
+    additionalChoiceTargets.push(resolved.target)
     additionalTargetActions.push(...resolved.commands)
     additionalTargetRaisedEvents.push(...resolved.raisedEvents)
     additionalTargetEmittedEvents.push(...resolved.emittedEvents)
@@ -1569,9 +1534,9 @@ const collectEvaluatedTransition = <
       ...state,
       values: new Map(state.values).set(update.path, update.value)
     }
-    : normalizeTargetConfigurationSync<States>(machine, state, target)
+    : normalizeTargetConfigurationSync(machine, state, target)
   for (const additionalTarget of additionalChoiceTargets) {
-    stateAfterTransition = normalizeTargetConfigurationSync<States>(
+    stateAfterTransition = normalizeTargetConfigurationSync(
       machine,
       stateAfterTransition,
       additionalTarget
@@ -1838,7 +1803,7 @@ const canSync = (
   const decodedEvent = decodeEventSync(machine, event)
   if (isFinalState(machine, state)) return false
   const configuration = normalizeConfigurationSync(machine, state)
-  return selectEventTransitions(machine, configuration, decodedEvent as any).length > 0
+  return selectEventTransitions(machine, configuration, decodedEvent).length > 0
 }
 
 const microstep = (
@@ -2041,7 +2006,7 @@ const settle = (
         throw new Error("Machine reached a terminal configuration without a completed root output")
       }
       completedTerminal = true
-      finalOutput = currentState.outputs.get(root) as any
+      finalOutput = currentState.outputs.get(root)
       break
     }
 
@@ -2104,7 +2069,7 @@ const settle = (
     microsteps
   }
   return completedTerminal
-    ? { ...result, done: true as const, output: finalOutput as any }
+    ? { ...result, done: true as const, output: finalOutput }
     : { ...result, done: false as const, output: undefined }
 }
 
@@ -2115,6 +2080,8 @@ const macrostepConfiguration = (
 ) => {
   const decodedEvent = InvocationEvent.isInvocationEvent(event) ? event : decodeEventSync(machine, event)
   if (isActiveFinalConfiguration(machine, configuration)) {
+    // Completion contexts receive the triggering event, including private invocation events
+    // that the public lifecycle event type does not model.
     const completed = completeConfigurationSync(machine, configuration, decodedEvent as any)
     const root = getRootPath(machine, completed.configuration)
     if (!completed.configuration.outputs.has(root)) {
@@ -2127,7 +2094,7 @@ const macrostepConfiguration = (
       emittedEvents: [],
       microsteps: [],
       done: true as const,
-      output: completed.configuration.outputs.get(root) as any
+      output: completed.configuration.outputs.get(root)
     }
   }
 
@@ -2152,7 +2119,7 @@ const macrostepConfiguration = (
   const step = microstep(
     machine,
     configuration,
-    decodedEvent as any,
+    decodedEvent,
     selections
   )
   const commands = [...step.commands]
@@ -2160,7 +2127,7 @@ const macrostepConfiguration = (
   const emittedEvents = [...step.emittedEvents]
   const microsteps = [step]
   return {
-    ...settle(machine, step.next, decodedEvent as any, commands, raisedEvents, emittedEvents, microsteps),
+    ...settle(machine, step.next, decodedEvent, commands, raisedEvents, emittedEvents, microsteps),
     event: decodedEvent
   }
 }

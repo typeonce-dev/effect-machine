@@ -613,6 +613,28 @@ export const makeTarget = <
     values: options?.values
   }) as Machine.Target<States, StateId>
 
+/**
+ * Builds a target from a planned configuration whose path, value, snapshot,
+ * and ancestor values were already decoded, so no state schema type applies.
+ * It keeps the same own-property shape as `makeTarget`, including `values`
+ * when undefined, which the optional public `values` field cannot express.
+ */
+export const makeResolvedTarget = (
+  path: string,
+  value: unknown,
+  options: {
+    readonly snapshot: Machine.AtomicSnapshot<string, unknown>
+    readonly values: Readonly<Record<string, unknown>> | undefined
+  }
+): Machine.Target<any, string> =>
+  ({
+    [TargetTypeId]: TargetTypeId,
+    [TargetSnapshotTypeId]: options.snapshot,
+    path,
+    value,
+    values: options.values
+  }) as Machine.Target<any, string>
+
 export const isTarget = (u: unknown): u is Machine.Target<any, any> => hasProperty(u, TargetTypeId)
 
 export const makeStateInput = (input: unknown): StateInput => ({

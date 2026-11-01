@@ -397,7 +397,7 @@ describe("machine planner and runtime strategies", () => {
       const machine = makeFlatMachine()
       const initial = yield* Machine.planInitial(machine)
       const selected = ExecutionPlan.selectExecutionPlanForTesting(machine, "indexed-flat").plan
-      const active = Configuration.normalizeConfigurationSync<Machine.Machine.States<typeof machine>>(
+      const active = Configuration.normalizeConfigurationSync(
         machine,
         initial.state
       )

@@ -7,7 +7,7 @@
 import * as Cause from "effect/Cause"
 import * as Effect from "effect/Effect"
 import * as Stream from "effect/Stream"
-import type { ChildMachine, ChildOwner, Inspection, Logic, Machine } from "../../Machine.js"
+import type { ChildMachine, ChildOwner, Inspection, Machine } from "../../Machine.js"
 import * as ChildRegistry from "./childRegistry.js"
 import * as Configuration from "./configuration.js"
 import { ChildAlreadyExistsError, InfiniteTransitionError, MachineSchemaDecodeError, StoppedError } from "./errors.js"
@@ -37,7 +37,9 @@ export const makeKey = (path: string, id: string): string => `${path.length}:${p
 export const makeChildId = (path: string, id: string): string =>
   `${ChildRegistry.invocationChildIdPrefix}${makeKey(path, id)}`
 
-const oneShot = (effect: Effect.Effect<any, any, any>): Logic<void, never, any, any, any> => ({
+const oneShot = (
+  effect: Effect.Effect<unknown, unknown, unknown>
+): Runtime.ProcessLogic<void, unknown, unknown, unknown, unknown> => ({
   initial: () => Effect.void,
   run: () => effect
 })
@@ -46,7 +48,7 @@ const streamLogic = (
   stream: Stream.Stream<any, any, any>,
   path: string,
   id: string
-): Runtime.ProcessLogic<void, never, any, any, void> => ({
+): Runtime.ProcessLogic<void, unknown, unknown, unknown, void> => ({
   initial: () => Effect.void,
   run: ({ parent }) => {
     const send = parent?.[Runtime.acknowledgedSend]
@@ -68,9 +70,10 @@ const resolveValue = (value: unknown, context: Omit<Machine.InvokeContext<any, a
   typeof value === "function" ? value(context) : value
 
 const makeChildOwner = (scope: Runtime.ProcessScope<any>): ChildOwner<any> => ({
-  spawn:
-    ((descriptor: ChildMachine.Any, options?: { readonly input?: unknown }) =>
-      (scope.spawn as any)(descriptor, options)) as ChildOwner<any>["spawn"],
+  spawn: <const Child extends ChildMachine.Any>(
+    child: Child & ChildMachine.Executable<Child> & ChildMachine.ParentCompatibility<Child, any>,
+    ...options: ChildMachine.SpawnArgs<Child>
+  ) => scope.spawn<Child>(child, ...options),
   sendTo: ((descriptor: ChildMachine.Any, event: unknown) => scope.sendTo(descriptor, event)) as ChildOwner<
     any
   >["sendTo"],
@@ -86,15 +89,7 @@ const resolveOne = (
     return {
       id: String(raw.id),
       sourceName: raw.sourceName,
-      src: () =>
-        oneShot(raw.effect(context) as Effect.Effect<any, any, any>) as unknown as Runtime.ProcessLogic<
-          any,
-          any,
-          any,
-          any,
-          any,
-          any
-        >,
+      src: () => oneShot(raw.effect(context)),
       onDone: raw.onDone,
       onFailure: raw.onFailure,
       onSnapshot: raw.onSnapshot,
@@ -105,15 +100,7 @@ const resolveOne = (
     return {
       id: String(raw.id),
       sourceName: raw.sourceName,
-      src: () =>
-        oneShot(Effect.sleep(resolveValue(raw.after, context) as any)) as unknown as Runtime.ProcessLogic<
-          any,
-          any,
-          any,
-          any,
-          any,
-          any
-        >,
+      src: () => oneShot(Effect.sleep(typeof raw.after === "function" ? raw.after(context) : raw.after)),
       onDone: raw.onDone,
       activityKind: "Timer"
     }
@@ -123,8 +110,7 @@ const resolveOne = (
     return {
       id,
       sourceName: raw.sourceName,
-      src: () =>
-        streamLogic(raw.stream(context), path, id) as unknown as Runtime.ProcessLogic<any, any, any, any, any, any>,
+      src: () => streamLogic(raw.stream(context), path, id),
       onDone: raw.onDone,
       onFailure: raw.onFailure,
       activityKind: "Stream"
