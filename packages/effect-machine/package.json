@@ -10,7 +10,7 @@
   "bugs": {
     "url": "https://github.com/typeonce-dev/effect-machine/issues"
   },
-  "homepage": "https://github.com/typeonce-dev/effect-machine#readme",
+  "homepage": "https://effect-machine.typeonce.dev",
   "type": "module",
   "license": "MIT",
   "sideEffects": false,
