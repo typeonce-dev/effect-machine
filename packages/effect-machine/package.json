@@ -69,6 +69,8 @@
   "scripts": {
     "build": "tsc -b tsconfig.build.json",
     "check": "tsc -b tsconfig.json",
+    "prepack": "node ../../scripts/ai-docs/copy.mjs",
+    "postpack": "node ../../scripts/ai-docs/copy.mjs --clean",
     "test:types": "tstyche"
   },
   "peerDependencies": {

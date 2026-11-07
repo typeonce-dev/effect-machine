@@ -39,8 +39,19 @@ interface EvaluationResponse {
   readonly results: ReadonlyArray<unknown>
 }
 
-type WorkerRequest = EvaluationRequest
-type WorkerResponse = EvaluationResponse
+interface CheckRequest {
+  readonly _tag: "CheckMachines"
+  readonly root: string
+  readonly candidates: ReadonlyArray<ProjectInspector.Candidate>
+}
+
+interface CheckResponse {
+  readonly _tag: "CheckedMachines"
+  readonly results: ReadonlyArray<unknown>
+}
+
+type WorkerRequest = EvaluationRequest | CheckRequest
+type WorkerResponse = EvaluationResponse | CheckResponse
 
 const scriptKind = (file: string): ts.ScriptKind => {
   if (file.endsWith(".tsx")) return ts.ScriptKind.TSX
@@ -223,6 +234,32 @@ const evaluate = (
   )
 }
 
+const check = (
+  api: PublicApi,
+  candidates: ReadonlyArray<ProjectInspector.Candidate>,
+  options: ProjectInspector.InspectOptions
+): Effect.Effect<ReadonlyArray<DevToolsProtocol.CheckResult>, ProjectInspector.EvaluationError> => {
+  if (candidates.length === 0) return Effect.succeed([])
+
+  return runWorker({ _tag: "CheckMachines", root: options.root, candidates }).pipe(
+    Effect.flatMap((message) => {
+      if (message._tag !== "CheckedMachines") {
+        return Effect.fail(new Error(`Unexpected worker response: ${String(message._tag)}`))
+      }
+      return Effect.forEach(
+        message.results,
+        (result) => Schema.decodeUnknownEffect(DevToolsProtocol.CheckResult)(result)
+      )
+    }),
+    Effect.mapError((cause) =>
+      new api.EvaluationError({
+        message: "The isolated machine evaluator failed",
+        cause
+      })
+    )
+  )
+}
+
 const make = (api: PublicApi) =>
   Effect.gen(function*() {
     const discover = yield* makeDiscovery(api)
@@ -231,7 +268,8 @@ const make = (api: PublicApi) =>
     return api.ProjectInspector.of({
       discover,
       evaluate: (candidates, options) => evaluate(api, candidates, options),
-      inspect
+      inspect,
+      check: (options) => Effect.flatMap(discover(options), (candidates) => check(api, candidates, options))
     })
   })
 

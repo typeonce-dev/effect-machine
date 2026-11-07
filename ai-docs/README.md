@@ -1,6 +1,6 @@
 # AI docs
 
-`LLMS.md` is generated from `ai-docs/src`. Each build copies it into the core package as `AGENTS.md` and `CLAUDE.md`, next to a copy of `ai-docs`, so an installed package carries documentation matching its version.
+`LLMS.md` is generated from `ai-docs/src`. Packing the core package copies it in as `AGENTS.md` and `CLAUDE.md`, next to a copy of `ai-docs`, so an installed package carries documentation matching its version. The copies are removed after packing.
 
 ## Add content
 

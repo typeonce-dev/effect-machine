@@ -128,6 +128,41 @@ export const MachineResult = Schema.Union([Ready, Partial, Failed])
 export type MachineResult = Schema.Schema.Type<typeof MachineResult>
 
 /**
+ * The outcome of checking one exported machine. `report` is the JSON form of a
+ * `MachineTest.CheckReport`.
+ *
+ * @category schemas
+ * @since 0.47.0
+ */
+export const Checked = Schema.Struct({
+  _tag: Schema.tag("Checked"),
+  key: Schema.String,
+  source: MachineDocument.Source,
+  report: Schema.Json
+})
+
+/**
+ * @category models
+ * @since 0.47.0
+ */
+export type Checked = Schema.Schema.Type<typeof Checked>
+
+/**
+ * One result of checking a project: a report, or a module or machine that could
+ * not be loaded.
+ *
+ * @category schemas
+ * @since 0.47.0
+ */
+export const CheckResult = Schema.Union([Checked, Failed])
+
+/**
+ * @category models
+ * @since 0.47.0
+ */
+export type CheckResult = Schema.Schema.Type<typeof CheckResult>
+
+/**
  * A complete live-registry update sent to browser clients.
  *
  * @category schemas

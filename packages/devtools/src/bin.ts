@@ -1,13 +1,16 @@
 #!/usr/bin/env node
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime"
 import * as NodeServices from "@effect/platform-node/NodeServices"
+import * as Argument from "effect/cli/Argument"
 import * as Command from "effect/cli/Command"
 import * as Flag from "effect/cli/Flag"
 import * as Console from "effect/Console"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
+import * as Option from "effect/Option"
 import PackageJson from "../package.json" with { type: "json" }
 import * as DevServer from "./DevServer.js"
+import * as CheckCommand from "./internal/checkCommand.js"
 import * as StaticSite from "./internal/staticSite.js"
 import * as MachineRegistry from "./MachineRegistry.js"
 import * as ProjectInspector from "./ProjectInspector.js"
@@ -78,7 +81,29 @@ const build = Command.make("build", { outputDirectory }).pipe(
   }))
 )
 
-const cli = dev.pipe(Command.withSubcommands([build]))
+const target = Argument.String("path").pipe(
+  Argument.withDescription("Machine source file or glob relative to the project root"),
+  Argument.optional
+)
+
+const json = Flag.Boolean("json").pipe(
+  Flag.withDescription("Print one JSON object instead of text"),
+  Flag.withDefault(false)
+)
+
+const check = Command.make("check", { target, json }).pipe(
+  Command.withDescription("Analyze, explore, and verify the project's machines, and exit non-zero on any error"),
+  Command.withHandler(Effect.fnUntraced(function*({ json, target }) {
+    const { include, root } = yield* base
+    const results = yield* ProjectInspector.check({ root, include: Option.getOrElse(target, () => include) }).pipe(
+      Effect.provide(ProjectInspector.layer)
+    )
+    yield* Console.log(json ? CheckCommand.renderJson(results) : CheckCommand.renderText(results))
+    if (!CheckCommand.isOk(results)) yield* Effect.sync(() => (process.exitCode = 1))
+  }))
+)
+
+const cli = dev.pipe(Command.withSubcommands([build, check]))
 
 Command.run(cli, { version: PackageJson.version }).pipe(
   Effect.provide(NodeServices.layer),

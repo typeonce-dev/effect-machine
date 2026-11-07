@@ -607,7 +607,25 @@ encoded snapshot.
 
 ## Testing
 
-The testing entrypoint provides complementary layers:
+Start with `MachineTest.check`. It reads the declared topology, explores the
+machine with events derived from its schemas, verifies every explored transition,
+plans each one twice to find nondeterminism, and returns the problems as data:
+
+```ts
+import { MachineTest } from "@typeonce/effect-machine/testing"
+
+const report = yield* MachineTest.check(Counter)
+report.ok // false when any finding is an error
+report.exploration // "exhaustive", or "bounded" with the reasons in report.limits
+report.findings // each one names its law, and replay events where they apply
+```
+
+A `"bounded"` pass means nothing was found in what was explored; it is not a
+proof. `effect-machine check --json` from `@typeonce/effect-machine-devtools` runs
+the same check across a project. `MachineTest.analyze` runs only the static part,
+without calling any machine callback.
+
+The testing entrypoint also provides complementary layers for specific tests:
 
 - `MachineTest.run` and `verify` inspect pure planner traces;
 - `coverage` reports exact transition-definition and conditional-branch hits;

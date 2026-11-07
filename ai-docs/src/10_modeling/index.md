@@ -380,8 +380,7 @@ address as well:
 ```ts
 // Register timers: { loadTimeout: "10 seconds" } in make.
 Loading: {
-  invoke: ;
-  ;[
+  invoke: [
     {
       src: "loadDocument",
       input: ({ state }) => state.documentId,
@@ -494,6 +493,43 @@ updated before the choice resolves, so its resolver reads the new value through
 owner input. Every branch the choice can reach, including through nested
 choices, must stay below the owner; otherwise the definition does not compile
 and `handle` throws while naming the choice, branch, and escaping target.
+
+### Verify a machine after changing it
+
+Run this after writing or changing a machine, before writing a specific test:
+
+```ts
+import { MachineTest } from "@typeonce/effect-machine/testing"
+import { Effect } from "effect"
+
+const verifyCounter = Effect.gen(function*() {
+  const report = yield* MachineTest.check(CounterMachine)
+  if (!report.ok) yield* Effect.die(MachineTest.formatCheckReport(report))
+})
+```
+
+From a shell, `effect-machine check src/counter.ts --json` from
+`@typeonce/effect-machine-devtools` does the same for every machine a file exports.
+
+To fix a finding, keep the failing evidence first. Replay its events to reproduce
+it, make the smallest behavior change, then run the check again. Do not silence a
+finding by weakening a type or a test.
+
+| Law                          | Meaning                                                         | Fix                                                                 |
+| ---------------------------- | --------------------------------------------------------------- | ------------------------------------------------------------------- |
+| `topology.noPathFromInitial` | No declared transition can enter the state.                     | Add the missing transition, or remove the state.                    |
+| `events.noHandler`           | No state handles a public event.                                | Handle it, or remove it from the protocol.                          |
+| `planning.deterministic`     | The same snapshot and event planned two different results.      | Move the clock, randomness, or external read into an event or work. |
+| `planning.failed`            | A planning callback threw or a value failed its schema.         | Replay the events, then fix the callback or the value.              |
+| `planning.verification`      | A planner law failed. This usually means an Effect Machine bug. | Report it with the replay.                                          |
+| `invariant.violated`         | An invariant you supplied failed.                               | Replay the events, then fix the behavior or the invariant.          |
+| `transition.notCovered`      | Exploration never took a declared branch. This is a warning.    | Cover it with a scenario, or remove it if it cannot happen.         |
+| `schema.underivable`         | Input or events could not be sampled from their schemas.        | Pass `input` or `events` explicitly.                                |
+
+A report is `"exhaustive"` only when `limits` is empty. Otherwise a pass means
+nothing was found in what was explored. Keep sampled checks, bounded exploration,
+and proof distinct when reporting a result. Invocations do not run during planning,
+so test them on a started machine with `MachineTest.probe`.
 
 ### Test paths and invariants
 

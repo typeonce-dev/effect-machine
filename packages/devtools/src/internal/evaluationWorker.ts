@@ -1,5 +1,7 @@
 import * as NodeWorkerRunner from "@effect/platform-node/NodeWorkerRunner"
 import { Machine } from "@typeonce/effect-machine"
+import { MachineTest } from "@typeonce/effect-machine/testing"
+import * as Cause from "effect/Cause"
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 import * as WorkerRunner from "effect/workers/WorkerRunner"
@@ -22,8 +24,19 @@ interface EvaluationResponse {
   readonly results: ReadonlyArray<DevToolsProtocol.MachineResult>
 }
 
-type WorkerRequest = EvaluationRequest
-type WorkerResponse = EvaluationResponse
+interface CheckRequest {
+  readonly _tag: "CheckMachines"
+  readonly root: string
+  readonly candidates: ReadonlyArray<ProjectInspector.Candidate>
+}
+
+interface CheckResponse {
+  readonly _tag: "CheckedMachines"
+  readonly results: ReadonlyArray<DevToolsProtocol.CheckResult>
+}
+
+type WorkerRequest = EvaluationRequest | CheckRequest
+type WorkerResponse = EvaluationResponse | CheckResponse
 
 const isMachine = (value: unknown): value is Machine.Machine.Any =>
   typeof value === "object" &&
@@ -78,28 +91,37 @@ const failed = (
   diagnostics: [diagnostic(candidate.file, code, message)]
 })
 
-const evaluateCandidate = (
+const loadMachines = (
   server: ViteDevServer,
-  request: EvaluationRequest,
+  root: string,
   candidate: ProjectInspector.Candidate
-): Effect.Effect<ReadonlyArray<DevToolsProtocol.MachineResult>> =>
+): Effect.Effect<ReadonlyArray<[string, Machine.Machine.Any]>, unknown> =>
   Effect.tryPromise({
-    try: () => server.ssrLoadModule(pathToFileURL(resolve(request.root, candidate.file)).href),
+    try: () => server.ssrLoadModule(pathToFileURL(resolve(root, candidate.file)).href),
     catch: (cause) => cause
   }).pipe(
     Effect.flatMap((module) =>
       Effect.try(() =>
         Object.entries(module).filter((entry): entry is [string, Machine.Machine.Any] => isMachine(entry[1]))
       )
-    ),
+    )
+  )
+
+const machineExportNotFound = (candidate: ProjectInspector.Candidate): DevToolsProtocol.Failed =>
+  failed(
+    candidate,
+    "machine-export-not-found",
+    "The module contains a .handle(...) call but does not export the resulting machine"
+  )
+
+const evaluateCandidate = (
+  server: ViteDevServer,
+  request: EvaluationRequest,
+  candidate: ProjectInspector.Candidate
+): Effect.Effect<ReadonlyArray<DevToolsProtocol.MachineResult>> =>
+  loadMachines(server, request.root, candidate).pipe(
     Effect.flatMap((machines) => {
-      if (machines.length === 0) {
-        return Effect.succeed([failed(
-          candidate,
-          "machine-export-not-found",
-          "The module contains a .handle(...) call but does not export the resulting machine"
-        )])
-      }
+      if (machines.length === 0) return Effect.succeed([machineExportNotFound(candidate)])
 
       const seen = new Set<Machine.Machine.Any>()
       return Effect.forEach(machines, ([exportName, machine]) => {
@@ -138,12 +160,64 @@ const evaluateCandidate = (
     Effect.catch((cause) => Effect.succeed([failed(candidate, "module-load-failed", messageOf(cause))]))
   )
 
-const handle = (server: ViteDevServer, request: EvaluationRequest): Effect.Effect<EvaluationResponse> =>
-  Effect.forEach(request.candidates, (candidate) => evaluateCandidate(server, request, candidate), {
-    concurrency: 1
-  }).pipe(
-    Effect.map((results) => ({ _tag: "InspectedMachines" as const, results: results.flat() }))
+// Reports cross a worker boundary and reach a JSON consumer, so decoded event
+// values in replays must become plain JSON here.
+const toJson = (value: unknown): Schema.Json =>
+  JSON.parse(
+    JSON.stringify(value, (_key, item) => {
+      if (typeof item === "bigint") return item.toString()
+      if (typeof item === "function" || typeof item === "symbol") return String(item)
+      return item
+    })
+  ) as Schema.Json
+
+const checkCandidate = (
+  server: ViteDevServer,
+  request: CheckRequest,
+  candidate: ProjectInspector.Candidate
+): Effect.Effect<ReadonlyArray<DevToolsProtocol.CheckResult>> =>
+  loadMachines(server, request.root, candidate).pipe(
+    Effect.flatMap((machines) => {
+      if (machines.length === 0) return Effect.succeed([machineExportNotFound(candidate)])
+
+      const seen = new Set<Machine.Machine.Any>()
+      return Effect.forEach(machines, ([exportName, machine]) => {
+        if (seen.has(machine)) return Effect.succeed<DevToolsProtocol.CheckResult | undefined>(undefined)
+        seen.add(machine)
+        // The CLI cannot supply services. A machine whose planning requires them
+        // reports that as a planning failure.
+        return (MachineTest.check as (machine: unknown) => Effect.Effect<MachineTest.CheckReport>)(machine).pipe(
+          Effect.map((report): DevToolsProtocol.CheckResult => ({
+            _tag: "Checked",
+            key: `${candidate.file}#${exportName}`,
+            source: sourceOf(candidate.file, exportName),
+            report: toJson({ ...report, text: MachineTest.formatCheckReport(report) })
+          })),
+          Effect.catchCause((cause) =>
+            Effect.succeed(failed(candidate, "machine-check-failed", Cause.pretty(cause), exportName))
+          )
+        )
+      }).pipe(
+        Effect.map((results) =>
+          results.filter((result): result is DevToolsProtocol.CheckResult => result !== undefined)
+        )
+      )
+    }),
+    Effect.catch((cause) => Effect.succeed([failed(candidate, "module-load-failed", messageOf(cause))]))
   )
+
+const handle = (server: ViteDevServer, request: WorkerRequest): Effect.Effect<WorkerResponse> =>
+  request._tag === "CheckMachines"
+    ? Effect.forEach(request.candidates, (candidate) => checkCandidate(server, request, candidate), {
+      concurrency: 1
+    }).pipe(
+      Effect.map((results) => ({ _tag: "CheckedMachines" as const, results: results.flat() }))
+    )
+    : Effect.forEach(request.candidates, (candidate) => evaluateCandidate(server, request, candidate), {
+      concurrency: 1
+    }).pipe(
+      Effect.map((results) => ({ _tag: "InspectedMachines" as const, results: results.flat() }))
+    )
 
 export const run = (server: ViteDevServer): Promise<void> =>
   Effect.gen(function*() {

@@ -92,6 +92,9 @@ export class ProjectInspector extends Context.Service<ProjectInspector, {
   readonly inspect: (
     options: InspectOptions
   ) => Effect.Effect<ReadonlyArray<DevToolsProtocol.MachineResult>, DiscoveryError | EvaluationError>
+  readonly check: (
+    options: InspectOptions
+  ) => Effect.Effect<ReadonlyArray<DevToolsProtocol.CheckResult>, DiscoveryError | EvaluationError>
 }>()("@typeonce/effect-machine-devtools/ProjectInspector") {}
 
 /**
@@ -129,6 +132,19 @@ export const inspect = (options: InspectOptions): Effect.Effect<
   DiscoveryError | EvaluationError,
   ProjectInspector
 > => Effect.flatMap(ProjectInspector, (inspector) => inspector.inspect(options))
+
+/**
+ * Runs `MachineTest.check` on every machine exported by the project, in the
+ * isolated evaluator.
+ *
+ * @category combinators
+ * @since 0.47.0
+ */
+export const check = (options: InspectOptions): Effect.Effect<
+  ReadonlyArray<DevToolsProtocol.CheckResult>,
+  DiscoveryError | EvaluationError,
+  ProjectInspector
+> => Effect.flatMap(ProjectInspector, (inspector) => inspector.check(options))
 
 /**
  * Node-backed inspector layer. Each inspection evaluates candidates inside a

@@ -3,7 +3,7 @@
   "type": "module",
   "packageManager": "pnpm@10.17.1",
   "scripts": {
-    "build": "pnpm --recursive --filter \"./packages/**\" run build && node scripts/ai-docs/copy.mjs",
+    "build": "pnpm --recursive --filter \"./packages/**\" run build",
     "test": "node --expose-gc ./node_modules/vitest/vitest.mjs run",
     "doctest": "vitest run --config vitest.docs.ts",
     "doctest:types": "node scripts/doc-examples/check.mjs",
