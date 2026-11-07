@@ -73,10 +73,7 @@ const readSiteModel = (inputDirectory, config) => {
     }
   })
   const changelog = readChangelog(packageManifest.name)
-  const agentGuide = readFileSync(
-    join(repositoryDirectory, "packages", "effect-machine", "docs", "agent-guide.md"),
-    "utf8"
-  )
+  const agentGuide = readFileSync(join(repositoryDirectory, "LLMS.md"), "utf8")
 
   return {
     ...config,
@@ -194,8 +191,8 @@ export const renderChangelogPage = (site) => {
 }
 
 export const renderAgentGuidePage = (site) => {
-  const resolveLink = (href) => href.startsWith("./") && href.endsWith(".md")
-    ? `${site.package.repositoryUrl}/blob/main/packages/effect-machine/docs/${href.slice(2)}`
+  const resolveLink = (href) => href.startsWith("./")
+    ? `${site.package.repositoryUrl}/blob/main/${href.slice(2)}`
     : href
   const content = `
     <article class="agent-guide" data-pagefind-meta="type:agent-guide">
@@ -680,7 +677,7 @@ export const renderMarkdown = (value) => {
     for (index += 1; index < lines.length && !/^\s*```\s*$/u.test(lines[index]); index++) {
       source.push(lines[index])
     }
-    output.push(renderMarkdownCodeBlock(source.join("\n"), fence[1].trim()))
+    output.push(renderMarkdownCodeBlock(source.join("\n"), fence[1].trim().split(/\s+/u)[0]))
   }
   flushProse()
   return output.join("")
@@ -707,7 +704,7 @@ export const renderMarkdownDocument = (value, { resolveLink = (href) => href } =
     for (index += 1; index < lines.length && !/^\s*```\s*$/u.test(lines[index]); index++) {
       source.push(lines[index])
     }
-    output.push(renderMarkdownCodeBlock(source.join("\n"), fence[1].trim()))
+    output.push(renderMarkdownCodeBlock(source.join("\n"), fence[1].trim().split(/\s+/u)[0]))
   }
   flushProse()
   return output.join("")

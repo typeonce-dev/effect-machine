@@ -1,13 +1,13 @@
-# Effect Atom and React
+## Effect Atom and React
 
 React code should own one stable machine atom, pass it through props or
 Context, and subscribe in the descendants that render machine state. Keep the
 machine definition free of React dependencies.
 
-Read the [Effect Machine agent guide](./agent-guide.md) for statechart
+Read [Effect Machine agent guide](#effect-machine-agent-guide) for statechart
 modeling, transitions, services, and testing.
 
-## Recommended folder structure
+### Recommended folder structure
 
 ```text
 src/
@@ -37,19 +37,17 @@ export const MachineAtoms = AtomMachine.bind(atomRuntime)
 
 Service-free machines can use `AtomMachine.make` directly.
 
-## Own a machine in one React subtree
+### Own a machine in one React subtree
 
 Create a context from a factory. Each Provider owns a fresh bridge in its current
 Atom registry; it does not subscribe to state changes.
 
 ```tsx
 import { createMachineContext } from "@typeonce/effect-machine-react"
-import { AuthMachine } from "../machines/auth-machine"
 import { MachineAtoms } from "../lib/atom-runtime"
+import { AuthMachine } from "../machines/auth-machine"
 
-export const Auth = createMachineContext(({ input }: { input: AuthInput }) =>
-  MachineAtoms.make(AuthMachine, input)
-)
+export const Auth = createMachineContext(({ input }: { input: AuthInput }) => MachineAtoms.make(AuthMachine, input))
 export const useAuthMachine = Auth.useMachine
 
 function AuthRoute({ input, attemptId }: Props) {
@@ -75,7 +73,7 @@ machines, even when their inputs are equal.
 `useMachineAtom(() => makeMachine(input))` remains available for custom owners.
 It mounts the reference after commit without reading `result` or `snapshot`.
 
-## Per-owner capabilities
+### Per-owner capabilities
 
 A router, a callback owned by a component, or another per-instance capability
 is a service, never a schema field or startup input. Declare the service, let a
@@ -84,8 +82,8 @@ React owner:
 
 ```tsx
 import { Machine } from "@typeonce/effect-machine"
-import { AtomMachine } from "@typeonce/effect-machine/reactivity"
 import { useMachineAtom } from "@typeonce/effect-machine-react"
+import { AtomMachine } from "@typeonce/effect-machine/reactivity"
 import { Context, Effect, Layer } from "effect"
 import { Atom } from "effect/reactivity"
 import { AppLayer } from "../lib/app-layer"
@@ -100,8 +98,7 @@ export const OnboardingMachine = Machine.make({
   }),
   events: Machine.events({ Submit: {} }),
   effects: {
-    navigateNext: Effect.flatMap(Navigation, (navigation) =>
-      navigation.push("/onboarding/next"))
+    navigateNext: Effect.flatMap(Navigation, (navigation) => navigation.push("/onboarding/next"))
   }
 }).handle({
   initial: { target: "Editing" },
@@ -179,7 +176,7 @@ Provider's React `key` to create a new owner with a new layer. Binding still
 checks the machine's requirements, so a layer type that omits `Navigation` is a
 compile error.
 
-## Render state-owned data
+### Render state-owned data
 
 Render a typed path in the smallest component that needs it:
 
@@ -265,7 +262,7 @@ function AuthCard() {
 Atom granularity cannot isolate hooks that all live in `AuthCard`. Any selected
 change rerenders the component that called the hook.
 
-## Send without subscribing
+### Send without subscribing
 
 Use the writable atom directly:
 
@@ -302,15 +299,15 @@ Writes after the machine stopped or completed fail with `StoppedError`. The
 same applies to `stop` and to child `send` and `stop`; a child command fails
 with `ChildNotActiveError` when the state that owns the child is not active.
 
-## Query concrete event acceptance
+### Query concrete event acceptance
 
 `AtomMachine.can` turns one concrete event input into a reusable machine
 projection. Declare the projection once, then apply it to the React-owned
 machine. Repeated applications to the same machine return the same atom:
 
 ```tsx
-import { AtomMachine } from "@typeonce/effect-machine/reactivity"
 import { useAtomSet, useAtomSuspense } from "@effect/atom-react"
+import { AtomMachine } from "@typeonce/effect-machine/reactivity"
 import { AuthEvents } from "../machines/auth-machine"
 
 const submitAllowed = AtomMachine.can(AuthEvents.Submitted())
@@ -340,8 +337,7 @@ When acceptance depends on a changing payload, project an event atom instead:
 ```ts
 import { Atom } from "effect/reactivity"
 
-const submitEvent = Atom.map(draftAtom, (draft) =>
-  AuthEvents.Submitted({ draft }))
+const submitEvent = Atom.map(draftAtom, (draft) => AuthEvents.Submitted({ draft }))
 
 const submitAllowed = AtomMachine.can(submitEvent)
 ```
@@ -390,7 +386,7 @@ not call `Effect.runSync(Machine.can(...))` in a component: the atom shares the
 running machine's snapshot, suspends during startup, and recomputes when the
 snapshot changes.
 
-## Whole-result and custom selections
+### Whole-result and custom selections
 
 Reading the full result is correct when a component renders the complete
 machine state:
@@ -440,7 +436,7 @@ function EmailField() {
 The component rerenders only when the projected email changes, not when other
 `Editing` fields change. Do not create a fresh derived atom on every render.
 
-## Share a keyed machine outside one React owner
+### Share a keyed machine outside one React owner
 
 `AtomMachine.family` is for registry-owned machines that unrelated consumers
 find by startup input. It is not the default for one React-owned workflow.
@@ -470,7 +466,7 @@ Family keys use Effect `Equal` and `Hash` semantics. Keep them immutable. If a
 changing value should update one running workflow, model it as an event instead
 of changing the family key.
 
-## Module-owned machines
+### Module-owned machines
 
 A no-input machine may intentionally have one module-owned identity:
 
@@ -482,7 +478,7 @@ export const CounterStateAtom = AtomMachine.select(CounterMachineAtom, "Count")
 Every consumer using the same `AtomRegistry` reaches the same running machine.
 Different registries still run independent instances.
 
-## Child machines
+### Child machines
 
 Direct child selectors follow the active child and preserve inactivity:
 
@@ -513,7 +509,7 @@ export const plantAtoms = AtomMachine.familyChild(CentralMachineAtom, {
 })
 ```
 
-## Generic helpers
+### Generic helpers
 
 Use `AtomMachine.MachineAtom.Any` and `AtomMachine.ChildMachineAtom.Any` to
 accept any bridge, including bridges for machines without events. Recover the
@@ -534,7 +530,7 @@ type EditorState = AtomMachine.ChildMachineAtom.State<
 >
 ```
 
-## Keep workflow effects out of emissions
+### Keep workflow effects out of emissions
 
 Emissions are ephemeral notifications for observers. They are not replayed, so
 a subscriber that mounts late never sees an earlier emission. Do not drive work
@@ -552,7 +548,7 @@ An emission that only feeds UI feedback has two stream-atom details:
   Pass `{ immediate: true }` so a lazy emissions atom starts; without it the
   callback never runs. The callback then also receives the initial result.
 
-## Registry and rendering semantics
+### Registry and rendering semantics
 
 A `MachineAtom` identifies one machine per `AtomRegistry`. Passing the same
 machine atom through two registry providers creates two independent runtimes.
@@ -566,14 +562,14 @@ either. Every bridge atom carries an Effect Atom server value, which
 `@effect/atom-react` hooks read during server rendering and hydration, and
 `Atom.getServerValue` reads directly:
 
-| Atom                                                  | Server value                                                                                                  |
-| ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
-| `ref`, `send`, `stop`                                 | `Initial`                                                                                                     |
-| `snapshot`                                            | `Success({ status: "active", state })`, waiting                                                               |
-| `result`                                              | `Success(state)`, waiting                                                                                     |
-| `select`, `selectSnapshot`, `matches`, `can`          | the projection of `state`, waiting                                                                            |
-| `child(Child).result` and child projections           | `Success(Option.some(childState))` when the planned state invokes `Child`, otherwise `Success(Option.none())` |
-| `family` and `familyChild` projections                | the server value of the projected bridge atom                                                                 |
+| Atom                                         | Server value                                                                                                  |
+| -------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| `ref`, `send`, `stop`                        | `Initial`                                                                                                     |
+| `snapshot`                                   | `Success({ status: "active", state })`, waiting                                                               |
+| `result`                                     | `Success(state)`, waiting                                                                                     |
+| `select`, `selectSnapshot`, `matches`, `can` | the projection of `state`, waiting                                                                            |
+| `child(Child).result` and child projections  | `Success(Option.some(childState))` when the planned state invokes `Child`, otherwise `Success(Option.none())` |
+| `family` and `familyChild` projections       | the server value of the projected bridge atom                                                                 |
 
 `state` is the machine's planned startup state: the state `Machine.planInitial`
 settles into with the bridge's input, without running startup commands,
@@ -583,7 +579,7 @@ startup state cannot be planned synchronously, for example because the input
 is invalid, every server value is `Initial`. Each bridge plans at most once,
 on its first server read.
 
-## Server rendering and hydration
+### Server rendering and hydration
 
 Render state slots with `MachineState` and no Suspense boundary:
 

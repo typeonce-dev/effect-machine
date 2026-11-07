@@ -17,7 +17,9 @@
   "files": [
     "src/**/*.ts",
     "dist",
-    "docs",
+    "AGENTS.md",
+    "CLAUDE.md",
+    "ai-docs/**/*",
     "README.md",
     "LICENSE",
     "NOTICE"

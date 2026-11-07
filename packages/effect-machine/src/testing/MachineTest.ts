@@ -250,7 +250,7 @@ export interface Scenarios<M extends AnyMachine> {
  *   states: {
  *     Idle: {
  *       on: {
- *         Reset: (to) => to.branch.Idle().resolve(({ target }) => target.from())
+ *         Reset: { target: "Idle" }
  *       }
  *     }
  *   }
@@ -1110,7 +1110,7 @@ export const Invariant: {
  * ```ts
  * import { Machine } from "@typeonce/effect-machine"
  * import { MachineTest } from "@typeonce/effect-machine/testing"
- * import { Schema } from "effect"
+ * import { Option, Schema } from "effect"
  * class Count extends Schema.TaggedClass<Count>("Count")("Count", {
  *   value: Schema.Number
  * }) {
@@ -1131,7 +1131,7 @@ export const Invariant: {
  * })
  * const nonNegative = MachineTest.invariants(machine).state(
  *   "count is non-negative",
- *   ({ snapshot }) => snapshot.value.value >= 0
+ *   ({ snapshot }) => States.get(snapshot, "Count").pipe(Option.exists(({ value }) => value >= 0))
  * )
  * ```
  *
@@ -1443,41 +1443,36 @@ export type ExploreOptions<M extends AnyMachine, Key extends ExplorationKey = Ex
  * retained at a state-limit frontier. Depth- and transition-limit frontiers
  * have no plan and therefore contribute no transition hits.
  *
- * **Example**
+ * **Example** (Exploring a bounded counter)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Machine } from "@typeonce/effect-machine"
  * import { MachineTest } from "@typeonce/effect-machine/testing"
- * import { Schema } from "effect"
- * class Count extends Schema.TaggedClass<Count>("Count")("Count", {
- *   value: Schema.Number
- * }) {
- * }
- * class Increment extends Schema.TaggedClass<Increment>("Increment")("Increment", {}) {
- * }
- * const States = Machine.state({ states: { Count } })
- * const machine = Machine.make({
- *   root: States,
- *   events: Machine.eventsFromSchemas(Increment)
- * }).handle({
- *   initial: {
- *     target: "Count",
- *     decoded: true,
- *     data: new Count({ value: 0 })
- *   },
+ * import { Effect, Option, Schema } from "effect"
+ *
+ * const States = Machine.state({
+ *   states: { Count: { fields: { value: Schema.Number } } }
+ * })
+ * const Events = Machine.events({ Increment: {} })
+ * const machine = Machine.make({ root: States, events: Events }).handle({
+ *   initial: { target: "Count", data: () => ({ value: 0 }) },
  *   states: {
  *     Count: {
  *       on: {
- *         Increment: (to) =>
- *           to.branch.Count().resolve(({ state, target }) => target.decoded(new Count({ value: state.value + 1 })))
+ *         Increment: { update: "Count", data: ({ state }) => ({ value: state.value + 1 }) }
  *       }
  *     }
  *   }
  * })
- * const explored = MachineTest.explore(machine, {
- *   events: ({ snapshot }) => snapshot.value.value < 2 ? [new Increment({})] : [],
- *   stateKey: ({ snapshot }) => snapshot.value.value
- * })
+ * const count = (snapshot: Machine.Snapshot<typeof States>) =>
+ *   States.get(snapshot, "Count").pipe(Option.map(({ value }) => value), Option.getOrElse(() => 0))
+ *
+ * const explored = await Effect.runPromise(MachineTest.explore(machine, {
+ *   events: ({ snapshot }) => count(snapshot) < 2 ? [Events.Increment()] : [],
+ *   stateKey: ({ snapshot }) => count(snapshot)
+ * }))
+ *
+ * explored.nodes.length // => 3
  * ```
  *
  * @category exploration

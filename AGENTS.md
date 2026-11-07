@@ -8,10 +8,10 @@ Apply these priorities in order:
 
 1. **Type safety.** Make invalid states, events, compositions, references, and capabilities unrepresentable at compile time whenever possible. Preserve typed Effect failures at runtime; validation must not escape as an accidental throw.
 2. **Explicit, opinionated semantics.** Similar concepts need distinct names and contracts. Do not hide a material semantic choice behind an omission, permissive overload, or ambiguous default. Convenience should come from builders and inference, not weaker boundaries.
-3. **Readable, concise models.** A human should be able to read a machine definition from top to bottom and understand its protocols, topology, behavior, and effects. Prefer declarative builders and eliminate raw schema plumbing, duplicated declarations, and incidental ceremony. Concision must not obscure intent.
+3. **Local, unambiguous models.** Agents write and verify most models, so an agent must be able to edit one transition correctly without reading another part of the machine. Keep each decision next to the state that owns it, give every key one meaning regardless of its siblings, and let the compiler or `MachineTest` reject mistakes. Prefer a longer explicit declaration over a shorter ambiguous one, and remove raw schema plumbing and duplicated declarations.
 4. **Effect-core alignment.** Follow Effect naming, failure, `Scope`, `Stream`, service, module, and ownership conventions. Inspect analogous implementations under `references/effect` before designing a new abstraction.
 
-When compatibility, convenience, concision, and semantic clarity conflict, prefer type safety and semantic clarity. Then optimize the resulting API for readable models. Make architectural decisions for the long term; do not accept a stopgap intended to be replaced later.
+When compatibility, convenience, concision, and semantic clarity conflict, prefer type safety and semantic clarity. Do not shape the public API around visualization: tooling reads what the model must declare for verification. Make architectural decisions for the long term; do not accept a stopgap intended to be replaced later.
 
 ## Experimental versioning
 
@@ -38,7 +38,16 @@ When compatibility, convenience, concision, and semantic clarity conflict, prefe
 - Keep casts at genuine erased boundaries only. Prefer narrower internal representations, explicit invariants, and exhaustive capability checks over broad `any`-based protocols.
 - For every optimized semantic change, add forced generic-versus-optimized differential coverage and a focused regression test. Include relevant edge cases such as targetless and reentering transitions, simultaneous transitions, raised events, completion, invocation, and retained snapshots.
 - Put public behavioral tests under `packages/effect-machine/test/` and implementation-strategy tests under `packages/effect-machine/test/internal/`. Tests should establish observable semantics, not mirror implementation details.
-- Treat correctness, type safety, and benchmark regressions as blockers. Do not recover performance by weakening semantics or public inference.
+- Treat correctness, type safety, and runtime or memory regressions as blockers. Do not recover performance by weakening semantics or public inference.
+- A type-performance regression is acceptable when it deliberately buys type safety or a clearer API. State the tradeoff in the pull request; investigate any other regression.
+
+## Documentation
+
+Follow Effect's documentation conventions so the docs can move into `effect` with the code:
+
+- Write public JSDoc in the shape described by `references/effect/.patterns/jsdoc.md`: a one-paragraph summary, then optional `**When to use**`, `**Details**`, and `**Gotchas**` sections, then `@category` and `@since`.
+- Title every example, as in `**Example** (Short title)`, and fence it with `` ```ts import.meta.vitest `` so `pnpm doctest` runs it and `pnpm doctest:types` compiles it. Assert results with a trailing `// =>` comment.
+- Keep agent documentation in `ai-docs/src`, as described in `ai-docs/README.md`. `LLMS.md` is generated with `pnpm ai-docgen`; do not edit it directly.
 
 ## Verification
 

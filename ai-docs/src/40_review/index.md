@@ -1,36 +1,36 @@
-# Effect Machine implementation review
+## Effect Machine implementation review
 
 Use this review after a machine and its UI adapter have been implemented. Look
 for modeling mistakes, redundant API usage, and logic that escaped the machine.
 Do not force a change when the current ownership is intentional.
 
-Read the [Effect Machine agent guide](./agent-guide.md) for statechart modeling
-and [Effect Atom and React patterns](./effect-atom-react.md) for integration
+Read [Effect Machine agent guide](#effect-machine-agent-guide) for statechart
+modeling and [Effect Atom and React](#effect-atom-and-react) for integration
 patterns.
 
 Run the recommended rules from
-[`@typeonce/oxlint-plugin-effect-machine`](../../oxlint-plugin/README.md) before
+`@typeonce/oxlint-plugin-effect-machine` before
 the manual review. They catch provable duplicate invocation identities,
 asynchronous work, browser access, nondeterminism, redundant resolvers, and
 conditional `none` fallbacks in direct same-module machine definitions.
 Continue with this review for cross-module ownership and architectural
 questions that syntax alone cannot answer.
 
-## Review the responsibility boundaries
+### Review the responsibility boundaries
 
 Use this split when deciding where code belongs:
 
-| Layer | Owns |
-| --- | --- |
-| Machine | State, transitions, workflow decisions, effect lifetimes, and service execution |
-| Atoms | Reactive selection, projections, and keyed machine lookup |
-| Component | Rendering and translating user interaction into domain events |
-| `RegistryProvider` | An optional Atom registry ownership boundary |
+| Layer              | Owns                                                                            |
+| ------------------ | ------------------------------------------------------------------------------- |
+| Machine            | State, transitions, workflow decisions, effect lifetimes, and service execution |
+| Atoms              | Reactive selection, projections, and keyed machine lookup                       |
+| Component          | Rendering and translating user interaction into domain events                   |
+| `RegistryProvider` | An optional Atom registry ownership boundary                                    |
 
 If a component coordinates a workflow, an atom performs business work, or a
 provider has no ownership purpose, inspect that code more closely.
 
-## Keep ordinary transitions inline
+### Keep ordinary transitions inline
 
 Use `{ target: "Running" }` for a state with default construction.
 Use `{ target: "Running", data: ({ event }) => ({ count: event.count }) }`
@@ -49,7 +49,7 @@ every event that enables or disables a control, refuse it with `guard` or with
 `declinable: true` and `decline()`. Keep `none` only for events that are
 deliberately accepted and ignored.
 
-## Choose React ownership or keyed family lookup
+### Choose React ownership or keyed family lookup
 
 Use `useMachineAtom` when one React subtree owns the workflow, including a
 machine with startup input:
@@ -108,7 +108,7 @@ subtree, and component-local calls to `machineAtoms.make` without a stable
 owner. Choose `AtomMachine.family` only when consumers need shared keyed
 lookup.
 
-## Justify each `RegistryProvider`
+### Justify each `RegistryProvider`
 
 Effect Atom hooks use a shared default registry when no provider is present.
 Do not add `RegistryProvider` automatically.
@@ -139,7 +139,7 @@ can split a machine that consumers expected to share.
 Review check: for every `RegistryProvider`, state which registry boundary it
 creates and why. Remove it when there is no deliberate boundary.
 
-## Keep workflow logic in the machine
+### Keep workflow logic in the machine
 
 The machine owns business flow. Components render selected state and send
 domain events. Atoms adapt machine state for reactive consumers. Neither layer
@@ -161,21 +161,23 @@ and its lifetime:
 
 ```ts
 // In make: effects: { submitOrder }
-machine.handle({ states: {
-  Editing: {
-    on: {
-      Submit: { target: "Submitting", data: ({ event }) => ({ order: event.order }) }
-    }
-  },
-  Submitting: {
-    invoke: {
-      src: "submitOrder",
-      input: ({ state }) => state.order,
-      onDone: { target: "Complete", data: ({ output }) => ({ order: output }) },
-      onFailure: { target: "Failed", data: ({ error }) => ({ message: String(error) }) }
+machine.handle({
+  states: {
+    Editing: {
+      on: {
+        Submit: { target: "Submitting", data: ({ event }) => ({ order: event.order }) }
+      }
+    },
+    Submitting: {
+      invoke: {
+        src: "submitOrder",
+        input: ({ state }) => state.order,
+        onDone: { target: "Complete", data: ({ output }) => ({ order: output }) },
+        onFailure: { target: "Failed", data: ({ error }) => ({ message: String(error) }) }
+      }
     }
   }
-} })
+})
 ```
 
 `submitOrder` can use Effect services for the API request and analytics. The
@@ -198,10 +200,10 @@ services provided by the React owner, not schema fields or startup input. A
 function in state data or input cannot be encoded by `Machine.encodeSnapshot`.
 Review check: search schemas for `Schema.declare` guards that accept functions
 and move each one to a service, as in
-[Per-owner capabilities](./effect-atom-react.md#per-owner-capabilities). Do not
+[Per-owner capabilities](#per-owner-capabilities). Do not
 drive navigation or other workflow effects from emissions.
 
-## Report findings
+### Report findings
 
 For each issue, cite the file and line, name the violated boundary, and show the
 smallest correction. Distinguish a confirmed problem from a provider or

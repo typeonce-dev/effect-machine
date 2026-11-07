@@ -83,5 +83,5 @@ the machine starts, where `useAtomValue` would return `Initial` again. Derive na
 and `Atom.withEquality` rather than hook options. Read `.result` for the whole logical snapshot or `.snapshot` for
 runtime status; the bridge has no separate `.state` projection.
 
-See the [React guide](../effect-machine/docs/effect-atom-react.md) for events,
+See the [React guide](../../ai-docs/src/30_react/index.md) for events,
 services, child machines, and registry-owned families.

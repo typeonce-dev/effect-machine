@@ -115,14 +115,15 @@ type IsAny<A> = 0 extends (1 & A) ? true : false
  * Use `declinable: true` when a named branch resolver may return `decline()`.
  * Register cancellable state-scoped delays in `make({ timers })`.
  *
- * **Example**
+ * **Example** (Declining an event with a guard)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Machine } from "@typeonce/effect-machine"
- * import { Schema } from "effect"
+ * import { Effect, Schema } from "effect"
+ *
  * const events = Machine.events({ Add: { by: Schema.Number } })
  * const Root = Machine.state({ fields: { count: Schema.Number } })
- * export const counter = Machine.make({
+ * const counter = Machine.make({
  *   root: Root,
  *   events
  * }).handle({
@@ -135,6 +136,15 @@ type IsAny<A> = 0 extends (1 & A) ? true : false
  *     }
  *   }
  * })
+ *
+ * const accepts = (by: number) =>
+ *   Effect.gen(function*() {
+ *     const initial = yield* Machine.planInitial(counter)
+ *     return yield* Machine.can(counter, initial.state, events.Add({ by }))
+ *   })
+ *
+ * await Effect.runPromise(accepts(1)) // => true
+ * await Effect.runPromise(accepts(0)) // => false
  * ```
  *
  * @category models
@@ -8930,9 +8940,9 @@ export const enabled: <
  * Synchronous transition resolvers cannot execute it. Querying an internal event
  * does not make that event available to `MachineRef.send`.
  *
- * **Example**
+ * **Example** (Checking an event against the current state)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Machine } from "@typeonce/effect-machine"
  * import { Effect, Schema } from "effect"
  *
@@ -8947,10 +8957,12 @@ export const enabled: <
  *   states: { Idle: { on: { Loaded: { none: true } } } }
  * })
  *
- * export const canLoad = Effect.gen(function*() {
+ * const canLoad = Effect.gen(function*() {
  *   const initial = yield* Machine.planInitial(machine)
  *   return yield* Machine.can(machine, initial.state, internalEvents.Loaded())
  * })
+ *
+ * await Effect.runPromise(canLoad) // => true
  * ```
  *
  * @category getters

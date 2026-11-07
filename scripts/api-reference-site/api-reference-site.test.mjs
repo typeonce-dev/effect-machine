@@ -58,7 +58,7 @@ test("renders the agent guide Markdown below the changelog navigation", () => {
     ...site,
     agentGuide: `# Effect Machine agent guide
 
-Read [Effect Atom patterns](./effect-atom-react.md).
+Read [the first example](./ai-docs/src/10_modeling/01_create-a-machine.ts).
 
 ## Create a machine
 
@@ -81,7 +81,7 @@ const machine = Machine.make({}).handle({})
   assert.match(html, /href="#create-a-machine">Create a machine<\/a>/)
   assert.match(
     html,
-    /href="https:\/\/github\.com\/typeonce-dev\/effect-machine\/blob\/main\/packages\/effect-machine\/docs\/effect-atom-react\.md"/
+    /href="https:\/\/github\.com\/typeonce-dev\/effect-machine\/blob\/main\/ai-docs\/src\/10_modeling\/01_create-a-machine\.ts"/
   )
   assert.match(html, /class="code-block code-block--markdown"/)
 })

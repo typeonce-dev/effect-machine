@@ -33,7 +33,9 @@ try {
     "package/dist/testing/index.d.ts",
     "package/package.json",
     "package/README.md",
-    "package/docs/agent-guide.md",
+    "package/AGENTS.md",
+    "package/CLAUDE.md",
+    "package/ai-docs/src/index.md",
     "package/LICENSE",
     "package/NOTICE"
   ]
