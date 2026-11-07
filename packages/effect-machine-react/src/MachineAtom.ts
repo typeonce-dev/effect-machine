@@ -104,7 +104,7 @@ export declare namespace MachineStateProps {
  * and the callback snapshot are then those of the child machine, and
  * `inactive` also renders while the state that owns the child is not active.
  *
- * **Example**
+ * **Example** (Rendering a child's state)
  *
  * ```tsx
  * <MachineState machine={machine.child(QuantityChild)} path="" inactive={null}>
@@ -202,7 +202,7 @@ export declare namespace MachineContext {
  * update a running workflow, or change the Provider's React `key` to create a
  * new owner with new input and layer.
  *
- * **Example**
+ * **Example** (Creating a machine context for each ownership style)
  *
  * ```tsx
  * const Auth = createMachineContext(AtomMachine.factory(AuthMachine))

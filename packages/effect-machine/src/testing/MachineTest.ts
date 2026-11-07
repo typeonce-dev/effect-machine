@@ -230,33 +230,31 @@ export interface Scenarios<M extends AnyMachine> {
  * Unsupported schema derivations fail immediately through `Arbitrary.schema`.
  * Non-fatal derivation warnings are returned instead of being hidden.
  *
- * **Example**
+ * **Example** (Generating event scenarios)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Machine } from "@typeonce/effect-machine"
  * import { MachineTest } from "@typeonce/effect-machine/testing"
- * import { Schema } from "effect"
- * class Idle extends Schema.TaggedClass<Idle>("Idle")("Idle", {}) {
- * }
- * class Reset extends Schema.TaggedClass<Reset>("Reset")("Reset", {}) {
- * }
- * const States = Machine.state({ states: { Idle } })
+ * import { Effect } from "effect"
+ * import * as Arbitrary from "effect/Arbitrary"
+ *
+ * const Events = Machine.events({ Reset: {} })
  * const machine = Machine.make({
- *   root: States,
- *   events: Machine.eventsFromSchemas(Reset)
+ *   root: Machine.state({ states: { Idle: {} } }),
+ *   events: Events
  * }).handle({
- *   initial: {
- *     target: "Idle"
- *   },
+ *   initial: { target: "Idle" },
  *   states: {
- *     Idle: {
- *       on: {
- *         Reset: { target: "Idle" }
- *       }
- *     }
+ *     Idle: { on: { Reset: { target: "Idle" } } }
  *   }
  * })
+ *
  * const generated = MachineTest.scenarios(machine, { maxEvents: 5 })
+ * const samples = Arbitrary.sampleEffect(generated.arbitrary, { count: 1, seed: 1 })
+ *
+ * const count = Effect.map(samples, (scenarios) => scenarios.length)
+ *
+ * await Effect.runPromise(count) // => 1
  * ```
  *
  * @category constructors
@@ -492,30 +490,25 @@ export { ProbeUnavailableError } from "../internal/testing/machine/probe.js"
  * available exclusively through `MachineRef.send` and retain their
  * asynchronous enqueue-only semantics.
  *
- * **Example**
+ * **Example** (Acknowledging commands at runtime)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Machine } from "@typeonce/effect-machine"
  * import { MachineTest } from "@typeonce/effect-machine/testing"
- * import { Effect, Schema } from "effect"
- * class Idle extends Schema.TaggedClass<Idle>("Idle")("Idle", {}) {
- * }
- * const States = Machine.state({ states: { Idle } })
- * const machine = Machine.make({
- *   root: States,
- *   events: Machine.eventsFromSchemas()
- * }).handle({
- *   initial: {
- *     target: "Idle"
- *   },
- *   states: {
- *     Idle: {}
- *   }
+ * import { Effect } from "effect"
+ *
+ * const States = Machine.state({ states: { Idle: {} } })
+ * const machine = Machine.make({ root: States, events: Machine.events({}) }).handle({
+ *   initial: { target: "Idle" }
  * })
- * const program = Effect.scoped(Effect.gen(function*() {
+ *
+ * const probed = Effect.scoped(Effect.gen(function*() {
  *   const ref = yield* Machine.start(machine)
- *   return yield* MachineTest.probe(machine, ref)
+ *   const probe = yield* MachineTest.probe(machine, ref)
+ *   return typeof probe
  * }))
+ *
+ * await Effect.runPromise(probed) // => "object"
  * ```
  *
  * @category runtime testing
@@ -1106,34 +1099,26 @@ export const Invariant: {
  * types. The machine is used only for inference; invariant evaluation remains
  * pure and reusable across traces from that machine.
  *
- * **Example**
+ * **Example** (Declaring a state invariant)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Machine } from "@typeonce/effect-machine"
  * import { MachineTest } from "@typeonce/effect-machine/testing"
- * import { Option, Schema } from "effect"
- * class Count extends Schema.TaggedClass<Count>("Count")("Count", {
- *   value: Schema.Number
- * }) {
- * }
- * const States = Machine.state({ states: { Count } })
- * const machine = Machine.make({
- *   root: States,
- *   events: Machine.eventsFromSchemas()
- * }).handle({
- *   initial: {
- *     target: "Count",
- *     decoded: true,
- *     data: new Count({ value: 0 })
- *   },
- *   states: {
- *     Count: {}
- *   }
+ * import { Effect, Option, Schema } from "effect"
+ *
+ * const States = Machine.state({ states: { Count: { fields: { value: Schema.Number } } } })
+ * const machine = Machine.make({ root: States, events: Machine.events({}) }).handle({
+ *   initial: { target: "Count", data: { value: 0 } }
  * })
+ *
  * const nonNegative = MachineTest.invariants(machine).state(
  *   "count is non-negative",
  *   ({ snapshot }) => States.get(snapshot, "Count").pipe(Option.exists(({ value }) => value >= 0))
  * )
+ *
+ * const ok = Effect.map(MachineTest.check(machine, { invariants: [nonNegative] }), (report) => report.ok)
+ *
+ * await Effect.runPromise(ok) // => true
  * ```
  *
  * @category constructors
@@ -1636,27 +1621,21 @@ export type RunServices<M extends AnyMachine> = IsAny<
  * Typed planning errors retain the scenario and successfully completed prefix
  * in a `RunFailure`.
  *
- * **Example**
+ * **Example** (Running a pure trace)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Machine } from "@typeonce/effect-machine"
  * import { MachineTest } from "@typeonce/effect-machine/testing"
- * import { Schema } from "effect"
- * class Idle extends Schema.TaggedClass<Idle>("Idle")("Idle", {}) {
- * }
- * const States = Machine.state({ states: { Idle } })
- * const machine = Machine.make({
- *   root: States,
- *   events: Machine.eventsFromSchemas()
- * }).handle({
- *   initial: {
- *     target: "Idle"
- *   },
- *   states: {
- *     Idle: {}
- *   }
+ * import { Effect } from "effect"
+ *
+ * const States = Machine.state({ states: { Idle: {} } })
+ * const machine = Machine.make({ root: States, events: Machine.events({}) }).handle({
+ *   initial: { target: "Idle" }
  * })
- * const trace = MachineTest.run(machine, { events: [] })
+ *
+ * const path = Effect.map(MachineTest.run(machine, { events: [] }), (trace) => trace.final.state.path)
+ *
+ * await Effect.runPromise(path) // => "Idle"
  * ```
  *
  * @category constructors
@@ -1907,27 +1886,22 @@ export interface Coverage<M extends AnyMachine> {
  * scenarios and logical configurations report observations only because their
  * complete spaces are generally infinite.
  *
- * **Example**
+ * **Example** (Reporting trace coverage)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Machine } from "@typeonce/effect-machine"
  * import { MachineTest } from "@typeonce/effect-machine/testing"
- * import { Effect, Schema } from "effect"
- * class Idle extends Schema.TaggedClass<Idle>("Idle")("Idle", {}) {
- * }
- * const States = Machine.state({ states: { Idle } })
- * const machine = Machine.make({
- *   root: States,
- *   events: Machine.eventsFromSchemas()
- * }).handle({
- *   initial: {
- *     target: "Idle"
- *   },
- *   states: {
- *     Idle: {}
- *   }
+ * import { Effect } from "effect"
+ *
+ * const States = Machine.state({ states: { Idle: {} } })
+ * const machine = Machine.make({ root: States, events: Machine.events({}) }).handle({
+ *   initial: { target: "Idle" }
  * })
- * const report = Effect.map(MachineTest.run(machine, { events: [] }), (trace) => MachineTest.coverage(machine, trace))
+ *
+ * const missing = Effect.map(MachineTest.run(machine, { events: [] }), (trace) =>
+ *   MachineTest.coverage(machine, trace).transitions.definitions.missing)
+ *
+ * await Effect.runPromise(missing) // => 0
  * ```
  *
  * @category verification
@@ -2135,30 +2109,25 @@ export interface VerifyOptions {
  * Every selected law is evaluated and returned in one structured error so a
  * shrunk property-test counterexample retains all relevant evidence.
  *
- * **Example**
+ * **Example** (Verifying planner laws on a trace)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Machine } from "@typeonce/effect-machine"
  * import { MachineTest } from "@typeonce/effect-machine/testing"
- * import { Effect, Schema } from "effect"
- * class Idle extends Schema.TaggedClass<Idle>("Idle")("Idle", {}) {
- * }
- * const States = Machine.state({ states: { Idle } })
- * const machine = Machine.make({
- *   root: States,
- *   events: Machine.eventsFromSchemas()
- * }).handle({
- *   initial: {
- *     target: "Idle"
- *   },
- *   states: {
- *     Idle: {}
- *   }
+ * import { Effect } from "effect"
+ *
+ * const States = Machine.state({ states: { Idle: {} } })
+ * const machine = Machine.make({ root: States, events: Machine.events({}) }).handle({
+ *   initial: { target: "Idle" }
  * })
- * const checked = Effect.gen(function*() {
+ *
+ * const verified = Effect.gen(function*() {
  *   const trace = yield* MachineTest.run(machine, { events: [] })
  *   yield* MachineTest.verify(machine, trace)
+ *   return true
  * })
+ *
+ * await Effect.runPromise(verified) // => true
  * ```
  *
  * @category verification

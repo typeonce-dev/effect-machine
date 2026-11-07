@@ -312,18 +312,27 @@ export interface Definition<
    * captured by value, so later mutation of the supplied objects cannot alter
    * the resulting machine.
    *
-   * **Example**
+   * **Example** (Adding handlers to a definition)
    *
-   * ```ts
-   * const counter = definition.handle({ states: {
-   *   Count: {
-   *     on: {
-   *       Increment: {
-   *         update: { Count: {} }
-   *       }
-   *     }
-   *   }
-   * } })
+   * ```ts import.meta.vitest
+   * import { Machine } from "@typeonce/effect-machine"
+   * import { Effect, Schema } from "effect"
+   *
+   * const Events = Machine.events({ Increment: { by: Schema.Number } })
+   * const definition = Machine.make({ root: Machine.state({ fields: { count: Schema.Number } }), events: Events })
+   *
+   * const counter = definition.handle({
+   *   root: { count: 0 },
+   *   on: { Increment: { update: { root: ({ root, event }) => ({ count: root.count + event.by }) } } }
+   * })
+   *
+   * const count = Effect.gen(function*() {
+   *   const initial = yield* Machine.planInitial(counter)
+   *   const planned = yield* Machine.plan(counter, initial.state, Events.Increment({ by: 2 }))
+   *   return planned.next.value.count
+   * })
+   *
+   * await Effect.runPromise(count) // => 2
    * ```
    *
    * @since 0.4.0
@@ -7864,14 +7873,13 @@ export const isFinal: <
  *
  * **Example** (Repeated compound state)
  *
- * ```ts
- * import { Machine } from "@typeonce/effect-machine"
- * import { Schema } from "effect"
+ * **Example** (Reusing one subtree in two parallel regions)
  *
- * const TradingState = Schema.TaggedUnion({
- *   InSession: {},
- *   Applying: {}
- * })
+ * ```ts import.meta.vitest
+ * import { Machine } from "@typeonce/effect-machine"
+ * import { Effect, Schema } from "effect"
+ *
+ * const TradingState = Schema.TaggedUnion({ InSession: {}, Applying: {} })
  * const TradingSlot = Machine.state({
  *   states: {
  *     Idle: {},
@@ -7879,13 +7887,21 @@ export const isFinal: <
  *     Applying: TradingState.cases.Applying
  *   }
  * })
+ * const States = Machine.state({ type: "parallel", states: { slot1: TradingSlot, slot2: TradingSlot } })
  *
- * const States = Machine.state({
+ * const machine = Machine.make({ root: States, events: Machine.events({}) }).handle({
  *   states: {
- *     slot1: TradingSlot,
- *     slot2: TradingSlot
+ *     slot1: { initial: { target: "slot1.Idle" } },
+ *     slot2: { initial: { target: "slot2.Idle" } }
  *   }
  * })
+ *
+ * const paths = Effect.map(Machine.planInitial(machine), ({ state }) => [
+ *   state.states.slot1.state.path,
+ *   state.states.slot2.state.path
+ * ])
+ *
+ * await Effect.runPromise(paths) // => ["slot1.Idle", "slot2.Idle"]
  * ```
  *
  * @category constructors
@@ -8072,39 +8088,39 @@ interface Make {
  *
  * **Example** (Typed counter machine)
  *
- * ```ts
+ * **Example** (Counting with schema classes)
+ *
+ * ```ts import.meta.vitest
  * import { Machine } from "@typeonce/effect-machine"
- * import { Schema } from "effect"
- * class Count extends Schema.TaggedClass<Count>("Count")("Count", {
- *   value: Schema.Number
- * }) {
- * }
- * class Increment extends Schema.TaggedClass<Increment>("Increment")("Increment", {
- *   by: Schema.Number
- * }) {
- * }
+ * import { Effect, Option, Schema } from "effect"
+ *
+ * class Count extends Schema.TaggedClass<Count>("Count")("Count", { value: Schema.Number }) {}
+ * class Increment extends Schema.TaggedClass<Increment>("Increment")("Increment", { by: Schema.Number }) {}
+ *
  * const States = Machine.state({ states: { Count } })
- * const Events = Machine.eventsFromSchemas(Increment)
  * const counter = Machine.make({
  *   root: States,
- *   events: Events
+ *   events: Machine.eventsFromSchemas(Increment)
  * }).handle({
- *   initial: {
- *     target: "Count",
- *     decoded: true,
- *     data: new Count({ value: 0 })
- *   },
+ *   initial: { target: "Count", decoded: true, data: new Count({ value: 0 }) },
  *   states: {
  *     Count: {
  *       on: {
  *         Increment: {
- *           update: { Count: { decoded: true, data: ({ event, state }) => new Count({ value: state.value + event.by }) } },
- *           decoded: true
+ *           update: { Count: { decoded: true, data: ({ event, state }) => new Count({ value: state.value + event.by }) } }
  *         }
  *       }
  *     }
  *   }
  * })
+ *
+ * const value = Effect.gen(function*() {
+ *   const initial = yield* Machine.planInitial(counter)
+ *   const planned = yield* Machine.plan(counter, initial.state, new Increment({ by: 2 }))
+ *   return States.get(planned.next, "Count").pipe(Option.map((count) => count.value))
+ * })
+ *
+ * await Effect.runPromise(value) // => Option.some(2)
  * ```
  *
  * @see {@link state} for typed state-tree helpers.
@@ -8133,17 +8149,33 @@ export type EventOf<Protocol extends Machine.EventProtocol.Any> = Machine.EventO
  * enter the machine's `MachineSchemaDecodeError` channel rather than throwing
  * at the call site.
  *
- * **Example**
+ * **Example** (Reusing a tagged union as the event protocol)
  *
- * ```ts
- * export const Event = Machine.eventsFromSchemas(
+ * ```ts import.meta.vitest
+ * import { Machine } from "@typeonce/effect-machine"
+ * import { Effect, Schema } from "effect"
+ *
+ * const Event = Machine.eventsFromSchemas(
  *   Schema.TaggedUnion({
  *     Increment: { by: Schema.Number },
  *     Reset: {}
  *   })
  * )
- * const machine = Machine.make({ events: Event, ... })
- * yield* ref.send(Event.Increment({ by: 1 }))
+ * const machine = Machine.make({ root: Machine.state({ fields: { count: Schema.Number } }), events: Event }).handle({
+ *   root: { count: 0 },
+ *   on: {
+ *     Increment: { update: { root: ({ root, event }) => ({ count: root.count + event.by }) } },
+ *     Reset: { update: { root: { count: 0 } } }
+ *   }
+ * })
+ *
+ * const count = Effect.scoped(Effect.gen(function*() {
+ *   const ref = yield* Machine.start(machine)
+ *   yield* ref.send(Event.Increment({ by: 1 }))
+ *   return (yield* ref.state).value.count
+ * }))
+ *
+ * await Effect.runPromise(count) // => 1
  * ```
  *
  * @category constructors
@@ -8165,9 +8197,16 @@ type ValidateEventFields<Cases> = {
 
 /** Defines a public event protocol from tagged field records.
  *
- * ```ts
+ * **Example** (Defining events from fields)
+ *
+ * ```ts import.meta.vitest
+ * import { Machine } from "@typeonce/effect-machine"
+ * import { Schema } from "effect"
+ *
  * const Events = Machine.events({ Increment: { by: Schema.Number }, Reset: {} })
- * const increment = Events.Increment({ by: 1 })
+ *
+ * Events.Increment({ by: 1 })._tag // => "Increment"
+ * Events.Reset()._tag // => "Reset"
  * ```
  *
  * Constructors defer schema validation until delivery. Use eventsFromSchemas
@@ -8224,19 +8263,39 @@ export const optionalParent: <const Events extends ReadonlyArray<Machine.TaggedS
  * Construction failures are reported through the
  * owning machine's `MachineSchemaDecodeError` channel.
  *
- * **Example**
+ * **Example** (Raising an internal event)
  *
- * ```ts
+ * ```ts import.meta.vitest
+ * import { Machine } from "@typeonce/effect-machine"
+ * import { Effect, Schema } from "effect"
+ *
+ * const Events = Machine.events({ Load: { value: Schema.String } })
  * const Internal = Machine.internalEventsFromSchemas(
  *   Schema.TaggedUnion({
  *     Loaded: { value: Schema.String },
  *     Failed: { message: Schema.String }
  *   })
  * )
- * const machine = Machine.make({ internalEvents: Internal, ... })
+ * const machine = Machine.make({
+ *   root: Machine.state({ fields: { value: Schema.String } }),
+ *   events: Events,
+ *   internalEvents: Internal
+ * }).handle({
+ *   root: { value: "" },
+ *   on: {
+ *     Load: { stay: true, commands: ({ event }, enqueue) => enqueue.raise(Internal.Loaded({ value: event.value })) },
+ *     Loaded: { update: { root: ({ event }) => ({ value: event.value }) } },
+ *     Failed: { stay: true }
+ *   }
+ * })
  *
- * // Inside a transition callback:
- * enqueue.raise(Internal.Loaded({ value }))
+ * const value = Effect.gen(function*() {
+ *   const initial = yield* Machine.planInitial(machine)
+ *   const planned = yield* Machine.plan(machine, initial.state, Events.Load({ value: "ready" }))
+ *   return planned.next.value.value
+ * })
+ *
+ * await Effect.runPromise(value) // => "ready"
  * ```
  *
  * @category constructors
@@ -8265,15 +8324,38 @@ export const internalEventsFromSchemas: {
  * implicitly to a parent machine. Observe them through `MachineRef.emissions` or
  * the AtomMachine emission stream adapters.
  *
- * **Example**
+ * **Example** (Emitting an event to observers)
  *
- * ```ts
+ * ```ts import.meta.vitest
+ * import { Machine } from "@typeonce/effect-machine"
+ * import { Effect, Schema } from "effect"
+ *
+ * const Events = Machine.events({ Save: { id: Schema.String } })
  * const Emitted = Machine.emittedEventsFromSchemas(
  *   Schema.TaggedUnion({
  *     Saved: { id: Schema.String }
  *   })
  * )
- * const machine = Machine.make({ emittedEvents: Emitted, ... })
+ * const machine = Machine.make({
+ *   root: Machine.state({ states: { Idle: {} } }),
+ *   events: Events,
+ *   emittedEvents: Emitted
+ * }).handle({
+ *   initial: { target: "Idle" },
+ *   states: {
+ *     Idle: {
+ *       on: { Save: { stay: true, commands: ({ event }, enqueue) => enqueue.emit(Emitted.Saved({ id: event.id })) } }
+ *     }
+ *   }
+ * })
+ *
+ * const emitted = Effect.gen(function*() {
+ *   const initial = yield* Machine.planInitial(machine)
+ *   const planned = yield* Machine.plan(machine, initial.state, Events.Save({ id: "a" }))
+ *   return planned.emittedEvents.length
+ * })
+ *
+ * await Effect.runPromise(emitted) // => 1
  * ```
  *
  * @category constructors
@@ -8322,29 +8404,24 @@ export const emittedEventsFromSchemas: {
  * Define an explicit JSON codec or keep process-local capabilities outside the
  * logical snapshot.
  *
- * **Example**
+ * **Example** (Encoding a snapshot for storage)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Machine } from "@typeonce/effect-machine"
- * import { Effect, Schema } from "effect"
- * class Idle extends Schema.TaggedClass<Idle>("Idle")("Idle", {}) {
- * }
- * const States = Machine.state({ states: { Idle } })
- * const machine = Machine.make({
- *   root: States,
- *   events: Machine.eventsFromSchemas()
- * }).handle({
- *   initial: {
- *     target: "Idle"
- *   },
- *   states: {
- *     Idle: {}
- *   }
+ * import { Effect } from "effect"
+ *
+ * const States = Machine.state({ states: { Idle: {} } })
+ * const machine = Machine.make({ root: States, events: Machine.events({}) }).handle({
+ *   initial: { target: "Idle" }
  * })
+ *
  * const encoded = Effect.gen(function*() {
  *   const initial = yield* Machine.planInitial(machine)
- *   return yield* Machine.encodeSnapshot(machine, initial.state)
+ *   const snapshot = yield* Machine.encodeSnapshot(machine, initial.state)
+ *   return typeof snapshot
  * })
+ *
+ * await Effect.runPromise(encoded) // => "object"
  * ```
  *
  * @see {@link decodeSnapshot} for restoring an encoded snapshot.
@@ -8409,30 +8486,25 @@ export const encodeSnapshot: <
  * Decoding restores logical statechart data only. It does not restart invoked
  * processes, recreate spawned children, or restore a previous `MachineRef`.
  *
- * **Example**
+ * **Example** (Restoring an encoded snapshot)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Machine } from "@typeonce/effect-machine"
- * import { Effect, Schema } from "effect"
- * class Idle extends Schema.TaggedClass<Idle>("Idle")("Idle", {}) {
- * }
- * const States = Machine.state({ states: { Idle } })
- * const machine = Machine.make({
- *   root: States,
- *   events: Machine.eventsFromSchemas()
- * }).handle({
- *   initial: {
- *     target: "Idle"
- *   },
- *   states: {
- *     Idle: {}
- *   }
+ * import { Effect } from "effect"
+ *
+ * const States = Machine.state({ states: { Idle: {} } })
+ * const machine = Machine.make({ root: States, events: Machine.events({}) }).handle({
+ *   initial: { target: "Idle" }
  * })
- * const roundTrip = Effect.gen(function*() {
+ *
+ * const path = Effect.gen(function*() {
  *   const initial = yield* Machine.planInitial(machine)
  *   const encoded = yield* Machine.encodeSnapshot(machine, initial.state)
- *   return yield* Machine.decodeSnapshot(machine, encoded)
+ *   const decoded = yield* Machine.decodeSnapshot(machine, encoded)
+ *   return decoded.state.path
  * })
+ *
+ * await Effect.runPromise(path) // => "Idle"
  * ```
  *
  * @see {@link encodeSnapshot} for creating the normalized representation.
@@ -8496,26 +8568,20 @@ export const decodeSnapshot: <
  * protocol. Manual planners may inspect commands but need running machine targets
  * to execute child-addressed operations.
  *
- * **Example**
+ * **Example** (Planning startup without running the machine)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Machine } from "@typeonce/effect-machine"
- * import { Effect, Schema } from "effect"
- * class Idle extends Schema.TaggedClass<Idle>("Idle")("Idle", {}) {
- * }
- * const States = Machine.state({ states: { Idle } })
- * const machine = Machine.make({
- *   root: States,
- *   events: Machine.eventsFromSchemas()
- * }).handle({
- *   initial: {
- *     target: "Idle"
- *   },
- *   states: {
- *     Idle: {}
- *   }
+ * import { Effect } from "effect"
+ *
+ * const States = Machine.state({ states: { Idle: {} } })
+ * const machine = Machine.make({ root: States, events: Machine.events({}) }).handle({
+ *   initial: { target: "Idle" }
  * })
- * const initialState = Effect.map(Machine.planInitial(machine), (plan) => plan.state)
+ *
+ * const path = Effect.map(Machine.planInitial(machine), (plan) => plan.state.state.path)
+ *
+ * await Effect.runPromise(path) // => "Idle"
  * ```
  *
  * @see {@link plan} for planning a received event.
@@ -8911,38 +8977,30 @@ export const can: {
  * `emittedEvents`. Events with no enabled transition are ignored and produce
  * an unchanged plan.
  *
- * **Example**
+ * **Example** (Planning one event without running the machine)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Machine } from "@typeonce/effect-machine"
- * import { Effect, Schema } from "effect"
- * class Off extends Schema.TaggedClass<Off>("Off")("Off", {}) {
- * }
- * class On extends Schema.TaggedClass<On>("On")("On", {}) {
- * }
- * class Toggle extends Schema.TaggedClass<Toggle>("Toggle")("Toggle", {}) {
- * }
- * const States = Machine.state({ states: { Off, On } })
+ * import { Effect } from "effect"
+ *
+ * const Events = Machine.events({ Toggle: {} })
  * const machine = Machine.make({
- *   root: States,
- *   events: Machine.eventsFromSchemas(Toggle)
+ *   root: Machine.state({ states: { Off: {}, On: {} } }),
+ *   events: Events
  * }).handle({
- *   initial: {
- *     target: "Off"
- *   },
+ *   initial: { target: "Off" },
  *   states: {
- *     Off: {
- *       on: {
- *         Toggle: { target: "On" }
- *       }
- *     },
- *     On: {}
+ *     Off: { on: { Toggle: { target: "On" } } }
  *   }
  * })
- * const nextState = Effect.gen(function*() {
+ *
+ * const path = Effect.gen(function*() {
  *   const initial = yield* Machine.planInitial(machine)
- *   return (yield* Machine.plan(machine, initial.state, new Toggle({}))).next
+ *   const planned = yield* Machine.plan(machine, initial.state, Events.Toggle())
+ *   return planned.next.state.path
  * })
+ *
+ * await Effect.runPromise(path) // => "On"
  * ```
  *
  * @see {@link planInitial} for planning machine startup.
@@ -9225,8 +9283,31 @@ export const watch: <State, Event, Error = never, Output = never>(
  * historical snapshots are not observed.
  *
  * @example
- * ```ts
- * const snapshot = yield* Machine.waitFor(ref, isReady).pipe(Effect.timeout("5 seconds"))
+ * **Example** (Waiting for a state with a timeout)
+ *
+ * ```ts import.meta.vitest
+ * import { Machine } from "@typeonce/effect-machine"
+ * import { Effect } from "effect"
+ *
+ * const Events = Machine.events({ Finish: {} })
+ * const machine = Machine.make({
+ *   root: Machine.state({ states: { Working: {}, Ready: {} } }),
+ *   events: Events
+ * }).handle({
+ *   initial: { target: "Working" },
+ *   states: {
+ *     Working: { on: { Finish: { target: "Ready" } } }
+ *   }
+ * })
+ *
+ * const path = Effect.scoped(Effect.gen(function*() {
+ *   const ref = yield* Machine.start(machine)
+ *   yield* ref.send(Events.Finish())
+ *   const ready = yield* Machine.waitFor(ref, ({ state }) => state.state.path === "Ready").pipe(Effect.timeout("5 seconds"))
+ *   return ready.state.state.path
+ * }))
+ *
+ * await Effect.runPromise(path) // => "Ready"
  * ```
  * @category combinators
  * @since 0.37.0
@@ -9265,15 +9346,41 @@ export const waitFor: {
  * `prepared.start` is one-shot and scoped: the `Scope` that first evaluates it
  * owns the machine, and closing that `Scope` is equivalent to `ref.stop`.
  *
- * ```ts
- * const prepared = yield* Machine.prepare(machine)
+ * **Example** (Observing emissions before startup)
  *
- * yield* prepared.emissions.pipe(
- *   Stream.runForEach(handleEmission),
- *   Effect.forkScoped({ startImmediately: true })
- * )
+ * ```ts import.meta.vitest
+ * import { Machine } from "@typeonce/effect-machine"
+ * import { Effect, Stream } from "effect"
  *
- * const ref = yield* prepared.start
+ * const Emitted = Machine.emittedEvents({ Started: {} })
+ * const machine = Machine.make({
+ *   root: Machine.state({ states: { Idle: {} } }),
+ *   events: Machine.events({}),
+ *   emittedEvents: Emitted
+ * }).handle({
+ *   initial: { target: "Idle" },
+ *   states: {
+ *     Idle: {
+ *       entry: (_, enqueue) => {
+ *         enqueue.emit(Emitted.Started())
+ *       }
+ *     }
+ *   }
+ * })
+ *
+ * const emitted = Effect.scoped(Effect.gen(function*() {
+ *   const prepared = yield* Machine.prepare(machine)
+ *   const seen: Array<string> = []
+ *   yield* prepared.emissions.pipe(
+ *     Stream.runForEach((event) => Effect.sync(() => seen.push(event._tag))),
+ *     Effect.forkScoped({ startImmediately: true })
+ *   )
+ *   yield* prepared.start
+ *   yield* Effect.yieldNow
+ *   return seen
+ * }))
+ *
+ * await Effect.runPromise(emitted) // => ["Started"]
  * ```
  *
  * @category constructors
@@ -9371,29 +9478,23 @@ export const prepare: <
  * rather than being returned by `send`. Sending after the machine reaches any
  * terminal state fails immediately with `StoppedError`.
  *
- * **Example**
+ * **Example** (Starting a machine in a scope)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Machine } from "@typeonce/effect-machine"
- * import { Effect, Schema } from "effect"
- * class Idle extends Schema.TaggedClass<Idle>("Idle")("Idle", {}) {
- * }
- * const States = Machine.state({ states: { Idle } })
- * const machine = Machine.make({
- *   root: States,
- *   events: Machine.eventsFromSchemas()
- * }).handle({
- *   initial: {
- *     target: "Idle"
- *   },
- *   states: {
- *     Idle: {}
- *   }
+ * import { Effect } from "effect"
+ *
+ * const States = Machine.state({ states: { Idle: {} } })
+ * const machine = Machine.make({ root: States, events: Machine.events({}) }).handle({
+ *   initial: { target: "Idle" }
  * })
- * const state = Effect.scoped(Effect.gen(function*() {
+ *
+ * const path = Effect.scoped(Effect.gen(function*() {
  *   const ref = yield* Machine.start(machine)
- *   return yield* ref.state
+ *   return (yield* ref.state).state.path
  * }))
+ *
+ * await Effect.runPromise(path) // => "Idle"
  * ```
  *
  * @see {@link plan} for inspecting the same transition plan without executing it.
@@ -9492,31 +9593,26 @@ export const start: <
  * evaluated merely because the runtime was resumed; only ordinary subsequent
  * transition planning can enter and stabilize states.
  *
- * **Example**
+ * **Example** (Resuming from a decoded snapshot)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Machine } from "@typeonce/effect-machine"
- * import { Effect, Schema } from "effect"
- * class Idle extends Schema.TaggedClass<Idle>("Idle")("Idle", {}) {
- * }
- * const States = Machine.state({ states: { Idle } })
- * const machine = Machine.make({
- *   root: States,
- *   events: Machine.eventsFromSchemas()
- * }).handle({
- *   initial: {
- *     target: "Idle"
- *   },
- *   states: {
- *     Idle: {}
- *   }
+ * import { Effect } from "effect"
+ *
+ * const States = Machine.state({ states: { Idle: {} } })
+ * const machine = Machine.make({ root: States, events: Machine.events({}) }).handle({
+ *   initial: { target: "Idle" }
  * })
- * const resumed = Effect.scoped(Effect.gen(function*() {
+ *
+ * const path = Effect.scoped(Effect.gen(function*() {
  *   const initial = yield* Machine.planInitial(machine)
  *   const encoded = yield* Machine.encodeSnapshot(machine, initial.state)
  *   const snapshot = yield* Machine.decodeSnapshot(machine, encoded)
- *   return yield* Machine.resume(machine, snapshot)
+ *   const ref = yield* Machine.resume(machine, snapshot)
+ *   return (yield* ref.state).state.path
  * }))
+ *
+ * await Effect.runPromise(path) // => "Idle"
  * ```
  *
  * @see {@link decodeSnapshot} for the schema and transport boundary.

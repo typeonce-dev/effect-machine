@@ -447,7 +447,7 @@ Prefer `ref.join` for final output, invocation `onDone` / `onFailure` for workfl
 behavior, atom selectors for UI reads, and `ref.changes` for continuous observation.
 
 ```ts
-const ready = yield * Machine.waitFor(ref, isReady).pipe(Effect.timeout("5 seconds"))
+const ready = Machine.waitFor(ref, isReady).pipe(Effect.timeout("5 seconds"))
 ```
 
 The predicate runs first, including for terminal snapshots. An unmatched failure
@@ -588,9 +588,11 @@ encoded snapshots are rejected; migrate persisted data explicitly before decodin
 Snapshots can be validated for storage or transport:
 
 ```ts
-const encoded = yield * Machine.encodeSnapshot(machine, snapshot)
-const decoded = yield * Machine.decodeSnapshot(machine, encoded)
-const ref = yield * Machine.resume(machine, decoded) // owned by the current Scope
+const resumed = Effect.gen(function*() {
+  const encoded = yield* Machine.encodeSnapshot(machine, snapshot)
+  const decoded = yield* Machine.decodeSnapshot(machine, encoded)
+  return yield* Machine.resume(machine, decoded) // owned by the current Scope
+})
 ```
 
 Decoded snapshots are local runtime values and may contain class instances or

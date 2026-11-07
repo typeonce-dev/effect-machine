@@ -338,27 +338,22 @@ export const layerMemory: Layer.Layer<Storage> = internal.layerMemory
  * JSON-compatible encoded representations. Local and internal event protocols
  * remain unrestricted because they do not cross the Cluster boundary.
  *
- * **Example**
+ * **Example** (Adapting a machine to an entity)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Machine } from "@typeonce/effect-machine"
  * import { ClusterMachine } from "@typeonce/effect-machine/cluster"
- * import { Schema } from "effect"
- * class Idle extends Schema.TaggedClass<Idle>("Idle")("Idle", {}) {
- * }
- * const States = Machine.state({ states: { Idle } })
+ *
  * const machine = Machine.make({
- *   root: States,
- *   events: Machine.eventsFromSchemas()
+ *   root: Machine.state({ states: { Idle: {} } }),
+ *   events: Machine.events({})
  * }).handle({
- *   initial: {
- *     target: "Idle"
- *   },
- *   states: {
- *     Idle: {}
- *   }
+ *   initial: { target: "Idle" }
  * })
+ *
  * const adapter = ClusterMachine.make("IdleMachine", machine, { version: "1" })
+ *
+ * adapter.entity.type // => "IdleMachine"
  * ```
  *
  * @category constructors
