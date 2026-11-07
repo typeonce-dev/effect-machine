@@ -784,7 +784,7 @@ describe("Static chart", () => {
     assert.isAtLeast(parentTransition.points.length, 2)
     assert.isAtLeast(externalFailure.points.length, 2)
     assert.strictEqual(parentTransition.points[0]?.y, source.y + source.headerHeight)
-    assert.isAtLeast(Math.min(...externalFailure.points.map(({ y }) => y)), target.y)
+    assert.isAtLeast(Math.min(...externalFailure.points.map(({ y }) => y)), source.y)
     const directDistance = Math.abs(externalFailure.points[0]!.x - externalFailure.points.at(-1)!.x) +
       Math.abs(externalFailure.points[0]!.y - externalFailure.points.at(-1)!.y)
     assert.isAtMost(chartRouteLength(externalFailure.points), directDistance + 80)

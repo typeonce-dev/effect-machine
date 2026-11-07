@@ -6519,6 +6519,17 @@ export declare namespace Machine {
       }
       & InlineDestinationConstruction<S, Src, P, C>
   }[DestinationPath<S>]
+  // A misspelled target matches this member, so validation can name the declared paths instead of `never`.
+  type InlineUnknownTarget<S extends StateSchemas> = {
+    /** Selects a declared descendant, constructing the values it requires. */
+    readonly target: ReferenceUnion<S, DestinationPath<S>> | (string & {})
+    readonly update?: never
+    readonly initialize?: never
+    readonly history?: never
+    readonly stay?: never
+    readonly branches?: never
+    readonly resolve?: never
+  }
   type InlineUpdate<S extends StateSchemas, Src extends StateNodeIdentifier<S>, C> = [UpdatableOwner<S, Src>] extends
     [never] ? never : {
     /** Replaces the value of one retained source or ancestor without replacing its active children. */
@@ -6650,6 +6661,7 @@ export declare namespace Machine {
       }
       & DeclarationData<
         | InlineDestination<S, Src, C>
+        | InlineUnknownTarget<S>
         | InlineUpdate<S, Src, C>
         | InlineRoot<C, R>
         | {
@@ -7042,6 +7054,8 @@ export declare namespace Machine {
       readonly exit?: never /** Constructs the decoded output declared by the state schema. */
       readonly output?: never
     }
+  type StateFieldError<Kind extends string, Src extends string, Field extends string, Fix extends string> =
+    `${Kind} state "${PathName<Src>}" cannot declare ${Field}. ${Fix}`
   /**
    * Handlers for a node of the declared root tree.
    *
@@ -7078,13 +7092,13 @@ export declare namespace Machine {
         /** Required total transition for a transient choice state. */
         readonly choice: Transition<S, Src, ChoiceContext<S, Ev, Em, Src, In, Pa>, Ev, Em, R>
         /** Event handlers keyed by the public or internal event tag. */
-        readonly on?: never
+        readonly on?: StateFieldError<"Choice", Src, "on", "Declare one transition in choice">
         /** Eventless transition evaluated during stabilization. */
-        readonly always?: never
+        readonly always?: StateFieldError<"Choice", Src, "always", "Declare one transition in choice">
         /** Handles successful invocation or state completion with its exact output type. */
-        readonly onDone?: never
+        readonly onDone?: StateFieldError<"Choice", Src, "onDone", "Declare one transition in choice">
         /** One registered invocation or an array with distinct lifecycle identities. */
-        readonly invoke?: never
+        readonly invoke?: StateFieldError<"Choice", Src, "invoke", "Declare one transition in choice">
         /** Child handlers nested according to the declared root topology. */
         readonly states?: never
         /** Restores the declared history reference, using its fallback on first entry. */
@@ -7092,15 +7106,15 @@ export declare namespace Machine {
       }
       : Src extends StateIdentifier<S> ? Node extends { readonly type: "final" } ? {
             /** Event handlers keyed by the public or internal event tag. */
-            readonly on?: never
+            readonly on?: StateFieldError<"Final", Src, "on", "A final state has no outgoing work">
             /** Eventless transition evaluated during stabilization. */
-            readonly always?: never
+            readonly always?: StateFieldError<"Final", Src, "always", "A final state has no outgoing work">
             /** Handles successful invocation or state completion with its exact output type. */
-            readonly onDone?: never
+            readonly onDone?: StateFieldError<"Final", Src, "onDone", "A final state has no outgoing work">
             /** Required total transition for a transient choice state. */
             readonly choice?: never
             /** One registered invocation or an array with distinct lifecycle identities. */
-            readonly invoke?: never
+            readonly invoke?: StateFieldError<"Final", Src, "invoke", "A final state has no outgoing work">
             /** Child handlers nested according to the declared root topology. */
             readonly states?: never
             /** Restores the declared history reference, using its fallback on first entry. */
@@ -7253,6 +7267,67 @@ export declare namespace Machine {
     [Result] extends [void | undefined] ? unknown
     : { readonly commands: "commands must not return a value. Enqueue work with its second argument" }
     : unknown
+  type DestinationNames<S extends StateSchemas> = ReferenceUnion<S, Exclude<DestinationPath<S>, HistoryIdentifier<S>>>
+  type UnknownTargetMessage<P extends string, S extends StateSchemas> = P extends "root"
+    ? `Cannot target "root". Reconstruct it with initialize, or update it with update: { root: ... }`
+    : P extends ReferenceUnion<S, HistoryIdentifier<S>> ?
+      `"${P}" is a history state. Restore it with: { history: "${P}" }`
+    : `Unknown target "${P}". Declared: ${JoinUnion<DestinationNames<S>>}`
+  // A property-level message would collapse with the declared literal to `never`, so these replace the whole value.
+  type ValidateTarget<T, S extends StateSchemas, Src extends string> = T extends {
+    readonly target: infer P extends string
+  } ? string extends P ? unknown
+    : P extends DestinationNames<S> ? ValidateTargetAncestors<S, Src, P> & ValidateTargetData<T, S, P>
+    : UnknownTargetMessage<P, S>
+    : unknown
+  // A known target also matches the misspelled-target member, which cannot require its values.
+  type ValidateTargetData<T, S extends StateSchemas, P extends string> = "data" extends keyof T ? unknown
+    : PathOf<P> extends infer Id extends StateIdentifier<S> ?
+      [NodeSchema<NodeByIdentifier<S, Id>>] extends [never] ? unknown
+      : {} extends NodeMakeInput<NodeByIdentifier<S, Id>> ? unknown
+      : `Target "${P}" requires data`
+    : unknown
+  // Entering below an inactive valued state has no value for it, so that state must be the target. Anything below the
+  // source or a parallel state may already be active, so only a state that is certainly inactive is reported here.
+  type HasParallelAncestor<S extends StateSchemas, Id extends string> = true extends {
+    [A in Extract<ParentStateIdentifier<Id>, StateIdentifier<S>>]: NodeByIdentifier<S, A> extends
+      { readonly type: "parallel" } ? true : false
+  }[Extract<ParentStateIdentifier<Id>, StateIdentifier<S>>] ? true :
+    false
+  type InactiveValuedAncestor<S extends StateSchemas, Src extends string, P extends string> = {
+    [
+      A in Exclude<
+        Extract<ParentStateIdentifier<PathOf<P>>, ValuedStateIdentifier<S>>,
+        Src | ParentStateIdentifier<Src> | JoinPath<Src, string>
+      >
+    ]: HasParallelAncestor<S, A> extends true ? never : A
+  }[
+    Exclude<
+      Extract<ParentStateIdentifier<PathOf<P>>, ValuedStateIdentifier<S>>,
+      Src | ParentStateIdentifier<Src> | JoinPath<Src, string>
+    >
+  ]
+  type ValidateTargetAncestors<S extends StateSchemas, Src extends string, P extends string> =
+    [InactiveValuedAncestor<S, Src, P>] extends [never] ? unknown :
+      `Target "${P}" enters "${JoinUnion<
+        PathName<InactiveValuedAncestor<S, Src, P>>
+      >}", which needs a value. Target that state and construct "${P}" with states`
+  type ValidateBranchEntries<T, S extends StateSchemas, Src extends string> = T extends {
+    readonly branches: infer B extends ReadonlyArray<unknown>
+  } ? {
+      readonly branches: {
+        readonly [K in keyof B]:
+          & (B[K] extends { readonly target: infer P extends string } ?
+            P extends DestinationNames<S> ? ValidateTargetAncestors<S, Src, P> : UnknownTargetMessage<P, S>
+            : unknown)
+          & (B[K] extends { readonly update: infer O extends string } ? O extends UpdatableNames<S, Src, B[K]> ? unknown
+            : `Cannot update "${O}". ${[UpdatableNames<S, Src, B[K]>] extends [never] ?
+              "No retained state can be updated here"
+              : `Updatable here: ${JoinUnion<UpdatableNames<S, Src, B[K]>>}`}` :
+            unknown)
+      }
+    }
+    : unknown
   type ValidateDestination<T> = Extract<
     keyof T,
     "target" | "update" | "initialize" | "history" | "stay" | "branches" | "resolve"
@@ -7285,7 +7360,9 @@ export declare namespace Machine {
       ]: never
     }
     & ValidateDestination<T>
+    & ValidateTarget<T, S, Src>
     & ValidateBranches<T>
+    & ValidateBranchEntries<T, S, Src>
     & ValidateUpdateOwners<T, S, Src>
     & ValidateCommands<T>
   type AllowedInvokeChannels<R, K extends PropertyKey> =
@@ -7323,17 +7400,18 @@ export declare namespace Machine {
     I extends {
       /** Name of the source registered in make. */
       readonly src: infer Src extends PropertyKey
-    } ? {
-        readonly [K in keyof I]: [Duplicate] extends [never] ?
-          ValidateInvokeField<I, K, R, Extract<Src, string>, Root, S, Path>
-          : K extends ("id" extends keyof I ? "id" : "src") ? InvocationDefinitionError<
-              `Invocation id '${Duplicate}' is declared more than once in this state`,
-              Extract<Src, string>,
-              K
-            >
-          : ValidateInvokeField<I, K, R, Extract<Src, string>, Root, S, Path>
-      } :
-      never
+    } ? Src extends SourceKeys<R> ? {
+          readonly [K in keyof I]: [Duplicate] extends [never] ?
+            ValidateInvokeField<I, K, R, Extract<Src, string>, Root, S, Path>
+            : K extends ("id" extends keyof I ? "id" : "src") ? InvocationDefinitionError<
+                `Invocation id '${Duplicate}' is declared more than once in this state`,
+                Extract<Src, string>,
+                K
+              >
+            : ValidateInvokeField<I, K, R, Extract<Src, string>, Root, S, Path>
+        }
+      : UnknownSourceMessage<R>
+      : never
   type ValidateInvokeField<
     I,
     K extends keyof I,
@@ -7346,6 +7424,9 @@ export declare namespace Machine {
     ValidateObjectTransition<I[K], S, Path> & ValidateChoiceUpdate<I[K], Root>
     : K extends "src" | "id" | "address" | "input" ? unknown
     : InvokeFieldError<K, Src>
+  type UnknownSourceMessage<R> = [Extract<SourceKeys<R>, string>] extends [never]
+    ? "Unknown source. Register it in make with effects, streams, timers, logic, or children"
+    : `Unknown source. Registered: ${JoinUnion<Extract<SourceKeys<R>, string>>}`
   type ValidateObjectInvoke<I, R, Root, S extends StateSchemas, Path extends string> = I extends
     ReadonlyArray<unknown> ?
     number extends I["length"] ? { readonly [K in keyof I]: ValidateInvokeEntry<I[K], R, never, Root, S, Path> }
@@ -7459,13 +7540,19 @@ export declare namespace Machine {
   }
   // Reverse-map authored fields to avoid expanding every possible transition.
   // Retain missing fields from H for required handlers and editor completion.
-  type HandlerShape<C, H> =
+  // Intersecting a misspelled `src` with its declared literals is `never`, so that invocation takes the message instead.
+  type InvokeShape<I, H, R> = I extends ReadonlyArray<{ readonly src: infer Src }> ?
+    [Exclude<Src, SourceKeys<R>>] extends [never] ? H : UnknownSourceMessage<R>
+    : I extends { readonly src: infer Src } ? [Src] extends [SourceKeys<R>] ? H : UnknownSourceMessage<R>
+    : H
+  type HandlerShape<C, H, R> =
     & {
       readonly [K in keyof C]: K extends keyof H ? K extends "states" ? {
             readonly [P in keyof C[K]]: P extends keyof NonNullable<H[K]>
-              ? HandlerShape<C[K][P], NonNullable<NonNullable<H[K]>[P]>>
+              ? HandlerShape<C[K][P], NonNullable<NonNullable<H[K]>[P]>, R>
               : never
           }
+        : K extends "invoke" ? InvokeShape<C[K], H[K], R>
         : H[K]
         : never
     }
@@ -7493,13 +7580,15 @@ export declare namespace Machine {
       config:
         & C
         & (C extends (...args: never[]) => unknown ? never : unknown)
+        // Checked first, so an invalid declaration reports the message that names its fix.
+        & ValidateObjectConfig<NoInfer<C>, R, S>
         & HandlerShape<
           C,
           & StateHandler<S, S[""], Ev, Em, Extract<"", StateNodeIdentifier<S>>, In, Pa, R & { readonly "~input": I }>
-          & RootConstruction<S[""], I["Type"]>
+          & RootConstruction<S[""], I["Type"]>,
+          R
         >
         & RootConstruction<S[""], I["Type"]>
-        & ValidateObjectConfig<NoInfer<C>, R, S>
         & RootHandlerValidation<
           S,
           Ev,
