@@ -1,5 +1,64 @@
 # @typeonce/effect-machine-devtools
 
+## 0.47.0
+
+### Minor Changes
+
+- d1d9137: Add `MachineTest.check`, `MachineTest.analyze`, and the `effect-machine check` command, so a machine can be verified with one call and no browser.
+  
+  `check` reports states with no path from the initial state, public events with no handler, nondeterministic planning, planner law violations, invariant failures, and declared branches that were never taken. It derives input and events from the machine's schemas, and each finding from a run includes the events that reproduce it. A report is `"exhaustive"` only when nothing limited exploration; otherwise `limits` says why it is `"bounded"`.
+  
+  ```ts
+  const program = Effect.gen(function*() {
+    const report = yield* MachineTest.check(Checkout)
+    return report.ok // false when any finding is an error
+  })
+  ```
+  
+  From a shell, `effect-machine check src/checkout.ts --json` prints one JSON object and exits with status 1 on any error.
+- 42e2d90: Declare conditional transitions inline, with `branches` next to `resolve`, so one transition can be read and edited alone. The compiler checks one against the other in both directions, and rejects a resolver that does not return a `select` call on every path:
+  
+  ```ts
+  Pay: {
+    branches: [{ target: "Charging" }, { update: "root" }, { stay: true }, { decline: true }],
+    resolve: ({ event, select }) => {
+      if (event.amount < 0) return select.decline()
+      if (event.amount === 0) return select.stay()
+      return event.preview
+        ? select.update({ root: { total: event.amount } })
+        : select.target("Charging", { data: { amount: event.amount } })
+    }
+  }
+  ```
+  
+  To migrate: move each `make({ branches })` group into its transition and drop its keys and `title`, so `select.key(...)` becomes `select.target(path, ...)`, `select.update({ owner: value })`, `select.history(path)`, `select.initialize({ input })`, or `select.stay()`. Two keys that reached the same destination are now one entry. Remove `declinable: true`, list `{ decline: true }`, and replace the `decline()` context function with `select.decline()`.
+  
+  `none` is replaced: `{ none: true }` becomes `{ stay: true }`, `{ none: true, reenter: true }` becomes `{ reenter: true }`, and `{ none: true, resolve }` becomes `{ stay: true, commands }`. Every plain transition accepts `commands: (context, enqueue) => ...`.
+  
+  `update` is now a record with one owner, so `data` only ever means the target's value: `{ update: "root", data }` becomes `{ update: { root: data } }`, and `{ target, update: "Owner", data: () => ({ target, update }) }` becomes `{ target, data, update: { Owner: value } }`. Inside a `branches` list, an entry still names its owner as a string, `{ target, update: "Owner" }`, and the value goes in its `select` call.
+  
+  `guard` and `decline` now exist only on `on` handlers and `always`. On `onDone`, `onFailure`, `onElement`, `onSnapshot`, and `choice`, which have no other candidate, use `{ stay: true }` or select a destination. A retained transition's `branchKey` and a transition definition's `key` are now the entry as written, such as `target:Paid`, and `title` is removed.
+  
+  In the Oxlint plugin, `no-conditional-none-branch` becomes `no-conditional-stay-branch`, and `no-redundant-resolve` is removed because the compiler now rejects what it reported. Resolvers for invocation outcomes and `always` may select `stay` conditionally, because `Machine.can` queries only events.
+
+### Patch Changes
+
+- 7d0e987: Update the devtools file watcher to chokidar 6. The devtools CLI now requires Node.js 22.22 or newer.
+  
+  Build the Oxlint plugin against `@oxlint/plugins` 1.90.0. The plugin still supports `oxlint` `>=1.80.0 <2`.
+- 697c6cb: Install the devtools CLI without pinning a second exact TypeScript or Vite.
+  
+  `@typeonce/effect-machine-devtools` now depends on `typescript` `>=5.9.0 <7.0.0` and `vite` `^8.1.5` instead of exact versions, so a package manager can reuse compatible versions your project already has. No setup changes are required: the CLI still works when your project uses neither, or uses TypeScript 7.
+- Updated dependencies [67f11cc]
+- Updated dependencies [573636b]
+- Updated dependencies [b24c367]
+- Updated dependencies [d1d9137]
+- Updated dependencies [ca51c52]
+- Updated dependencies [42e2d90]
+- Updated dependencies [104f98a]
+- Updated dependencies [7ffcab7]
+  - @typeonce/effect-machine@0.47.0
+
 ## 0.46.0
 
 ### Patch Changes

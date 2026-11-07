@@ -1,5 +1,69 @@
 # @typeonce/effect-machine
 
+## 0.47.0
+
+### Minor Changes
+
+- 67f11cc: Compile errors for common machine mistakes now name the fix instead of reporting `never`:
+  
+  ```ts
+  Pay: { target: "Archivd" }
+  // Unknown target "Archivd". Declared: Editing, Checkout, Archived
+  
+  invoke: { src: "loadd", onDone: { stay: true } }
+  // Unknown source. Registered: load
+  ```
+  
+  `Machine.handle` reports a misspelled target, source, or owner, a missing `data`, the root or a history state used as a target, and an `on`, `always`, `onDone`, or `invoke` on a final or choice state.
+  
+  A transition that targets a state below an inactive valued state, such as `{ target: "Checkout.Paid" }` from outside `Checkout`, used to fail while planning. It is now a compile error: target `"Checkout"` with a `branches` entry and construct the child with `select.target("Checkout", { data, states: { Paid: {} } })`.
+- 573636b: Ship agent documentation as `AGENTS.md`, `CLAUDE.md`, and `ai-docs/` in the package, replacing `docs/`.
+  
+  An agent working in a project can now read documentation matching the installed version from `node_modules/@typeonce/effect-machine/AGENTS.md`. Replace links to `docs/agent-guide.md`, `docs/root-api.md`, `docs/effect-atom-react.md`, and `docs/machine-review.md` with that file, or with the matching section under `ai-docs/src`.
+- d1d9137: Add `MachineTest.check`, `MachineTest.analyze`, and the `effect-machine check` command, so a machine can be verified with one call and no browser.
+  
+  `check` reports states with no path from the initial state, public events with no handler, nondeterministic planning, planner law violations, invariant failures, and declared branches that were never taken. It derives input and events from the machine's schemas, and each finding from a run includes the events that reproduce it. A report is `"exhaustive"` only when nothing limited exploration; otherwise `limits` says why it is `"bounded"`.
+  
+  ```ts
+  const program = Effect.gen(function*() {
+    const report = yield* MachineTest.check(Checkout)
+    return report.ok // false when any finding is an error
+  })
+  ```
+  
+  From a shell, `effect-machine check src/checkout.ts --json` prints one JSON object and exits with status 1 on any error.
+- 42e2d90: Declare conditional transitions inline, with `branches` next to `resolve`, so one transition can be read and edited alone. The compiler checks one against the other in both directions, and rejects a resolver that does not return a `select` call on every path:
+  
+  ```ts
+  Pay: {
+    branches: [{ target: "Charging" }, { update: "root" }, { stay: true }, { decline: true }],
+    resolve: ({ event, select }) => {
+      if (event.amount < 0) return select.decline()
+      if (event.amount === 0) return select.stay()
+      return event.preview
+        ? select.update({ root: { total: event.amount } })
+        : select.target("Charging", { data: { amount: event.amount } })
+    }
+  }
+  ```
+  
+  To migrate: move each `make({ branches })` group into its transition and drop its keys and `title`, so `select.key(...)` becomes `select.target(path, ...)`, `select.update({ owner: value })`, `select.history(path)`, `select.initialize({ input })`, or `select.stay()`. Two keys that reached the same destination are now one entry. Remove `declinable: true`, list `{ decline: true }`, and replace the `decline()` context function with `select.decline()`.
+  
+  `none` is replaced: `{ none: true }` becomes `{ stay: true }`, `{ none: true, reenter: true }` becomes `{ reenter: true }`, and `{ none: true, resolve }` becomes `{ stay: true, commands }`. Every plain transition accepts `commands: (context, enqueue) => ...`.
+  
+  `update` is now a record with one owner, so `data` only ever means the target's value: `{ update: "root", data }` becomes `{ update: { root: data } }`, and `{ target, update: "Owner", data: () => ({ target, update }) }` becomes `{ target, data, update: { Owner: value } }`. Inside a `branches` list, an entry still names its owner as a string, `{ target, update: "Owner" }`, and the value goes in its `select` call.
+  
+  `guard` and `decline` now exist only on `on` handlers and `always`. On `onDone`, `onFailure`, `onElement`, `onSnapshot`, and `choice`, which have no other candidate, use `{ stay: true }` or select a destination. A retained transition's `branchKey` and a transition definition's `key` are now the entry as written, such as `target:Paid`, and `title` is removed.
+  
+  In the Oxlint plugin, `no-conditional-none-branch` becomes `no-conditional-stay-branch`, and `no-redundant-resolve` is removed because the compiler now rejects what it reported. Resolvers for invocation outcomes and `always` may select `stay` conditionally, because `Machine.can` queries only events.
+
+### Patch Changes
+
+- b24c367: The npm page for `@typeonce/effect-machine` now links to the API reference at https://effect-machine.typeonce.dev.
+- ca51c52: Every API example in the published source now has a title, and the core package's examples compile and run against the current API.
+- 104f98a: Internal: check the compiled execution plan's transition contexts, targets, and commands at compile time instead of through `any` casts. Machine behavior and the public API are unchanged.
+- 7ffcab7: Internal: check planner target resolution, invocation sources, and runtime child operations at compile time instead of through `any` casts. Machine behavior and the public API are unchanged.
+
 ## 0.46.0
 
 ### Minor Changes
