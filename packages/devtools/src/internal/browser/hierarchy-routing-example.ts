@@ -68,8 +68,12 @@ export const hierarchyRoutingMachine = Machine.make({
             id: "save-review",
             onDone: { target: "Workflow.Publishing" },
             onFailure: {
-              target: "Workflow.Review.Failed",
-              data: () => ({ message: "The review could not be saved." })
+              branches: [{ target: "Workflow.Review" }],
+              resolve: ({ select }) =>
+                select.target("Workflow.Review", {
+                  data: { title: "A deterministic chart" },
+                  states: { Failed: { data: { message: "The review could not be saved." } } }
+                })
             }
           }
         },

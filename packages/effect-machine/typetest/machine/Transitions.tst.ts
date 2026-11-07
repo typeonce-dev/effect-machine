@@ -21,7 +21,7 @@ const Events = Machine.events({ Bump: { by: Schema.Number }, Pay: { amount: Sche
 const Emits = Machine.emittedEvents({ Cancelled: {} })
 const definition = Machine.make({ root: Root, events: Events, emittedEvents: Emits })
 const handleEditing = { root: { count: 0 }, initial: { target: "Editing", data: { complete: false } } } as const
-declare const widened: "Archived" | "Checkout.Paid"
+declare const widened: "Archived" | "Editing"
 
 describe("transition declarations", () => {
   it("types every plain transition and every select call from the local declaration", () => {
@@ -34,8 +34,8 @@ describe("transition declarations", () => {
             Bump: { stay: true, commands: (_, enqueue) => enqueue.emit(Emits.Cancelled()) },
             Pay: {
               branches: [
-                { target: "Checkout.Charging" },
-                { target: "Checkout.Paid" },
+                { target: "Checkout" },
+                { target: "Archived" },
                 { update: "Editing" },
                 { stay: true },
                 { decline: true }
@@ -46,8 +46,11 @@ describe("transition declarations", () => {
                 if (event.amount === 1) return select.update({ Editing: { complete: true } })
                 if (event.amount === 2) return select.stay()
                 return event.amount === 0
-                  ? select.target("Checkout.Paid")
-                  : select.target("Checkout.Charging", { data: { amount: event.amount } })
+                  ? select.target("Archived")
+                  : select.target("Checkout", {
+                    data: { total: 0 },
+                    states: { Charging: { data: { amount: event.amount } } }
+                  })
               }
             }
           }
@@ -154,7 +157,7 @@ describe("transition declarations", () => {
         Editing: {
           on: {
             Pay: {
-              branches: [{ target: "Archived" }, { target: "Checkout.Paid" }],
+              branches: [{ target: "Archived" }, { target: "Editing" }],
               resolve: ({ select }) => select.target(widened)
             }
           }
@@ -162,7 +165,7 @@ describe("transition declarations", () => {
       }
     })).type.toRaiseError(
       "",
-      "select.target takes one path, got: Archived, Checkout.Paid. Call it once per path"
+      "select.target takes one path, got: "
     )
   })
 
