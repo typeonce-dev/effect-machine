@@ -672,6 +672,154 @@ export const program = Effect.scoped(Effect.gen(function*() {
 }))
 ```
 
+#### Choosing a destination from an event
+
+List every destination in `branches`, next to the `resolve` that selects one.
+The compiler checks one against the other, so this transition can be edited
+without reading anything else.
+
+```ts
+import { Machine } from "@typeonce/effect-machine"
+import { Schema } from "effect"
+
+export const CheckoutStates = Machine.state({
+  fields: { attempts: Schema.Number },
+  states: {
+    Editing: {},
+    Charging: { fields: { amount: Schema.Number } },
+    Paid: {}
+  }
+})
+
+export const CheckoutEvents = Machine.events({
+  Pay: { amount: Schema.Number },
+  Paid: {}
+})
+
+export const CheckoutMachine = Machine.make({
+  root: CheckoutStates,
+  events: CheckoutEvents
+}).handle({
+  root: { attempts: 0 },
+  initial: { target: "Editing" },
+  states: {
+    Editing: {
+      on: {
+        Pay: {
+          // `stay` accepts the event, so `Machine.can` is true. `decline` refuses it, so `Machine.can` is false and a
+          // parent handler for the same event runs.
+          branches: [{ target: "Charging" }, { target: "Paid" }, { update: "root" }, { stay: true }, { decline: true }],
+          resolve: ({ event, root, select }) => {
+            if (event.amount < 0) return select.decline()
+            if (event.amount === 0) return select.target("Paid")
+            if (root.attempts >= 3) return select.stay()
+            if (event.amount > 1_000) return select.update({ root: { attempts: root.attempts + 1 } })
+            // Each call takes the values of the path it is given.
+            return select.target("Charging", { data: { amount: event.amount } })
+          }
+        }
+      }
+    },
+    Charging: {
+      on: {
+        Paid: { target: "Paid" }
+      }
+    }
+  }
+})
+```
+
+#### Updating retained state and enqueueing commands
+
+`data` only ever means the target's value. `update` is a record naming the one
+retained state it replaces. `commands` enqueues work on any plain transition.
+
+```ts
+import { Machine } from "@typeonce/effect-machine"
+import { Schema } from "effect"
+
+export const DocumentEmitted = Machine.emittedEvents({ Saved: { revision: Schema.Number } })
+
+export const DocumentMachine = Machine.make({
+  root: Machine.state({
+    states: {
+      Document: {
+        fields: { revision: Schema.Number },
+        states: {
+          Editing: {},
+          Saving: { fields: { draft: Schema.String } }
+        }
+      }
+    }
+  }),
+  events: Machine.events({ Change: {}, Save: { draft: Schema.String }, Saved: {} }),
+  emittedEvents: DocumentEmitted
+}).handle({
+  initial: { target: "Document", data: { revision: 0 } },
+  states: {
+    Document: {
+      initial: { target: "Document.Editing" },
+      on: {
+        // Replaces the value of Document and keeps its active child and running work.
+        Change: { update: { Document: ({ state }) => ({ revision: state.revision + 1 }) } }
+      },
+      states: {
+        Editing: {
+          on: {
+            // Enters a state and replaces a retained ancestor in one validated step.
+            Save: {
+              target: "Document.Saving",
+              data: ({ event }) => ({ draft: event.draft }),
+              update: { Document: ({ ancestors }) => ({ revision: ancestors.Document.revision + 1 }) }
+            }
+          }
+        },
+        Saving: {
+          on: {
+            Saved: {
+              target: "Document.Editing",
+              commands: ({ ancestors }, enqueue) =>
+                enqueue.emit(DocumentEmitted.Saved({ revision: ancestors.Document.revision }))
+            }
+          }
+        }
+      }
+    }
+  }
+})
+```
+
+#### Verifying a machine after changing it
+
+Run `MachineTest.check` after every change. It needs no test setup, and a
+finding names the law it broke and the events that reproduce it.
+
+```ts
+import { Machine } from "@typeonce/effect-machine"
+import { MachineTest } from "@typeonce/effect-machine/testing"
+import { Effect } from "effect"
+
+export const SwitchMachine = Machine.make({
+  root: Machine.state({ states: { Off: {}, On: {} } }),
+  events: Machine.events({ Toggle: {} })
+}).handle({
+  initial: { target: "Off" },
+  states: {
+    Off: { on: { Toggle: { target: "On" } } },
+    On: { on: { Toggle: { target: "Off" } } }
+  }
+})
+
+export const verified = Effect.gen(function*() {
+  const report = yield* MachineTest.check(SwitchMachine)
+  if (!report.ok) {
+    return yield* Effect.die(MachineTest.formatCheckReport(report))
+  }
+  // "exhaustive" means nothing limited exploration. "bounded" lists why in `limits`, and is not a proof.
+  return report.exploration
+})
+```
+
 ## Root machine API
 
 A machine has one root state. It can own data, child topology, both, or neither.

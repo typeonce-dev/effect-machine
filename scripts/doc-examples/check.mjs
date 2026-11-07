@@ -5,10 +5,10 @@ import { join, relative, resolve } from "node:path"
 
 // Doctests execute examples without type checking them. Extract the same
 // snippets and compile them so that a stale API cannot survive in an example
-// whose wrong types happen to work at runtime.
+// whose wrong types happen to work at runtime. A plain `ts` fence would escape
+// both, so every example in the published source must be runnable and titled.
 const root = resolve(import.meta.dirname, "../..")
 const output = join(root, ".data", "doc-examples")
-const includeUnmarked = process.argv.includes("--all")
 
 const sourceFiles = (directory) =>
   readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
@@ -17,13 +17,26 @@ const sourceFiles = (directory) =>
     return entry.name.endsWith(".ts") ? [path] : []
   })
 
-// `--all` also compiles plain `ts` fences. Use it to audit examples that are not runnable yet.
-const markRunnable = (text) => text.replace(/(\* ```ts)[ \t]*$/gm, "$1 import.meta.vitest")
+const documentedFiles = [
+  ...sourceFiles(join(root, "packages/effect-machine/src")),
+  ...sourceFiles(join(root, "packages/effect-machine-react/src"))
+]
+const problems = documentedFiles.flatMap((file) =>
+  readFileSync(file, "utf8").split("\n").flatMap((line, index) => {
+    const location = `${relative(root, file)}:${index + 1}`
+    if (/^\s*\*\s*```ts\s*$/.test(line)) return [`${location} is not runnable. Use \`\`\`ts import.meta.vitest`]
+    if (/^\s*\*\s*\*\*Example\*\*\s*$/.test(line)) return [`${location} has no title. Use **Example** (Short title)`]
+    return []
+  })
+)
+if (problems.length > 0) {
+  process.stderr.write(`${problems.join("\n")}\n`)
+  process.exit(1)
+}
 
 const snippets = []
 for (const file of sourceFiles(join(root, "packages/effect-machine/src"))) {
-  const contents = readFileSync(file, "utf8")
-  for (const snippet of Source.extract(includeUnmarked ? markRunnable(contents) : contents)) {
+  for (const snippet of Source.extract(readFileSync(file, "utf8"))) {
     snippets.push({ file: relative(root, file), snippet })
   }
 }

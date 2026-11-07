@@ -465,32 +465,26 @@ type EnsureValuedSelectorPath<State, Path extends string> = [Path] extends [Valu
  * The derived atom suppresses structurally equal updates. Repeated calls with
  * the same bridge and path return the same atom.
  *
- * **Example**
+ * **Example** (Selecting a state value)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Machine } from "@typeonce/effect-machine"
  * import { AtomMachine } from "@typeonce/effect-machine/reactivity"
- * import { Schema } from "effect"
- * class Count extends Schema.TaggedClass<Count>("Count")("Count", {
- *   value: Schema.Number
- * }) {
- * }
- * const States = Machine.state({ states: { Count } })
- * const machine = Machine.make({
- *   root: States,
- *   events: Machine.eventsFromSchemas()
- * }).handle({
- *   initial: {
- *     target: "Count",
- *     decoded: true,
- *     data: new Count({ value: 0 })
- *   },
- *   states: {
- *     Count: {}
- *   }
+ * import { AsyncResult, AtomRegistry } from "effect/reactivity"
+ * import { Option, Schema } from "effect"
+ *
+ * const States = Machine.state({ states: { Count: { fields: { value: Schema.Number } } } })
+ * const machine = Machine.make({ root: States, events: Machine.events({}) }).handle({
+ *   initial: { target: "Count", data: { value: 0 } }
  * })
- * const machineAtom = AtomMachine.make(machine)
- * const countAtom = AtomMachine.select(machineAtom, "Count")
+ *
+ * const countAtom = AtomMachine.select(AtomMachine.make(machine), "Count")
+ * const registry = AtomRegistry.make()
+ * registry.mount(countAtom)
+ *
+ * const count = AsyncResult.value(registry.get(countAtom)).pipe(Option.flatten, Option.map(({ value }) => value))
+ *
+ * count // => Option.some(0)
  * ```
  *
  * @category combinators
@@ -601,11 +595,35 @@ export const selectSnapshot: {
  * bridge. An inactive child produces `Option.none()`. Repeated calls with the
  * same child bridge and path return the same atom.
  *
- * **Example**
+ * **Example** (Selecting a state value of a child)
  *
- * ```ts
+ * ```ts import.meta.vitest
+ * import { Machine } from "@typeonce/effect-machine"
+ * import { AtomMachine } from "@typeonce/effect-machine/reactivity"
+ * import { AtomRegistry } from "effect/reactivity"
+ * import { Schema } from "effect"
+ *
+ * const Editing = Schema.TaggedStruct("Editing", { text: Schema.String })
+ * const Editor = Machine.make({
+ *   root: Machine.state({ states: { Editing } }),
+ *   events: Machine.events({})
+ * }).handle({
+ *   initial: { target: "Editing", data: { text: "" } }
+ * })
+ * const EditorChild = Machine.child("editor", Editor)
+ * const parent = Machine.make({
+ *   root: Machine.state({ states: { Open: {} } }),
+ *   events: Machine.events({}),
+ *   children: { EditorChild }
+ * }).handle({
+ *   initial: { target: "Open" },
+ *   states: { Open: { invoke: { src: "EditorChild" } } }
+ * })
+ *
+ * const editorAtom = AtomMachine.make(parent).child(EditorChild)
  * const editingAtom = AtomMachine.selectChild(editorAtom, "Editing")
- * // Atom<AsyncResult<Option<Editing>, StartError | ChildRuntimeError>>
+ *
+ * AtomRegistry.make().mount(editingAtom)
  * ```
  *
  * @category combinators
@@ -712,28 +730,24 @@ export const selectSnapshotChild: {
  * bridge and path return the same atom. Runtime failures remain in the typed
  * failure channel.
  *
- * **Example**
+ * **Example** (Matching the active state)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Machine } from "@typeonce/effect-machine"
  * import { AtomMachine } from "@typeonce/effect-machine/reactivity"
- * import { Schema } from "effect"
- * class Idle extends Schema.TaggedClass<Idle>("Idle")("Idle", {}) {
- * }
- * const States = Machine.state({ states: { Idle } })
- * const machine = Machine.make({
- *   root: States,
- *   events: Machine.eventsFromSchemas()
- * }).handle({
- *   initial: {
- *     target: "Idle"
- *   },
- *   states: {
- *     Idle: {}
- *   }
+ * import { AsyncResult, AtomRegistry } from "effect/reactivity"
+ * import { Option } from "effect"
+ *
+ * const States = Machine.state({ states: { Idle: {} } })
+ * const machine = Machine.make({ root: States, events: Machine.events({}) }).handle({
+ *   initial: { target: "Idle" }
  * })
- * const machineAtom = AtomMachine.make(machine)
- * const isIdleAtom = AtomMachine.matches(machineAtom, "Idle")
+ *
+ * const isIdleAtom = AtomMachine.matches(AtomMachine.make(machine), "Idle")
+ * const registry = AtomRegistry.make()
+ * registry.mount(isIdleAtom)
+ *
+ * AsyncResult.value(registry.get(isIdleAtom)) // => Option.some(true)
  * ```
  *
  * @category combinators
@@ -791,15 +805,36 @@ export const matches: {
  * {@link Machine.can}; done and stopped snapshots produce `false`, while
  * runtime and schema failures remain in the typed failure channel.
  *
- * **Example**
+ * **Example** (Asking whether a machine accepts an event)
  *
- * ```ts
- * const submitAllowed = AtomMachine.can(AuthEvents.Submitted())
- * const canSubmitAtom = submitAllowed(authMachineAtom)
+ * ```ts import.meta.vitest
+ * import { Machine } from "@typeonce/effect-machine"
+ * import { AtomMachine } from "@typeonce/effect-machine/reactivity"
+ * import { Atom, AtomRegistry } from "effect/reactivity"
+ * import { Schema } from "effect"
  *
- * const submitEvent = Atom.map(draftAtom, (draft) =>
- *   AuthEvents.Submitted({ draft }))
- * const reactiveSubmitAllowed = AtomMachine.can(submitEvent)
+ * const Events = Machine.events({ Submitted: { draft: Schema.String } })
+ * const machine = Machine.make({
+ *   root: Machine.state({ states: { Editing: {}, Sent: {} } }),
+ *   events: Events
+ * }).handle({
+ *   initial: { target: "Editing" },
+ *   states: {
+ *     Editing: { on: { Submitted: { target: "Sent", guard: ({ event }) => event.draft.length > 0 } } }
+ *   }
+ * })
+ *
+ * const machineAtom = AtomMachine.make(machine)
+ * const canSubmitAtom = AtomMachine.can(Events.Submitted({ draft: "a" }))(machineAtom)
+ *
+ * // The event can also come from an atom, so acceptance follows its value.
+ * const draftAtom = Atom.make("")
+ * const submitEvent = Atom.map(draftAtom, (draft) => Events.Submitted({ draft }))
+ * const reactiveCanSubmitAtom = AtomMachine.can(submitEvent)(machineAtom)
+ *
+ * const registry = AtomRegistry.make()
+ * registry.mount(canSubmitAtom)
+ * registry.mount(reactiveCanSubmitAtom)
  * ```
  *
  * @category combinators
@@ -1109,9 +1144,26 @@ export interface Bound<Services, RuntimeError = never> {
  * registry runtime mounted. Keys follow Effect `Equal` and `Hash` semantics.
  * The optional `label` function labels each public projected atom.
  *
- * **Example**
+ * **Example** (Keeping one machine per key)
  *
- * ```ts
+ * ```ts import.meta.vitest
+ * import { Machine } from "@typeonce/effect-machine"
+ * import { AtomMachine } from "@typeonce/effect-machine/reactivity"
+ * import { AtomRegistry } from "effect/reactivity"
+ * import { Schema } from "effect"
+ *
+ * const Events = Machine.events({ Finish: {} })
+ * const processMachine = Machine.make({
+ *   root: Machine.state({ states: { Running: {}, Ready: {} } }),
+ *   events: Events,
+ *   input: Schema.String
+ * }).handle({
+ *   initial: { target: "Running" },
+ *   states: {
+ *     Running: { on: { Finish: { target: "Ready" } } }
+ *   }
+ * })
+ *
  * const processAtoms = AtomMachine.family(processMachine, {
  *   atoms: {
  *     ready: AtomMachine.matches("Ready"),
@@ -1121,7 +1173,8 @@ export interface Bound<Services, RuntimeError = never> {
  * })
  *
  * const readyAtom = processAtoms.ready("effect")
- * const sendAtom = processAtoms.send("effect")
+ *
+ * AtomRegistry.make().mount(readyAtom)
  * ```
  *
  * @category constructors
@@ -1154,12 +1207,32 @@ export const family: <
  * Every projected atom retains the resulting child bridge while the projected
  * atom remains reachable. Keys follow Effect `Equal` and `Hash` semantics.
  *
- * **Example**
+ * **Example** (Keeping child atoms per key)
  *
- * ```ts
+ * ```ts import.meta.vitest
+ * import { Machine } from "@typeonce/effect-machine"
+ * import { AtomMachine } from "@typeonce/effect-machine/reactivity"
+ * import { Schema } from "effect"
+ *
+ * const plantMachine = Machine.make({
+ *   root: Machine.state({ states: { Growing: {}, Broken: {} } }),
+ *   events: Machine.events({ Break: {} }),
+ *   input: Schema.String
+ * }).handle({
+ *   initial: { target: "Growing" },
+ *   states: {
+ *     Growing: { on: { Break: { target: "Broken" } } }
+ *   }
+ * })
  * const Plant = Machine.childFamily(plantMachine)
+ * const parent = Machine.make({
+ *   root: Machine.state({ states: { Open: {} } }),
+ *   events: Machine.events({})
+ * }).handle({
+ *   initial: { target: "Open" }
+ * })
  *
- * const plantAtoms = AtomMachine.familyChild(parentMachineAtom, {
+ * const plantAtoms = AtomMachine.familyChild(AtomMachine.make(parent), {
  *   child: (plantId: string) => Plant(plantId),
  *   atoms: {
  *     broken: AtomMachine.matchesChild("Broken"),
@@ -1167,6 +1240,8 @@ export const family: <
  *     send: (child) => child.send
  *   }
  * })
+ *
+ * plantAtoms.broken("a")
  * ```
  *
  * @category constructors
@@ -1195,27 +1270,26 @@ export const familyChild: <
  * Use `bind(runtime).make(machine)` when the machine requires external
  * services.
  *
- * **Example**
+ * **Example** (Owning a machine with an atom)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { Machine } from "@typeonce/effect-machine"
  * import { AtomMachine } from "@typeonce/effect-machine/reactivity"
- * import { Schema } from "effect"
- * class Idle extends Schema.TaggedClass<Idle>("Idle")("Idle", {}) {
- * }
- * const States = Machine.state({ states: { Idle } })
- * const machine = Machine.make({
- *   root: States,
- *   events: Machine.eventsFromSchemas()
- * }).handle({
- *   initial: {
- *     target: "Idle"
- *   },
- *   states: {
- *     Idle: {}
- *   }
+ * import { AsyncResult, AtomRegistry } from "effect/reactivity"
+ * import { Option } from "effect"
+ *
+ * const States = Machine.state({ states: { Idle: {} } })
+ * const machine = Machine.make({ root: States, events: Machine.events({}) }).handle({
+ *   initial: { target: "Idle" }
  * })
+ *
  * const machineAtom = AtomMachine.make(machine)
+ * const registry = AtomRegistry.make()
+ * registry.mount(machineAtom.result)
+ *
+ * const path = AsyncResult.value(registry.get(machineAtom.result)).pipe(Option.map(({ state }) => state.path))
+ *
+ * path // => Option.some("Idle")
  * ```
  *
  * @category constructors
@@ -1283,13 +1357,28 @@ export const make: {
  * bridge type. Every call creates a fresh `MachineAtom`; it does not cache by
  * input or start the machine before an `AtomRegistry` reads or mounts it.
  *
- * **Example**
+ * **Example** (Making machine atoms from input)
  *
- * ```ts
+ * ```ts import.meta.vitest
+ * import { Machine } from "@typeonce/effect-machine"
+ * import { AtomMachine } from "@typeonce/effect-machine/reactivity"
+ * import { Schema } from "effect"
+ *
+ * const searchMachine = Machine.make({
+ *   root: Machine.state({ fields: { query: Schema.String } }),
+ *   events: Machine.events({}),
+ *   input: Schema.Struct({ query: Schema.String })
+ * }).handle({
+ *   root: ({ input }) => ({ query: input.query })
+ * })
+ *
  * const makeSearchMachine = AtomMachine.factory(searchMachine)
  * const search = makeSearchMachine({ query: "effect" })
  *
  * type SearchMachineAtom = ReturnType<typeof makeSearchMachine>
+ * const typed: SearchMachineAtom = search
+ *
+ * typed === search // => true
  * ```
  *
  * @category constructors
