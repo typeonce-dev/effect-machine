@@ -77,7 +77,7 @@ const pathName = (path: string): string => JSON.stringify(path === "" ? "root" :
 /** Public declaration represented by a retained transition branch. */
 export const branchTargetApi = (branch: VisualizationBranch): string | undefined => {
   const { selection } = branch
-  if (selection.kind === "none") return "{ none: true }"
+  if (selection.kind === "none") return "{ stay: true }"
   const path = selection.path
   if (path === null) return undefined
   if (selection.scope === "initial") return "initialConfiguration"

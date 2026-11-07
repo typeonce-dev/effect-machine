@@ -48,16 +48,6 @@ const AuthEvents = Machine.eventsFromSchemas(Schema.TaggedUnion({
   Submit: { route: Schema.Literals(["verification", "login", "invalid"]) }
 }))
 export const layoutResilienceMachine = Machine.make({
-  branches: {
-    transition4: {
-      requestVerification: {
-        target: "Editing.RequestingVerification",
-        title: "Request a verification code"
-      },
-      login: { target: "Editing.SubmittingLogin", title: "Submit password login" },
-      invalid: { target: "Editing.Form.Failed", title: "Show validation failure" }
-    }
-  },
   effects: {
     source1: ({ containingState }: {
       readonly containingState: {
@@ -101,27 +91,34 @@ export const layoutResilienceMachine = Machine.make({
           },
           on: {
             EmailChanged: {
-              update: "Editing",
-              data: ({ ancestors: { "Editing": current }, event }) => ({ ...current, email: event.value })
+              update: {
+                Editing: ({ ancestors: { "Editing": current }, event }) => ({ ...current, email: event.value })
+              }
             },
             LoginMethodChanged: {
-              update: "Editing",
-              data: ({ ancestors: { "Editing": current }, event }) => ({ ...current, loginMethod: event.value })
+              update: {
+                Editing: ({ ancestors: { "Editing": current }, event }) => ({ ...current, loginMethod: event.value })
+              }
             },
             PasswordChanged: {
-              update: "Editing",
-              data: ({ ancestors: { "Editing": current }, event }) => ({ ...current, password: event.value })
+              update: {
+                Editing: ({ ancestors: { "Editing": current }, event }) => ({ ...current, password: event.value })
+              }
             },
             Submit: {
-              branches: "transition4",
+              branches: [{ target: "Editing.RequestingVerification" }, { target: "Editing.SubmittingLogin" }, {
+                target: "Editing.Form.Failed"
+              }],
               resolve: ({ event, select }) => {
                 if (event.route === "login") {
-                  return select.login({})
+                  return select.target("Editing.SubmittingLogin", {})
                 }
                 if (event.route === "verification") {
-                  return select.requestVerification({})
+                  return select.target("Editing.RequestingVerification", {})
                 }
-                return select.invalid({ data: { message: "Enter valid authentication details." } })
+                return select.target("Editing.Form.Failed", {
+                  data: { message: "Enter valid authentication details." }
+                })
               }
             }
           },

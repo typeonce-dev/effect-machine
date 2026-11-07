@@ -53,8 +53,7 @@ describe("declarative transitions", () => {
         }
       })
       const effects = { load: Effect.succeed(1) }
-      const branches = { finish: { done: { target: "Done" } } } as const
-      const definition = Machine.make({ root, events: Machine.events({}), effects, branches })
+      const definition = Machine.make({ root, events: Machine.events({}), effects })
       effects.load = Effect.succeed(99)
       const machine = definition.handle({
         initial: {
@@ -64,7 +63,10 @@ describe("declarative transitions", () => {
           Loading: {
             invoke: {
               src: "load",
-              onDone: { branches: "finish", resolve: ({ output, select }) => select.done({ data: { value: output } }) }
+              onDone: {
+                branches: [{ target: "Done" }],
+                resolve: ({ output, select }) => select.target("Done", { data: { value: output } })
+              }
             }
           },
           Done: { output: ({ state }) => state.value }
@@ -144,10 +146,7 @@ describe("declarative transitions", () => {
       let calls = 0
       const machine = Machine.make({
         root: Root,
-        events,
-        branches: {
-          checkout: { review: { target: "Checkout" } }
-        }
+        events
       }).handle({
         initial: {
           target: "Idle"
@@ -156,10 +155,10 @@ describe("declarative transitions", () => {
           Idle: {
             on: {
               Complete: {
-                branches: "checkout",
+                branches: [{ target: "Checkout" }],
                 resolve: ({ event, select }) => {
                   calls++
-                  return select.review({
+                  return select.target("Checkout", {
                     data: { orderId: "order-1" },
                     states: { Review: { data: { total: event.count } } }
                   })

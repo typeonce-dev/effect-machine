@@ -11,7 +11,7 @@ const makeWatcher = (released: Ref.Ref<boolean>) =>
     streams: { watch: Stream.never.pipe(Stream.ensuring(Ref.set(released, true))) }
   }).handle({
     initial: { target: "Watching" },
-    states: { Watching: { invoke: { src: "watch", onDone: { none: true } } } }
+    states: { Watching: { invoke: { src: "watch", onDone: { stay: true } } } }
   })
 
 const strategies: ReadonlyArray<Runtime.ProcessRuntimeStrategy> = ["generic", "compiled"]

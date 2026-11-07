@@ -11,7 +11,6 @@ class CompositionService extends Context.Service<CompositionService, string>()("
 class CompositionFailure extends Data.TaggedError("CompositionFailure")<{}> {
 }
 const machine = Machine.make({
-  branches: { enter: { app: { target: "App" } } },
   root: States,
   events: Machine.eventsFromSchemas()
 })
@@ -85,9 +84,9 @@ const handled = machine.handle({
         },
         Route: {
           choice: {
-            branches: "enter",
+            branches: [{ target: "App" }],
             resolve: ({ select }) =>
-              select.app({
+              select.target("App", {
                 data: App.make({}),
                 states: {
                   Workspace: {

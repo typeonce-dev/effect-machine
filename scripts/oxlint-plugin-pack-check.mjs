@@ -97,14 +97,14 @@ try {
     join(consumer, ".oxlintrc.json"),
     JSON.stringify({
       jsPlugins: ["@typeonce/oxlint-plugin-effect-machine"],
-      rules: { "effect-machine/no-redundant-resolve": "error" }
+      rules: { "effect-machine/no-conditional-stay-branch": "error" }
     }, null, 2)
   )
 
   const fixture = join(consumer, "machine.ts")
   await writeFile(
     fixture,
-    `import { Machine } from "@typeonce/effect-machine"\nMachine.make({ root: Machine.state({}), events: Machine.events({ Ignore: {} }) }).handle({ on: { Ignore: { none: true, resolve: () => {} } } })\n`
+    `import { Machine } from "@typeonce/effect-machine"\nMachine.make({ root: Machine.state({}), events: Machine.events({ Save: {} }) }).handle({ states: { Idle: { on: { Save: { branches: [{ target: "Idle" }, { stay: true }], resolve: ({ state, select }) => state.ok ? select.target("Idle") : select.stay() } } } } })\n`
   )
 
   run(process.execPath, [
@@ -115,10 +115,9 @@ try {
      const expected = [
        "no-async-planning-callback",
        "no-browser-api-in-planning",
-       "no-conditional-none-branch",
+       "no-conditional-stay-branch",
        "no-conflicting-invocation-identity",
        "no-nondeterministic-planning",
-       "no-redundant-resolve",
        "prefer-inline-handle"
      ];
      const actual = Object.keys(plugin.rules).sort();
@@ -132,17 +131,11 @@ try {
     encoding: "utf8"
   })
   const lintOutput = `${lint.stdout ?? ""}\n${lint.stderr ?? ""}`
-  if (lint.status === 0 || !lintOutput.includes("effect-machine(no-redundant-resolve)")) {
-    throw new Error(`packed plugin did not report no-redundant-resolve\n${lintOutput.trim()}`)
+  if (lint.status === 0 || !lintOutput.includes("effect-machine(no-conditional-stay-branch)")) {
+    throw new Error(`packed plugin did not report no-conditional-stay-branch\n${lintOutput.trim()}`)
   }
 
-  run(oxlint, ["-c", ".oxlintrc.json", "--fix", "machine.ts"], { cwd: consumer })
-  const fixed = await readFile(fixture, "utf8")
-  if (!fixed.includes("Ignore: { none: true }") || fixed.includes("resolve:")) {
-    throw new Error(`packed plugin did not apply its fixer\n${fixed}`)
-  }
-
-  console.log("packed Oxlint plugin import, configuration, diagnostic, and fixer passed")
+  console.log("packed Oxlint plugin import, configuration, and diagnostic passed")
 } finally {
   await rm(destination, { recursive: true, force: true })
 }

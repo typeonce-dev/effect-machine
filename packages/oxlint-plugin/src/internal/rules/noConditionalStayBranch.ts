@@ -1,13 +1,6 @@
 import type { ESTree, Rule } from "@oxlint/plugins"
 import { resolvedVariable, staticMemberName, unwrapExpression } from "../ast.js"
-import {
-  isMachineHandleCall,
-  isMachineMakeCall,
-  type MachineBindings,
-  makeMachineBindings,
-  recordMachineDefinition,
-  recordMachineImport
-} from "../imports.js"
+import { type MachineBindings, makeMachineBindings, recordMachineDefinition, recordMachineImport } from "../imports.js"
 import { isEventHandlerProperty, isPlanningCallback, type PlanningFunction } from "../planning.js"
 
 const propertyKey = (node: ESTree.Node): string | undefined => {
@@ -24,60 +17,21 @@ const findProperty = (
 
 const isTrueLiteral = (node: ESTree.Node | undefined): boolean => node?.type === "Literal" && node.value === true
 
-/** The `make` configuration that a `.handle(...)` call implements, when it is declared in this module. */
-const makeConfiguration = (
-  handle: ESTree.CallExpression,
-  bindings: MachineBindings
-): ESTree.ObjectExpression | undefined => {
-  if (handle.callee.type !== "MemberExpression") return undefined
-  const callee = unwrapExpression(handle.callee.object)
-  let receiver: ESTree.Node | null | undefined = callee
-  if (callee.type === "Identifier") {
-    const declaration = resolvedVariable(bindings.context, callee)?.identifiers[0]?.parent
-    receiver = declaration?.type === "VariableDeclarator" ? declaration.init : undefined
+/** Whether a branch list declares `key: true`, or `undefined` when an entry cannot be read statically. */
+const declares = (branches: ESTree.ArrayExpression, key: string): boolean | undefined => {
+  let found = false
+  for (const entry of branches.elements) {
+    if (entry?.type !== "ObjectExpression") return undefined
+    if (isTrueLiteral(findProperty(entry, key)?.value)) found = true
   }
-  if (receiver?.type !== "CallExpression" || !isMachineMakeCall(receiver, bindings)) return undefined
-  const configuration = receiver.arguments[0]
-  return configuration?.type === "ObjectExpression" ? configuration : undefined
-}
-
-const enclosingHandleCall = (
-  node: ESTree.Node,
-  bindings: MachineBindings
-): ESTree.CallExpression | undefined => {
-  let current: ESTree.Node | null = node.parent
-  while (current !== null && current.type !== "Program") {
-    if (current.type === "CallExpression" && isMachineHandleCall(current, bindings)) return current
-    current = current.parent
-  }
-  return undefined
-}
-
-/** Keys of the branches declared as `{ none: true }` in one named group. */
-const noneBranches = (
-  configuration: ESTree.ObjectExpression,
-  group: string
-): ReadonlySet<string> => {
-  const keys = new Set<string>()
-  const groups = findProperty(configuration, "branches")?.value
-  if (groups?.type !== "ObjectExpression") return keys
-  const branches = findProperty(groups, group)?.value
-  if (branches?.type !== "ObjectExpression") return keys
-  for (const branch of branches.properties) {
-    const key = propertyKey(branch)
-    if (
-      key !== undefined && branch.type === "Property" && branch.value.type === "ObjectExpression" &&
-      isTrueLiteral(findProperty(branch.value, "none")?.value)
-    ) keys.add(key)
-  }
-  return keys
+  return found
 }
 
 interface Selectors {
   /** Identifiers bound to the whole `select` object, or to the resolver context. */
   readonly select: ReadonlySet<ESTree.Node>
   readonly context: ReadonlySet<ESTree.Node>
-  /** Identifiers bound to one destructured selector, by branch key. */
+  /** Identifiers bound to one destructured `select` method, by method name. */
   readonly aliases: ReadonlyMap<ESTree.Node, string>
 }
 
@@ -114,7 +68,7 @@ const bindsTo = (
     ? resolvedVariable(bindings.context, node)?.identifiers.find((identifier) => declarations.has(identifier))
     : undefined
 
-/** The branch key selected by a returned selector call such as `select.key()` or `alias.from()`. */
+/** The method selected by a returned call such as `select.stay()` or a destructured `stay()`. */
 const selectedBranch = (
   node: ESTree.Expression,
   selectors: Selectors,
@@ -210,17 +164,17 @@ const resolverOutcomes = (callback: PlanningFunction): ReadonlyArray<Outcome> =>
   return outcomes
 }
 
-export const noConditionalNoneBranch: Rule = {
+export const noConditionalStayBranch: Rule = {
   meta: {
     type: "problem",
     docs: {
-      description: "Require declinable resolvers when a none branch is selected conditionally.",
+      description: "Require a decline entry when a stay branch is selected conditionally.",
       recommended: true
     },
     schema: [],
     messages: {
-      conditionalNoneBranch:
-        "A conditionally selected `none` branch still accepts the event for `Machine.can`; declare `declinable: true` and return `decline()` when the event must be refused."
+      conditionalStayBranch:
+        "A conditionally selected `stay` branch still accepts the event for `Machine.can`; add `{ decline: true }` to branches and return `select.decline()` when the event must be refused."
     }
   },
   create(context) {
@@ -232,28 +186,18 @@ export const noConditionalNoneBranch: Rule = {
         const callback = node.value
         if (callback.type !== "ArrowFunctionExpression" && callback.type !== "FunctionExpression") return
         const transition = node.parent
-        const group = findProperty(transition, "branches")?.value
-        if (group?.type !== "Literal" || typeof group.value !== "string") return
-        const declinable = findProperty(transition, "declinable")
-        if (declinable !== undefined && (isTrueLiteral(declinable.value) || declinable.value.type !== "Literal")) {
-          return
-        }
+        const branches = findProperty(transition, "branches")?.value
+        if (branches?.type !== "ArrayExpression") return
+        if (declares(branches, "stay") !== true || declares(branches, "decline") !== false) return
         if (!isEventHandlerProperty(transition.parent, bindings) || !isPlanningCallback(callback, bindings)) return
-
-        const handle = enclosingHandleCall(transition, bindings)
-        const configuration = handle === undefined ? undefined : makeConfiguration(handle, bindings)
-        if (configuration === undefined) return
-        const none = noneBranches(configuration, group.value)
-        if (none.size === 0) return
         const selectors = resolverSelectors(callback)
         if (selectors === undefined) return
 
         const outcomes = resolverOutcomes(callback)
         for (const outcome of outcomes) {
           if (!outcome.conditional && outcomes.length === 1) continue
-          const branch = selectedBranch(outcome.expression, selectors, bindings)
-          if (branch !== undefined && none.has(branch)) {
-            context.report({ node: outcome.expression, messageId: "conditionalNoneBranch" })
+          if (selectedBranch(outcome.expression, selectors, bindings) === "stay") {
+            context.report({ node: outcome.expression, messageId: "conditionalStayBranch" })
           }
         }
       },

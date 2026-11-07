@@ -23,8 +23,8 @@ describe("MachineTest invariants", () => {
     states: {
       idle: {
         on: {
-          Tick: { none: true },
-          Internal: { none: true }
+          Tick: { stay: true },
+          Internal: { stay: true }
         }
       }
     }

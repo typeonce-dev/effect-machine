@@ -51,8 +51,7 @@ const inspection: InspectionApi<TestMachine, { readonly active: boolean }> = {
       branches: [
         {
           type: "branch",
-          key: "approved",
-          title: "approved %%\nnow",
+          key: "approved %%\nnow",
           target: "Root.Done",
           selection: { kind: "state", scope: "local", path: "Root.Done" },
           updates: []
@@ -60,7 +59,6 @@ const inspection: InspectionApi<TestMachine, { readonly active: boolean }> = {
         {
           type: "branch",
           key: "unchanged",
-          title: "unchanged",
           target: undefined,
           selection: { kind: "none", scope: "local", path: undefined },
           updates: []

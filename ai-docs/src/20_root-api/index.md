@@ -74,9 +74,9 @@ that name. It is not a transition destination.
 `{ initialize: ... }` reconstructs root data and follows its initial
 declarations using fresh machine input: a value or a callback of the transition
 context. A machine without input declares `{ initialize: true }`. `initialize`
-rejects `target`, `update`, `history`, `none`, `data`, and `decoded`. A named
-branch declares `{ initialize: true }`, and its resolver passes the input with
-`select.branch({ input })`.
+rejects `target`, `update`, `history`, `stay`, `data`, and `decoded`. A `branches`
+entry declares `{ initialize: true }`, and its resolver passes the input with
+`select.initialize({ input })`.
 
 Initializing root retains its lifecycle unless it is reentered. Put a machine-wide
 reset handler at root and use `reenter: true` to exit and enter root as well as
@@ -85,11 +85,11 @@ reentry, retained root work continues; it does not automatically acquire new
 construction values. Ordinary transition conflict and lifecycle rules still apply.
 This does not create a new machine reference or discard history records.
 
-`{ update: "root", data: ... }` instead replaces root's complete value,
+`{ update: { root: ... } }` instead replaces root's complete value,
 retaining its active children and running work. It takes no input and does not
 run initial constructors. Other source/ancestor updates follow the same rules.
 
-### Inline and named construction
+### Inline and branching construction
 
 Ordinary transitions stay inline:
 
@@ -102,32 +102,21 @@ Load: {
 
 Targeting a compound or parallel state follows its initial declarations. Event
 transitions use `target`, never `initial`. `initial` names only handler startup
-edges. `history` restores a declared history state; `none: true` accepts an
+edges. `history` restores a declared history state; `stay: true` accepts an
 event without changing its target configuration.
 
-Declare branch topology in `make` when a resolver chooses an outcome, builds an
-explicit subtree, or enqueues commands:
-
-```ts
-branches: {
-  open: {
-    checkout: { target: "Checkout" },
-    unchanged: { none: true }
-  }
-}
-```
-
-The resolver calls a constructor bound to that declaration:
+List `branches` next to `resolve` when a transition chooses an outcome or builds
+an explicit subtree. The compiler checks one against the other in both directions:
 
 ```ts
 Open: {
-  branches: "open",
+  branches: [{ target: "Checkout" }, { stay: true }],
   resolve: ({ event, select }) => event.open
-    ? select.checkout({
+    ? select.target("Checkout", {
       data: { cartId: event.cartId },
       states: { Review: { data: { total: event.total } } }
     })
-    : select.unchanged()
+    : select.stay()
 }
 ```
 
@@ -142,35 +131,34 @@ requires every region. Source-local parallel construction can select a single
 region while retaining its active siblings, preserving the existing scope rules.
 Names under `states` cannot collide with construction metadata.
 
-Declared branch targets remain inspectable without executing a resolver.
+Each branch's destination remains inspectable without executing `resolve`.
 Dynamically selected descendants are visible after resolution; this API does not
 add static analysis of resolver bodies.
 
 ### Retained-owner updates
 
-An inline combined transition keeps `target` and `update` paths separate:
+An inline combined transition keeps the target's value and the owner's value
+separate, so `data` only ever means the target's value:
 
 ```ts
 Save: {
   target: "Checkout.Saving",
-  update: "Checkout",
-  data: ({ event }) => ({
-    target: { requestId: event.requestId },
-    update: { cartId: event.cartId }
-  })
+  data: ({ event }) => ({ requestId: event.requestId }),
+  update: { Checkout: ({ event }) => ({ cartId: event.cartId }) }
 }
 ```
 
-For the same pair declared as a named branch, construct both in one call:
+A `branches` entry names the same pair, `{ target: "Checkout.Saving", update: "Checkout" }`,
+and its call constructs both:
 
 ```ts
-select.saved({
+select.target("Checkout.Saving", {
   data: { requestId: event.requestId },
-  update: { data: { cartId: event.cartId } }
+  update: { Checkout: { cartId: event.cartId } }
 })
 ```
 
-`update` is required only for a branch declaring an owner update. It is not an
+`update` takes exactly one owner. It is not an
 arbitrary nested-state operation. The owner must be active and retained across
 the transition. Both complete values validate before either is committed.
 
@@ -198,6 +186,7 @@ including required ancestors and parallel siblings. Its root data is state data,
 not startup input. `Machine.resume` restores a validated snapshot without rerunning
 startup constructors.
 
-`guard` declines before construction. A resolver may return `decline()` only with
-`declinable: true`. Effect, Stream, timer, logic, child invocation, completion,
+`guard` declines before construction. A resolver may return `select.decline()` only
+when `branches` lists `{ decline: true }`. Both exist only on `on` handlers and
+`always`. Effect, Stream, timer, logic, child invocation, completion,
 entry/exit, and required outcome channels retain their existing contracts.

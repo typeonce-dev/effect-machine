@@ -37,8 +37,8 @@ const editing = {
     // The committed value comes from a raised event, so observing it requires
     // the whole macrostep, including its emission, to have run.
     Pasted: {
-      none: true,
-      resolve: ({ event }: { readonly event: Pasted }, enqueue: Machine.Enqueue<Normalized, Published>) => {
+      stay: true,
+      commands: ({ event }: { readonly event: Pasted }, enqueue: Machine.Enqueue<Normalized, Published>) => {
         const value = event.value.trim()
         enqueue.raise(new Normalized({ value }))
         enqueue.emit(Emissions.Published({ value }))

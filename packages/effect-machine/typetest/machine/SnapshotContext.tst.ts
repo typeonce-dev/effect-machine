@@ -32,10 +32,6 @@ const States = Machine.state({
 describe("Machine transition snapshot context", () => {
   it("infers the complete machine snapshot for event, always, and onDone handlers", () => {
     Machine.make({
-      branches: {
-        transition1: { destination: { target: "Root.Left.LeftIdle" } },
-        transition2: { destination: { target: "Root.Left.LeftDone" } }
-      },
       root: States,
       events: Machine.eventsFromSchemas(Advance)
     }).handle({
@@ -55,31 +51,31 @@ describe("Machine transition snapshot context", () => {
                 target: "Root.Left.LeftIdle"
               },
               onDone: {
-                branches: "transition1",
-                resolve: ({ snapshot, select: { destination: target } }) => {
+                branches: [{ target: "Root.Left.LeftIdle" }],
+                resolve: ({ snapshot, select }) => {
                   expect(snapshot).type.toBe<Machine.Snapshot<typeof States>>()
                   expect(States.matches).type.toBeCallableWith(snapshot, "Root.Right.RightIdle")
                   expect(States.get).type.toBeCallableWith(snapshot, "Root.Right.RightIdle")
                   expect(States.getSnapshot).type.toBeCallableWith(snapshot, "Root.Right.RightIdle")
-                  return target({ data: new LeftIdle({}), decoded: true })
+                  return select.target("Root.Left.LeftIdle", { data: new LeftIdle({}), decoded: true })
                 }
               },
               states: {
                 LeftIdle: {
                   always: {
-                    none: true,
-                    resolve: ({ snapshot }) => {
+                    stay: true,
+                    commands: ({ snapshot }) => {
                       expect(snapshot).type.toBe<Machine.Snapshot<typeof States>>()
                       return undefined
                     }
                   },
                   on: {
                     Advance: {
-                      branches: "transition2",
-                      resolve: ({ snapshot, select: { destination: target } }) => {
+                      branches: [{ target: "Root.Left.LeftDone" }],
+                      resolve: ({ snapshot, select }) => {
                         expect(snapshot).type.toBe<Machine.Snapshot<typeof States>>()
                         expect(States.matches(snapshot, "Root.Right.RightIdle")).type.toBe<boolean>()
-                        return target({ data: new LeftDone({}), decoded: true })
+                        return select.target("Root.Left.LeftDone", { data: new LeftDone({}), decoded: true })
                       }
                     }
                   }
@@ -117,7 +113,6 @@ describe("Machine transition snapshot context", () => {
       }
     })
     Machine.make({
-      branches: { transition1: { destination: { target: "Flow.Active" } } },
       root: choiceStates,
       events: Machine.eventsFromSchemas()
     }).handle({
@@ -137,10 +132,10 @@ describe("Machine transition snapshot context", () => {
           states: {
             Routing: {
               choice: {
-                branches: "transition1",
+                branches: [{ target: "Flow.Active" }],
                 resolve: (context) => {
                   expect(context).type.not.toHaveProperty("snapshot")
-                  return context.select.destination({ data: new Active({}), decoded: true })
+                  return context.select.target("Flow.Active", { data: new Active({}), decoded: true })
                 }
               }
             },

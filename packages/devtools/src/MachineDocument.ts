@@ -149,8 +149,7 @@ export const Branch = Schema.Union([
   Schema.Struct({
     ...BranchFields,
     type: Schema.tag("branch"),
-    key: Schema.String,
-    title: Schema.String
+    key: Schema.String
   })
 ])
 

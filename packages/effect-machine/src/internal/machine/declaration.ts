@@ -19,7 +19,6 @@ export interface Declaration {
   /** Declared state paths keyed by internal identifier; the root is `""`. */
   readonly paths: ReadonlyMap<string, PathKind>
   readonly sources: ReadonlyMap<string, Source>
-  readonly branches: ReadonlyMap<string, Readonly<Record<string, Readonly<Record<string, unknown>>>>>
 }
 const record = (value: unknown, message: string): Record<string, unknown> => {
   if (typeof value !== "object" || value === null || Array.isArray(value)) throw new Error(message)
@@ -56,43 +55,7 @@ export const capture = (
       sources.set(name, Object.freeze({ kind, value }))
     }
   }
-  const branches = new Map<string, Readonly<Record<string, Readonly<Record<string, unknown>>>>>()
-  if (config.branches !== undefined) {
-    for (const [name, group] of Object.entries(record(config.branches, "Machine branches must be a map"))) {
-      const branchRecord = record(group, `Machine branches "${name}" must be a branch record`)
-      for (const key of Reflect.ownKeys(branchRecord)) {
-        if (typeof key !== "string") throw new Error("Machine branches cannot use symbol keys")
-        if (key.length === 0 || String(Number(key)) === key) {
-          throw new Error("Machine branches require non-index string branch keys")
-        }
-      }
-      const entries = Object.entries(branchRecord)
-      if (entries.length === 0) throw new Error(`Machine branches "${name}" requires a branch`)
-      branches.set(
-        name,
-        Object.freeze(Object.fromEntries(entries.map(([key, value]) => {
-          const spec = { ...record(value, `Machine branch "${name}.${key}" must be a declaration`) }
-          for (const field of Reflect.ownKeys(spec)) {
-            if (
-              typeof field !== "string" ||
-              !["target", "update", "history", "none", "initialize", "title"].includes(field)
-            ) {
-              throw new Error(`Machine branch "${name}.${key}" contains an unknown declaration field`)
-            }
-          }
-          if (spec.initialize !== undefined && spec.initialize !== true) {
-            throw new Error(`Machine branch "${name}.${key}" declares initialize: true; its resolver supplies input`)
-          }
-          if (spec.title !== undefined && (typeof spec.title !== "string" || spec.title.length === 0)) {
-            throw new Error("Machine branch title must be a non-empty string")
-          }
-          selection({ root, input, paths, sources, branches }, spec)
-          return [key, Object.freeze(spec)]
-        })))
-      )
-    }
-  }
-  return { root, input, paths, sources, branches }
+  return { root, input, paths, sources }
 }
 const reference = (
   value: unknown,
@@ -105,26 +68,38 @@ const reference = (
   }
   return { path, kind }
 }
+/** The single owner named by a transition's `update` record. */
+export const updateOwner = (update: unknown): string => {
+  const keys = record(update, "Machine update must be a record with one owner")
+  const owners = Object.keys(keys)
+  if (owners.length !== 1 || Object.getOwnPropertySymbols(keys).length > 0) {
+    throw new Error(`Machine update takes one owner, got: ${owners.join(", ")}`)
+  }
+  return owners[0]!
+}
 export const selection = (
   declaration: Declaration,
   config: Readonly<Record<string, unknown>>
 ): Topology.TargetSelection => {
-  const keys = ["target", "history", "none", "initialize"].filter((key) => config[key] !== undefined)
-  if (keys.length === 0 && config.update !== undefined) {
-    const owner = reference(config.update, declaration)
-    if (owner.kind !== "state") throw new Error("Machine update requires an active state reference")
-    return Topology.makeTargetSelection("update", owner.path, "branch")
+  const keys = ["target", "history", "stay", "initialize"].filter((key) => config[key] !== undefined)
+  const owner = typeof config.update === "string" || config.update === undefined
+    ? config.update
+    : updateOwner(config.update)
+  if (keys.length === 0 && owner !== undefined) {
+    const reference_ = reference(owner, declaration)
+    if (reference_.kind !== "state") throw new Error("Machine update requires an active state reference")
+    return Topology.makeTargetSelection("update", reference_.path, "branch")
   }
+  if (keys.length === 0 && config.reenter === true) return Topology.noneTargetSelection
   if (keys.length !== 1) throw new Error("Machine transition must declare exactly one destination operation")
   const key = keys[0]!
-  if (key === "none") {
-    if (config.none !== true || config.update !== undefined) {
-      throw new Error("Machine targetless transition requires none: true")
-    }
+  if (key === "stay") {
+    if (config.stay !== true || owner !== undefined) throw new Error("Machine stay requires stay: true alone")
+    if (config.reenter !== undefined) throw new Error("Machine stay cannot reenter; use reenter: true alone")
     return Topology.noneTargetSelection
   }
   if (key === "initialize") {
-    if (config.update !== undefined) throw new Error("Machine initialize cannot update a retained owner")
+    if (owner !== undefined) throw new Error("Machine initialize cannot update a retained owner")
     return Topology.makeTargetSelection("state", "", "branch")
   }
   const ref = reference(config[key], declaration)
@@ -134,7 +109,7 @@ export const selection = (
   if ((key === "history") !== (ref.kind === "history")) {
     throw new Error("Machine history references require a history transition")
   }
-  const update = config.update === undefined ? undefined : reference(config.update, declaration).path
+  const update = owner === undefined ? undefined : reference(owner, declaration).path
   if (update !== undefined && key !== "target") throw new Error("Machine owner updates require an ordinary destination")
   return Topology.makeTargetSelection(
     ref.kind,

@@ -32,8 +32,8 @@ describe("MachineTest exploration", () => {
     states: {
       counter: {
         on: {
-          Increment: { none: true },
-          Internal: { none: true }
+          Increment: { stay: true },
+          Internal: { stay: true }
         }
       }
     }

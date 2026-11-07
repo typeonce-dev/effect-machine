@@ -346,39 +346,36 @@ Changes to `draftAtom` recompute acceptance. The event atom contains the event
 input itself rather than an `AsyncResult`.
 
 `can` is `true` whenever the active configuration selects a transition. A
-`{ none: true }` branch is a selected transition: it accepts the event without
-changing state. A resolver that falls back to a `none` branch therefore keeps
-the button enabled:
+`{ stay: true }` branch is a selected transition: it accepts the event without
+changing state. A resolver that falls back to `stay` therefore keeps the button
+enabled:
 
 ```ts
 // Before: an incomplete form still accepts Submitted, so `can` is true.
-// In make: branches: { submit: { review: { target: "Reviewing" }, incomplete: { none: true } } }
 Submitted: {
-  branches: "submit",
+  branches: [{ target: "Reviewing" }, { stay: true }],
   resolve: ({ state, select }) =>
-    state.email.length > 0 ? select.review() : select.incomplete()
+    state.email.length > 0 ? select.target("Reviewing") : select.stay()
 }
 ```
 
 When the event must be refused, decline it. Use `guard` for an ordinary
-transition, or `declinable: true` with `decline()` in a resolver:
+transition, or `{ decline: true }` with `select.decline()` in a resolver:
 
 ```ts
 // After: an incomplete form declines Submitted, so `can` is false.
 Submitted: { target: "Reviewing", guard: ({ state }) => state.email.length > 0 }
 
 // A resolver that needs commands or construction declines explicitly.
-// In make: branches: { submit: { review: { target: "Reviewing" } } }
 Submitted: {
-  branches: "submit",
-  declinable: true,
-  resolve: ({ state, select, decline }) =>
-    state.email.length > 0 ? select.review() : decline()
+  branches: [{ target: "Reviewing" }, { decline: true }],
+  resolve: ({ state, select }) =>
+    state.email.length > 0 ? select.target("Reviewing") : select.decline()
 }
 ```
 
-Keep `none` for events that are deliberately accepted and ignored. The
-`effect-machine/no-conditional-none-branch` lint rule reports the conditional
+Keep `stay` for events that are deliberately accepted and ignored. The
+`effect-machine/no-conditional-stay-branch` lint rule reports the conditional
 fallback.
 
 Query acceptance during render through `AtomMachine.can(event)(machine)`. Do

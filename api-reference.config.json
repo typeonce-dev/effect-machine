@@ -172,12 +172,12 @@
               "label": "Inline transitions"
             },
             {
-              "reflection": "Machine.BranchDeclaration",
-              "label": "Named branch declarations"
+              "reflection": "Machine.BranchEntry",
+              "label": "Branch entries"
             },
             {
-              "reflection": "Machine.DeclineCapability",
-              "label": "Declinable transitions"
+              "reflection": "Machine.BranchSelect",
+              "label": "Branch selection"
             },
             {
               "reflection": "Enqueue",

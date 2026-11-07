@@ -13,10 +13,6 @@ describe("machine scheduling", () => {
     Effect.gen(function*() {
       const states = Machine.state({ states: { SchedulingActive } })
       const machine = Machine.make({
-        branches: {
-          transition1: { destination: { target: "SchedulingActive" } },
-          transition2: { destination: { target: "SchedulingActive" } }
-        },
         root: states,
         events: Machine.eventsFromSchemas(StartBurst),
         internalEvents: Machine.internalEventsFromSchemas(Burst)
@@ -30,20 +26,20 @@ describe("machine scheduling", () => {
           SchedulingActive: {
             on: {
               StartBurst: {
-                branches: "transition1",
-                resolve: ({ state, select: { destination: target } }, enqueue) => {
+                branches: [{ target: "SchedulingActive" }],
+                resolve: ({ state, select }, enqueue) => {
                   enqueue.raise(new Burst({}))
-                  return target({ data: state, decoded: true })
+                  return select.target("SchedulingActive", { data: state, decoded: true })
                 }
               },
               Burst: {
-                branches: "transition2",
-                resolve: ({ state, select: { destination: target } }, enqueue) => {
+                branches: [{ target: "SchedulingActive" }],
+                resolve: ({ state, select }, enqueue) => {
                   const count = state.count + 1
                   if (count < burstSize) {
                     enqueue.raise(new Burst({}))
                   }
-                  return target({ data: new SchedulingActive({ count }), decoded: true })
+                  return select.target("SchedulingActive", { data: new SchedulingActive({ count }), decoded: true })
                 }
               }
             }

@@ -30,7 +30,6 @@ const NavigationStates = Machine.state({
   }
 })
 const navigationMachine = Machine.make({
-  branches: { transition1: { destination: { target: "app" } } },
   root: NavigationStates,
   events: Machine.eventsFromSchemas(Go)
 }).handle({
@@ -41,9 +40,13 @@ const navigationMachine = Machine.make({
     off: {
       on: {
         Go: {
-          branches: "transition1",
-          resolve: ({ select: { destination: target } }) =>
-            target({ data: new App({}), decoded: true, states: { two: { data: new Two({}), decoded: true } } })
+          branches: [{ target: "app" }],
+          resolve: ({ select }) =>
+            select.target("app", {
+              data: new App({}),
+              decoded: true,
+              states: { two: { data: new Two({}), decoded: true } }
+            })
         }
       }
     },
@@ -59,10 +62,6 @@ const navigationMachine = Machine.make({
   }
 })
 const raisedNavigationMachine = Machine.make({
-  branches: {
-    transition1: { destination: { target: "app" } },
-    transition2: { destination: { target: "app" } }
-  },
   root: NavigationStates,
   events: Machine.eventsFromSchemas(Go)
 }).handle({
@@ -74,15 +73,23 @@ const raisedNavigationMachine = Machine.make({
   states: {
     off: {
       always: {
-        branches: "transition1",
-        resolve: ({ select: { destination: target } }) =>
-          target({ data: new App({}), decoded: true, states: { one: { data: new One({}), decoded: true } } })
+        branches: [{ target: "app" }],
+        resolve: ({ select }) =>
+          select.target("app", {
+            data: new App({}),
+            decoded: true,
+            states: { one: { data: new One({}), decoded: true } }
+          })
       },
       on: {
         Go: {
-          branches: "transition2",
-          resolve: ({ select: { destination: target } }) =>
-            target({ data: new App({}), decoded: true, states: { one: { data: new One({}), decoded: true } } })
+          branches: [{ target: "app" }],
+          resolve: ({ select }) =>
+            select.target("app", {
+              data: new App({}),
+              decoded: true,
+              states: { one: { data: new One({}), decoded: true } }
+            })
         }
       }
     },
@@ -99,7 +106,6 @@ const raisedNavigationMachine = Machine.make({
 })
 const CounterStates = Machine.state({ states: { counter: Counter } })
 const counterMachine = Machine.make({
-  branches: { transition1: { destination: { target: "counter" } } },
   root: CounterStates,
   events: Machine.eventsFromSchemas(Increment, Noop)
 }).handle({
@@ -116,15 +122,12 @@ const counterMachine = Machine.make({
           decoded: true,
           data: ({ state }) => (new Counter({ count: state.count + 1 }))
         },
-        Noop: { none: true }
+        Noop: { stay: true }
       }
     }
   }
 })
 const conditionalMachine = Machine.make({
-  branches: {
-    transition1: { negative: { none: true }, zero: { target: "counter" }, positive: { none: true } }
-  },
   root: CounterStates,
   events: Machine.eventsFromSchemas(Select)
 }).handle({
@@ -137,13 +140,13 @@ const conditionalMachine = Machine.make({
     counter: {
       on: {
         Select: {
-          branches: "transition1",
+          branches: [{ stay: true }, { target: "counter" }, { update: "counter" }],
           resolve: ({ event, select }) =>
             event.value < 0
-              ? select.negative()
+              ? select.stay()
               : event.value === 0
-              ? select.zero({ data: new Counter({ count: 0 }), decoded: true })
-              : select.positive()
+              ? select.target("counter", { data: new Counter({ count: 0 }), decoded: true })
+              : select.update({ counter: { decoded: true, data: new Counter({ count: event.value }) } })
         }
       }
     }
@@ -161,10 +164,10 @@ const invokedMachine = Machine.make({
   },
   states: {
     counter: {
-      invoke: [{ src: "source1", id: "first", onDone: { none: true } }, {
+      invoke: [{ src: "source1", id: "first", onDone: { stay: true } }, {
         src: "source2",
         id: "second",
-        onDone: { none: true }
+        onDone: { stay: true }
       }]
     }
   }
@@ -184,10 +187,6 @@ const RoutedStartupStates = Machine.state({
   }
 })
 const routedStartupMachine = Machine.make({
-  branches: {
-    transition1: { destination: { target: "a.second" } },
-    transition2: { destination: { target: "b" } }
-  },
   root: RoutedStartupStates,
   events: Machine.eventsFromSchemas()
 }).handle({
@@ -203,7 +202,7 @@ const routedStartupMachine = Machine.make({
       },
       states: {
         route: {
-          choice: { branches: "transition1", resolve: ({ select: { destination: target } }) => target() }
+          choice: { branches: [{ target: "a.second" }], resolve: ({ select }) => select.target("a.second") }
         },
         second: {
           choice: { target: "b", decoded: true, data: () => (new StartupB({})) }
@@ -230,10 +229,6 @@ const ChoiceResolutionStates = Machine.state({
   }
 })
 const choiceResolutionMachine = Machine.make({
-  branches: {
-    transition1: { destination: { target: "flow.first" } },
-    transition2: { destination: { target: "flow.second" } }
-  },
   root: ChoiceResolutionStates,
   events: Machine.eventsFromSchemas(Route)
 }).handle({
@@ -252,11 +247,11 @@ const choiceResolutionMachine = Machine.make({
       states: {
         ready: {
           on: {
-            Route: { branches: "transition1", resolve: ({ select: { destination: target } }) => target() }
+            Route: { branches: [{ target: "flow.first" }], resolve: ({ select }) => select.target("flow.first") }
           }
         },
         first: {
-          choice: { branches: "transition2", resolve: ({ select: { destination: target } }) => target() }
+          choice: { branches: [{ target: "flow.second" }], resolve: ({ select }) => select.target("flow.second") }
         },
         second: {
           choice: { target: "flow.routed", decoded: true, data: () => (new ChoiceRouted({})) }
@@ -267,7 +262,6 @@ const choiceResolutionMachine = Machine.make({
   }
 })
 const reentryMachine = Machine.make({
-  branches: { transition1: { destination: { target: "app" } } },
   root: NavigationStates,
   events: Machine.eventsFromSchemas(Restart)
 }).handle({
@@ -286,10 +280,14 @@ const reentryMachine = Machine.make({
       },
       on: {
         Restart: {
-          branches: "transition1",
+          branches: [{ target: "app" }],
           reenter: true,
-          resolve: ({ select: { destination: target } }) =>
-            target({ data: new App({}), decoded: true, states: { one: { data: new One({}), decoded: true } } })
+          resolve: ({ select }) =>
+            select.target("app", {
+              data: new App({}),
+              decoded: true,
+              states: { one: { data: new One({}), decoded: true } }
+            })
         }
       },
       states: {
@@ -365,10 +363,6 @@ const HistoryStates = Machine.state({
   }
 })
 const historyMachine = Machine.make({
-  branches: {
-    transition1: { destination: { target: "away" } },
-    transition2: { destination: { history: "workspace.exact" } }
-  },
   root: HistoryStates,
   events: Machine.eventsFromSchemas(Leave, Resume)
 }).handle({
@@ -440,7 +434,10 @@ const historyMachine = Machine.make({
     },
     away: {
       on: {
-        Resume: { branches: "transition2", resolve: ({ select: { destination: target } }) => target() }
+        Resume: {
+          branches: [{ history: "workspace.exact" }],
+          resolve: ({ select }) => select.history("workspace.exact")
+        }
       }
     }
   }
@@ -472,7 +469,6 @@ const structuralHistoryInitial = () => ({
   }
 })
 const structuralHistoryMachine = Machine.make({
-  branches: { transition1: { destination: { target: "away" } } },
   root: StructuralHistoryStates,
   events: Machine.eventsFromSchemas(Leave)
 }).handle({
@@ -547,7 +543,6 @@ const DoneTransitionStates = Machine.state({
   }
 })
 const doneTransitionMachine = Machine.make({
-  branches: { transition1: { destination: { target: "archived" } } },
   root: DoneTransitionStates,
   events: Machine.eventsFromSchemas()
 }).handle({
@@ -1004,7 +999,7 @@ describe("MachineTest.verify", () => {
             ...step.plan,
             microsteps: [{
               ...microstep,
-              transitions: [{ ...transition, branchKey: "zero" }]
+              transitions: [{ ...transition, branchKey: "target:counter" }]
             }]
           }
         }]
@@ -1021,7 +1016,7 @@ describe("MachineTest.verify", () => {
             ...step.plan,
             microsteps: [{
               ...microstep,
-              transitions: [{ ...transition, branchIndex: 1, branchKey: "zero" }]
+              transitions: [{ ...transition, branchIndex: 1, branchKey: "target:counter" }]
             }]
           }
         }]

@@ -113,6 +113,8 @@ const unsafeTagged = <
     readonly _tag: PropertyKey
   }
 >(value: A): A => value
+const accepts = (): boolean => false
+
 describe("Machine", () => {
   it("creates independent one-shot implementations from one definition", () => {
     class Stable extends Schema.TaggedClass<Stable>("OneShotStable")("Stable", {}) {
@@ -131,7 +133,7 @@ describe("Machine", () => {
         data: new Stable({})
       },
       states: {
-        Stable: { on: { Ping: { none: true } } }
+        Stable: { on: { Ping: { stay: true } } }
       }
     })
     const ignoringPing = definition.handle({
@@ -162,8 +164,8 @@ describe("Machine", () => {
       let captures = 0
       let resolves = 0
       const transition = {
-        none: true as const,
-        get resolve() {
+        stay: true as const,
+        get commands() {
           captures++
           return (): undefined => {
             resolves++
@@ -253,7 +255,7 @@ describe("Machine", () => {
           target: "Stable"
         },
         states: {
-          Stable: { on: { Restart: { none: true, reenter: true } } }
+          Stable: { on: { Restart: { reenter: true } } }
         }
       })
       assert.strictEqual(Machine.transitionDefinitions(machine)[0]?.reenter, true)
@@ -263,19 +265,15 @@ describe("Machine", () => {
       assert.deepStrictEqual(planned.microsteps[0]?.exitPaths, ["Stable"])
       assert.deepStrictEqual(planned.microsteps[0]?.entryPaths, ["Stable"])
     }))
-  it.effect("captures named branches once with stable semantic keys", () =>
+  it.effect("captures branches once, keyed by the entry as written", () =>
     Effect.gen(function*() {
       class Stable extends Schema.TaggedClass<Stable>("NamedBranchStable")("Stable", {}) {
       }
       class Ping extends Schema.TaggedClass<Ping>("NamedBranchPing")("Ping", { route: Schema.Boolean }) {
       }
       const states = Machine.state({ states: { Stable } })
-      const declarations = {
-        unchanged: { none: true as const },
-        refresh: { title: "Refresh stable state", target: "Stable" as const }
-      }
+      const refresh = { target: "Stable" as const }
       const definition = Machine.make({
-        branches: { refresh: declarations },
         root: states,
         events: Machine.eventsFromSchemas(Ping)
       })
@@ -289,16 +287,16 @@ describe("Machine", () => {
           Stable: {
             on: {
               Ping: {
-                branches: "refresh",
+                branches: [{ stay: true }, refresh],
                 reenter: true,
                 resolve: ({ event, select }) =>
-                  event.route ? select.refresh({ data: new Stable({}), decoded: true }) : select.unchanged()
+                  event.route ? select.target("Stable", { data: new Stable({}), decoded: true }) : select.stay()
               }
             }
           }
         }
       })
-      declarations.refresh.title = "mutated after capture"
+      refresh.target = "mutated after capture" as "Stable"
       assert.deepStrictEqual(Machine.transitionDefinitions(machine), [{
         source: "Stable",
         trigger: { type: "event", event: "Ping" },
@@ -306,15 +304,13 @@ describe("Machine", () => {
         acceptance: "required",
         branches: [{
           type: "branch",
-          key: "unchanged",
-          title: "unchanged",
+          key: "stay",
           target: undefined,
           selection: { path: undefined, kind: "none", scope: "local" },
           updates: []
         }, {
           type: "branch",
-          key: "refresh",
-          title: "Refresh stable state",
+          key: "target:Stable",
           target: "Stable",
           selection: { path: "Stable", kind: "state", scope: "branch" },
           updates: []
@@ -322,36 +318,42 @@ describe("Machine", () => {
       }])
       const initial = yield* Machine.planInitial(machine)
       const unchanged = yield* Machine.plan(machine, initial.state, new Ping({ route: false }))
-      const refresh = yield* Machine.plan(machine, initial.state, new Ping({ route: true }))
-      assert.strictEqual(unchanged.microsteps[0]?.transitions[0]?.branchKey, "unchanged")
-      assert.strictEqual(refresh.microsteps[0]?.transitions[0]?.branchKey, "refresh")
+      const refreshed = yield* Machine.plan(machine, initial.state, new Ping({ route: true }))
+      assert.strictEqual(unchanged.microsteps[0]?.transitions[0]?.branchKey, "stay")
+      assert.strictEqual(refreshed.microsteps[0]?.transitions[0]?.branchKey, "target:Stable")
       assert.deepStrictEqual(unchanged.microsteps[0]?.exitPaths, ["Stable"])
       assert.deepStrictEqual(unchanged.microsteps[0]?.entryPaths, ["Stable"])
     }))
-  it("rejects branch records without stable string identities", () => {
+  it("rejects branch lists that are not unique, valid destinations", () => {
     class Stable extends Schema.TaggedClass<Stable>("InvalidBranchStable")("Stable", {}) {
     }
     class Ping extends Schema.TaggedClass<Ping>("InvalidBranchPing")("Ping", {}) {
     }
     const InvalidBranchRoot = Machine.state({ states: { Stable } })
-    const handle = (group: object) => () =>
+    const handle = (transition: object) => () =>
       Machine.make({
         root: InvalidBranchRoot,
-        events: Machine.eventsFromSchemas(Ping),
-        branches: { invalid: group } as any
+        events: Machine.eventsFromSchemas(Ping)
       }).handle({
         initial: { decoded: true, data: new Stable({}), target: "Stable" },
         states: {
-          Stable: { on: { Ping: { branches: "invalid", resolve: () => undefined } as any } }
+          Stable: { on: { Ping: transition as any } }
         }
       })
-    assert.throws(handle({}), /requires a branch/)
-    assert.throws(handle([{ none: true }]), /branch record/)
-    assert.throws(handle({ "": { none: true } }), /non-index string branch keys/)
-    assert.throws(handle({ 0: { none: true } }), /non-index string branch keys/)
-    assert.throws(handle({ invalid: { title: "", none: true } }), /non-empty string/)
-    assert.throws(handle({ invalid: { target: undefined } }), /exactly one destination operation/)
-    assert.throws(handle({ valid: { none: true }, [Symbol("invalid")]: { none: true } }), /cannot use symbol keys/)
+    const resolve = () => undefined
+    assert.throws(handle({ branches: [], resolve }), /at least one entry/)
+    assert.throws(handle({ branches: {}, resolve }), /at least one entry/)
+    assert.throws(handle({ branches: [{ stay: true }, { stay: true }], resolve }), /declare "stay" more than once/)
+    assert.throws(handle({ branches: [{ decline: true }], resolve }), /destination besides decline/)
+    assert.throws(handle({ branches: [{ stay: true, target: "Stable" }], resolve }), /must be one destination/)
+    assert.throws(handle({ branches: [{ target: undefined }], resolve }), /must be one destination/)
+    assert.throws(handle({ branches: [{ target: "Missing" }], resolve }), /not a declared state path/)
+    assert.throws(handle({ branches: [{ stay: true }] }), /branches and resolve must be declared together/)
+    assert.throws(handle({ resolve }), /branches and resolve must be declared together/)
+    assert.throws(
+      handle({ branches: [{ stay: true }], resolve, guard: () => true }),
+      /cannot redeclare its destination, guard, or commands/
+    )
   })
   it.effect("rejects selected branch evidence from another transition", () =>
     Effect.gen(function*() {
@@ -364,7 +366,6 @@ describe("Machine", () => {
       let captured: unknown
       const root6 = Machine.state({ states: { Stable } })
       const machine = Machine.make({
-        branches: { transition1: { unchanged: { none: true } }, transition2: { unchanged: { none: true } } },
         root: root6,
         events: Machine.eventsFromSchemas(Capture, Reuse)
       }).handle({
@@ -377,15 +378,15 @@ describe("Machine", () => {
           Stable: {
             on: {
               Capture: {
-                branches: "transition1",
+                branches: [{ stay: true }],
                 resolve: ({ select }) => {
-                  captured = select.unchanged()
-                  return captured as ReturnType<typeof select.unchanged>
+                  captured = select.stay()
+                  return captured as ReturnType<typeof select.stay>
                 }
               },
               Reuse: {
-                branches: "transition2",
-                resolve: ({ select }) => captured as ReturnType<typeof select.unchanged>
+                branches: [{ stay: true }],
+                resolve: ({ select }) => captured as ReturnType<typeof select.stay>
               }
             }
           }
@@ -397,7 +398,7 @@ describe("Machine", () => {
       assert.strictEqual(exit._tag, "Failure")
       if (exit._tag === "Failure") {
         assert(Cause.hasDies(exit.cause))
-        assert.match(String(Cause.squash(exit.cause)), /must select one declared branch/)
+        assert.match(String(Cause.squash(exit.cause)), /must return a select call/)
       }
     }))
   const Input = Schema.Struct({
@@ -605,7 +606,6 @@ describe("Machine", () => {
       }
       const states = Machine.state({ states: { Submit, RequestSucceeded } })
       const definition = Machine.make({
-        branches: { transition1: { destination: { target: "RequestSucceeded" } } },
         root: states,
         events: Machine.eventsFromSchemas(Convert)
       })
@@ -619,10 +619,10 @@ describe("Machine", () => {
           Submit: {
             on: {
               Convert: {
-                branches: "transition1",
-                resolve: ({ state, select: { destination: target } }) => {
+                branches: [{ target: "RequestSucceeded" }],
+                resolve: ({ state, select }) => {
                   const { _tag: _, ...fields } = state
-                  return target({ data: fields })
+                  return select.target("RequestSucceeded", { data: fields })
                 }
               }
             }
@@ -962,8 +962,8 @@ describe("Machine", () => {
               on: {
                 SetValue: { target: "Active", data: ({ event }) => ({ value: event.value }) },
                 Reset: {
-                  none: true,
-                  resolve: (_, enqueue) => {
+                  stay: true,
+                  commands: (_, enqueue) => {
                     enqueue.raise(internalEvents.Loaded({ value: "loaded" }))
                     return undefined
                   }
@@ -1035,7 +1035,7 @@ describe("Machine", () => {
           states: {
             Idle: {
               on: {
-                Submit: { none: true }
+                Submit: { stay: true }
               }
             }
           }
@@ -1126,7 +1126,7 @@ describe("Machine", () => {
           states: {
             Idle: {
               on: {
-                Submit: { none: true }
+                Submit: { stay: true }
               }
             }
           }
@@ -1263,10 +1263,6 @@ describe("Machine", () => {
           }
         })
         const machine = Machine.make({
-          branches: {
-            transition3: { destination: { target: "Flow.Nested" } },
-            transition4: { destination: { target: "Flow" } }
-          },
           id: "from-empty-targets",
           root: states,
           events: Machine.eventsFromSchemas(
@@ -1291,13 +1287,13 @@ describe("Machine", () => {
                     Local: { target: "Flow.Running" },
                     LocalWith: { target: "Flow.Running" },
                     Branch: {
-                      branches: "transition3",
-                      resolve: ({ select: { destination: target } }) => target({ states: { NestedIdle: {} } })
+                      branches: [{ target: "Flow.Nested" }],
+                      resolve: ({ select }) => select.target("Flow.Nested", { states: { NestedIdle: {} } })
                     },
                     Full: {
-                      branches: "transition4",
-                      resolve: ({ select: { destination: target } }) =>
-                        target({ states: { Nested: { states: { NestedIdle: {} } } } })
+                      branches: [{ target: "Flow" }],
+                      resolve: ({ select }) =>
+                        select.target("Flow", { states: { Nested: { states: { NestedIdle: {} } } } })
                     },
                     Finish: { target: "Flow.Done" }
                   }
@@ -1498,7 +1494,6 @@ describe("Machine", () => {
           }
         })
         const machine = Machine.make({
-          branches: { transition1: { destination: { target: "fulfillment" } } },
           root: states,
           events: Machine.eventsFromSchemas(Submit)
         }).handle({
@@ -1510,9 +1505,9 @@ describe("Machine", () => {
             idle: {
               on: {
                 Submit: {
-                  branches: "transition1",
-                  resolve: ({ event, select: { destination: target } }) =>
-                    target({
+                  branches: [{ target: "fulfillment" }],
+                  resolve: ({ event, select }) =>
+                    select.target("fulfillment", {
                       data: { id: event.value },
                       states: {
                         inventory: {
@@ -1590,7 +1585,6 @@ describe("Machine", () => {
           }
         })
         const machine = Machine.make({
-          branches: { transition1: { destination: { target: "payment" } } },
           root: states,
           events: Machine.eventsFromSchemas(Submit)
         }).handle({
@@ -1608,9 +1602,12 @@ describe("Machine", () => {
                 entering: {
                   on: {
                     Submit: {
-                      branches: "transition1",
-                      resolve: ({ event, select: { destination: target } }) =>
-                        target({ data: { id: "payment-2" }, states: { authorized: { data: { code: event.value } } } })
+                      branches: [{ target: "payment" }],
+                      resolve: ({ event, select }) =>
+                        select.target("payment", {
+                          data: { id: "payment-2" },
+                          states: { authorized: { data: { code: event.value } } }
+                        })
                     }
                   }
                 },
@@ -1645,7 +1642,6 @@ describe("Machine", () => {
           }
         })
         const machine = Machine.make({
-          branches: { transition1: { destination: { target: "workflow" } } },
           root: states,
           events: Machine.eventsFromSchemas(Submit)
         }).handle({
@@ -1663,9 +1659,9 @@ describe("Machine", () => {
                 idle: {
                   on: {
                     Submit: {
-                      branches: "transition1",
-                      resolve: ({ event, select: { destination: target } }) =>
-                        target({
+                      branches: [{ target: "workflow" }],
+                      resolve: ({ event, select }) =>
+                        select.target("workflow", {
                           data: { id: "workflow-2" },
                           states: {
                             checkout: {
@@ -2569,7 +2565,6 @@ describe("Machine", () => {
         }
       })
       const machine = Machine.make({
-        branches: { transition2: { destination: { target: "payment.authorized" } } },
         root: root28,
         events: Machine.eventsFromSchemas(Authorize)
       }).handle({
@@ -2596,11 +2591,14 @@ describe("Machine", () => {
               entering: {
                 on: {
                   Authorize: {
-                    branches: "transition2",
-                    resolve: ({ event, containingState, ancestors, select: { destination: target } }) => {
+                    branches: [{ target: "payment.authorized" }],
+                    resolve: ({ event, containingState, ancestors, select }) => {
                       assert.deepStrictEqual(containingState, payment)
                       assert.deepStrictEqual(ancestors, { payment })
-                      return target({ data: new AuthorizedPayment({ code: event.code }), decoded: true })
+                      return select.target("payment.authorized", {
+                        data: new AuthorizedPayment({ code: event.code }),
+                        decoded: true
+                      })
                     }
                   }
                 }
@@ -2647,7 +2645,6 @@ describe("Machine", () => {
       let raisedResolverCalls = 0
       let lifecycleCalls = 0
       const machine = Machine.make({
-        branches: { transition1: { destination: { target: "Done" } } },
         root: states,
         events: Machine.eventsFromSchemas(Check, Consume, Finish, Ignore),
         internalEvents: Machine.internalEventsFromSchemas(Raised)
@@ -2664,34 +2661,33 @@ describe("Machine", () => {
             },
             on: {
               Check: {
-                none: true,
-                resolve: ({ event, decline }, enqueue) => {
+                branches: [{ stay: true }, { decline: true }],
+                resolve: ({ event, select }, enqueue) => {
                   declinableResolverCalls++
                   if (!event.accept) {
-                    return decline()
+                    return select.decline()
                   }
                   enqueue.raise(new Raised({}))
-                  return undefined
-                },
-                declinable: true
+                  return select.stay()
+                }
               },
               Consume: {
-                none: true,
-                resolve: () => {
+                stay: true,
+                commands: () => {
                   requiredResolverCalls++
                   return undefined
                 }
               },
               Finish: {
-                branches: "transition1",
-                resolve: ({ select: { destination: target } }) => {
+                branches: [{ target: "Done" }],
+                resolve: ({ select }) => {
                   requiredResolverCalls++
-                  return target({ data: new Done({}), decoded: true })
+                  return select.target("Done", { data: new Done({}), decoded: true })
                 }
               },
               Raised: {
-                none: true,
-                resolve: () => {
+                stay: true,
+                commands: () => {
                   raisedResolverCalls++
                   return undefined
                 }
@@ -2743,9 +2739,6 @@ describe("Machine", () => {
         }
       })
       const machine = Machine.make({
-        branches: {
-          transition2: { authorize: { target: "payment.authorized" }, consume: { none: true } }
-        },
         root: root30,
         events: Machine.eventsFromSchemas(Authorize),
         emittedEvents: Machine.emittedEventsFromSchemas(Notice)
@@ -2773,18 +2766,20 @@ describe("Machine", () => {
               entering: {
                 on: {
                   Authorize: {
-                    branches: "transition2",
-                    resolve: ({ event, select, decline }, enqueue) => {
+                    branches: [{ target: "payment.authorized" }, { stay: true }, { decline: true }],
+                    resolve: ({ event, select }, enqueue) => {
                       if (event.code === "child") {
-                        return select.authorize({ data: new AuthorizedPayment({ code: event.code }), decoded: true })
+                        return select.target("payment.authorized", {
+                          data: new AuthorizedPayment({ code: event.code }),
+                          decoded: true
+                        })
                       }
                       if (event.code === "consume") {
-                        return select.consume()
+                        return select.stay()
                       }
                       enqueue.emit(new Notice({}))
-                      return decline()
-                    },
-                    declinable: true
+                      return select.decline()
+                    }
                   }
                 }
               },
@@ -2808,11 +2803,11 @@ describe("Machine", () => {
         assert.strictEqual(child.next.state.state.path, "payment.authorized")
       }
       assert.strictEqual(child.microsteps[0]?.transitions[0]?.source, "payment.entering")
-      assert.strictEqual(child.microsteps[0]?.transitions[0]?.branchKey, "authorize")
+      assert.strictEqual(child.microsteps[0]?.transitions[0]?.branchKey, "target:payment.authorized")
       const consumed = yield* Machine.plan(machine, initial.state, new Authorize({ code: "consume" }))
       assert.deepStrictEqual(consumed.next, initial.state)
       assert.strictEqual(consumed.microsteps[0]?.transitions[0]?.source, "payment.entering")
-      assert.strictEqual(consumed.microsteps[0]?.transitions[0]?.branchKey, "consume")
+      assert.strictEqual(consumed.microsteps[0]?.transitions[0]?.branchKey, "stay")
       assert.strictEqual(consumed.microsteps[0]?.transitions[0]?.target, undefined)
       const declined = yield* Machine.plan(machine, initial.state, new Authorize({ code: "parent" }))
       assert.strictEqual(declined.next.state.path, "failed")
@@ -2856,9 +2851,8 @@ describe("Machine", () => {
             states: {
               waiting: {
                 always: {
-                  none: true,
-                  resolve: ({ state, decline }) => state.ready ? undefined : decline(),
-                  declinable: true
+                  branches: [{ stay: true }, { decline: true }],
+                  resolve: ({ state, select }) => state.ready ? select.stay() : select.decline()
                 }
               }
             }
@@ -2889,7 +2883,10 @@ describe("Machine", () => {
         states: {
           Stable: {
             on: {
-              Ping: { none: true, resolve: ({ decline }) => decline(), declinable: true }
+              Ping: {
+                branches: [{ stay: true }, { decline: true }],
+                resolve: ({ select }) => accepts() ? select.stay() : select.decline()
+              }
             }
           }
         }
@@ -2900,57 +2897,6 @@ describe("Machine", () => {
       const planned = yield* Machine.plan(machine, initial.state, new Ping({}))
       assert.deepStrictEqual(planned.next, initial.state)
       assert.deepStrictEqual(planned.microsteps, [])
-    }))
-  it.effect("leaves a completed compound state active when onDone declines", () =>
-    Effect.gen(function*() {
-      class Workflow extends Schema.TaggedClass<Workflow>("DeclineDoneWorkflow")("Workflow", {}) {
-      }
-      class Complete extends Schema.TaggedClass<Complete>("DeclineDoneComplete")("Complete", {}) {
-      }
-      class Finished extends Schema.TaggedClass<Finished>("DeclineDoneFinished")("Finished", {}) {
-      }
-      const states = Machine.state({
-        states: {
-          workflow: {
-            schema: Workflow,
-            states: {
-              complete: { schema: Complete, type: "final", output: Schema.String }
-            }
-          },
-          finished: Finished
-        }
-      })
-      const machine = Machine.make({
-        branches: { transition1: { destination: { target: "finished" } } },
-        root: states,
-        events: Machine.eventsFromSchemas()
-      }).handle({
-        initial: {
-          target: "workflow",
-          decoded: true,
-          data: new Workflow({})
-        },
-        states: {
-          workflow: {
-            initial: {
-              target: "workflow.complete",
-              decoded: true,
-              data: new Complete({})
-            },
-            onDone: { branches: "transition1", resolve: ({ decline }) => decline(), declinable: true },
-            states: {
-              complete: { output: () => "complete" }
-            }
-          },
-          finished: {}
-        }
-      })
-      const planned = yield* Machine.planInitial(machine)
-      assert.isFalse(planned.done)
-      assert.strictEqual(planned.state.state.path, "workflow")
-      if (planned.state.state.path === "workflow") {
-        assert.strictEqual(planned.state.state.state.path, "workflow.complete")
-      }
     }))
   it.effect("preserves descendant preemption when parallel candidates decline", () =>
     Effect.gen(function*() {
@@ -2978,7 +2924,6 @@ describe("Machine", () => {
       })
       let parentCalls = 0
       const machine = Machine.make({
-        branches: { transition1: { destination: { target: "finished" } } },
         root: states,
         events: Machine.eventsFromSchemas(Ping)
       }).handle({
@@ -2992,25 +2937,27 @@ describe("Machine", () => {
             initial: { left: { decoded: true, data: new Left({}) }, right: { decoded: true, data: new Right({}) } },
             on: {
               Ping: {
-                branches: "transition1",
-                resolve: ({ select: { destination: target } }) => {
+                branches: [{ target: "finished" }],
+                resolve: ({ select }) => {
                   parentCalls++
-                  return target({ data: new Finished({}), decoded: true })
+                  return select.target("finished", { data: new Finished({}), decoded: true })
                 }
               }
             },
             states: {
               left: {
                 on: {
-                  Ping: { none: true, resolve: ({ decline }) => decline(), declinable: true }
+                  Ping: {
+                    branches: [{ stay: true }, { decline: true }],
+                    resolve: ({ select }) => accepts() ? select.stay() : select.decline()
+                  }
                 }
               },
               right: {
                 on: {
                   Ping: {
-                    none: true,
-                    resolve: ({ event, decline }) => event.handleRight ? undefined : decline(),
-                    declinable: true
+                    branches: [{ stay: true }, { decline: true }],
+                    resolve: ({ event, select }) => event.handleRight ? select.stay() : select.decline()
                   }
                 }
               }
@@ -3187,7 +3134,6 @@ describe("Machine", () => {
         }
       })
       const machine = Machine.make({
-        branches: { transition1: { destination: { target: "fulfillment" } } },
         root: states,
         events: Machine.eventsFromSchemas(Submit)
       }).handle({
@@ -3200,9 +3146,9 @@ describe("Machine", () => {
           idle: {
             on: {
               Submit: {
-                branches: "transition1",
-                resolve: ({ event, select: { destination: target } }) =>
-                  target({
+                branches: [{ target: "fulfillment" }],
+                resolve: ({ event, select }) =>
+                  select.target("fulfillment", {
                     data: new Fulfillment({ id: event.value }),
                     decoded: true,
                     states: {
@@ -3315,7 +3261,6 @@ describe("Machine", () => {
         }
       })
       const machine = Machine.make({
-        branches: { transition1: { destination: { target: "workflow.fulfillment" } } },
         root: states,
         events: Machine.eventsFromSchemas(Submit)
       }).handle({
@@ -3335,9 +3280,9 @@ describe("Machine", () => {
               idle: {
                 on: {
                   Submit: {
-                    branches: "transition1",
-                    resolve: ({ event, select: { destination: target } }) =>
-                      target({
+                    branches: [{ target: "workflow.fulfillment" }],
+                    resolve: ({ event, select }) =>
+                      select.target("workflow.fulfillment", {
                         data: new Fulfillment({ id: event.value }),
                         decoded: true,
                         states: {
@@ -3473,7 +3418,6 @@ describe("Machine", () => {
         }
       }
       const machine = Machine.make({
-        branches: { transition1: { destination: { target: "app.flow.fulfillment" } } },
         root: states,
         events: Machine.eventsFromSchemas(Submit)
       }).handle({
@@ -3496,9 +3440,9 @@ describe("Machine", () => {
                   idle: {
                     on: {
                       Submit: {
-                        branches: "transition1",
-                        resolve: ({ event, select: { destination: target } }) =>
-                          target({
+                        branches: [{ target: "app.flow.fulfillment" }],
+                        resolve: ({ event, select }) =>
+                          select.target("app.flow.fulfillment", {
                             data: new Fulfillment({ id: event.value }),
                             decoded: true,
                             states: {
@@ -3678,7 +3622,6 @@ describe("Machine", () => {
       const quoting = new QuotingShipping({ postalCode: "12345" })
       const nextInventory = new Inventory({ warehouse: "warehouse-2" })
       const machine = Machine.make({
-        branches: { transition1: { destination: { target: "fulfillment.inventory" } } },
         root: states,
         events: Machine.eventsFromSchemas(ReserveInventory)
       }).handle({
@@ -3704,9 +3647,9 @@ describe("Machine", () => {
                   checking: {
                     on: {
                       ReserveInventory: {
-                        branches: "transition1",
-                        resolve: ({ event, select: { destination: target } }) =>
-                          target({
+                        branches: [{ target: "fulfillment.inventory" }],
+                        resolve: ({ event, select }) =>
+                          select.target("fulfillment.inventory", {
                             data: nextInventory,
                             decoded: true,
                             states: {
@@ -3790,7 +3733,6 @@ describe("Machine", () => {
       const quoting = new QuotingShipping({ postalCode: "12345" })
       const nextInventory = new Inventory({ warehouse: "warehouse-2" })
       const machine = Machine.make({
-        branches: { transition1: { destination: { target: "fulfillment.inventory" } } },
         root: states,
         events: Machine.eventsFromSchemas(ReserveInventory)
       }).handle({
@@ -3813,9 +3755,9 @@ describe("Machine", () => {
                   checking: {
                     on: {
                       ReserveInventory: {
-                        branches: "transition1",
-                        resolve: ({ event, select: { destination: target } }) =>
-                          target({
+                        branches: [{ target: "fulfillment.inventory" }],
+                        resolve: ({ event, select }) =>
+                          select.target("fulfillment.inventory", {
                             data: nextInventory,
                             decoded: true,
                             states: {
@@ -3900,7 +3842,6 @@ describe("Machine", () => {
       const shipping = new Shipping({ address: "Main Street" })
       const quoting = new QuotingShipping({ postalCode: "12345" })
       const machine = Machine.make({
-        branches: { transition1: { destination: { target: "fulfillment" } } },
         root: states,
         events: Machine.eventsFromSchemas(ReserveInventory)
       }).handle({
@@ -3923,9 +3864,9 @@ describe("Machine", () => {
                   checking: {
                     on: {
                       ReserveInventory: {
-                        branches: "transition1",
-                        resolve: ({ event, select: { destination: target } }) =>
-                          target({
+                        branches: [{ target: "fulfillment" }],
+                        resolve: ({ event, select }) =>
+                          select.target("fulfillment", {
                             data: nextFulfillment,
                             decoded: true,
                             states: {
@@ -4012,7 +3953,6 @@ describe("Machine", () => {
       const inventory = new Inventory({ warehouse: "warehouse-1" })
       const shipping = new Shipping({ address: "Main Street" })
       const machine = Machine.make({
-        branches: { transition1: { destination: { target: "payment.shipping" } } },
         root: states,
         events: Machine.eventsFromSchemas(ReserveInventory)
       }).handle({
@@ -4039,9 +3979,9 @@ describe("Machine", () => {
                   checking: {
                     on: {
                       ReserveInventory: {
-                        branches: "transition1",
-                        resolve: ({ event, select: { destination: target } }) =>
-                          target({
+                        branches: [{ target: "payment.shipping" }],
+                        resolve: ({ event, select }) =>
+                          select.target("payment.shipping", {
                             data: shipping,
                             decoded: true,
                             states: {
@@ -4879,7 +4819,6 @@ describe("Machine", () => {
         }
       })
       const machine = Machine.make({
-        branches: { transition1: { destination: { target: "fulfillment.inventory.reserved" } } },
         root: root52,
         events: Machine.eventsFromSchemas(ReserveInventory, Resolve)
       }).handle({
@@ -4902,10 +4841,10 @@ describe("Machine", () => {
                   checking: {
                     on: {
                       ReserveInventory: {
-                        branches: "transition1",
-                        resolve: ({ event, select: { destination: target } }, enqueue) => {
+                        branches: [{ target: "fulfillment.inventory.reserved" }],
+                        resolve: ({ event, select }, enqueue) => {
                           enqueue.raise(new Resolve({}))
-                          return target({
+                          return select.target("fulfillment.inventory.reserved", {
                             data: new InventoryReserved({
                               reservationId: event.reservationId
                             }),
@@ -5526,7 +5465,7 @@ describe("Machine", () => {
         states: {
           Idle: {
             on: {
-              Submit: { none: true }
+              Submit: { stay: true }
             }
           },
           Loading: {}
@@ -6317,7 +6256,7 @@ describe("Machine", () => {
               src: "source1",
               id: "request",
               address: Machine.childAddress("request-parent"),
-              onFailure: { none: true }
+              onFailure: { stay: true }
             },
             on: {
               RequestSucceeded: {
@@ -6376,7 +6315,7 @@ describe("Machine", () => {
               src: "source1",
               id: "request",
               address: Machine.childAddress("stale-request"),
-              onFailure: { none: true }
+              onFailure: { stay: true }
             },
             on: {
               Resolve: { target: "Idle", decoded: true, data: () => (new Idle({ userId: "resolved" })) }
@@ -6651,9 +6590,6 @@ describe("Machine", () => {
               )
           })
         },
-        branches: {
-          snapshots: { ready: { target: "Success", title: "Request is ready" }, unchanged: { none: true } }
-        },
         root: root83,
         events: Machine.eventsFromSchemas(Submit, RequestProgress),
         input: Input
@@ -6681,11 +6617,11 @@ describe("Machine", () => {
               id: "request",
               address: Machine.childAddress("filtered-progress"),
               onSnapshot: {
-                branches: "snapshots",
+                branches: [{ target: "Success" }, { stay: true }],
                 resolve: ({ snapshot, select }) =>
                   snapshot.state === "ready"
-                    ? select.ready({ data: new Success({ requestId: snapshot.state }), decoded: true })
-                    : select.unchanged()
+                    ? select.target("Success", { data: new Success({ requestId: snapshot.state }), decoded: true })
+                    : select.stay()
               }
             }
           },
@@ -6762,7 +6698,7 @@ describe("Machine", () => {
               src: "source1",
               id: "request",
               address: Machine.childAddress("void-request"),
-              onDone: { none: true }
+              onDone: { stay: true }
             }
           }
         }
@@ -7216,10 +7152,6 @@ describe("Machine", () => {
         }
       })
       const machine = Machine.make({
-        branches: {
-          transition1: { destination: { target: "flow" } },
-          transition2: { destination: { target: "flow" } }
-        },
         id: "CompletionLoopMachine",
         root: states,
         events: Machine.eventsFromSchemas(Submit)
@@ -7233,9 +7165,9 @@ describe("Machine", () => {
           idle: {
             on: {
               Submit: {
-                branches: "transition1",
-                resolve: ({ select: { destination: target } }) =>
-                  target({
+                branches: [{ target: "flow" }],
+                resolve: ({ select }) =>
+                  select.target("flow", {
                     data: new Loading({ requestId: "request-1" }),
                     decoded: true,
                     states: { done: { data: new Success({ requestId: "request-1" }), decoded: true } }
@@ -7249,9 +7181,9 @@ describe("Machine", () => {
               data: { requestId: "initial" }
             },
             onDone: {
-              branches: "transition2",
-              resolve: ({ state, select: { destination: target } }) =>
-                target({
+              branches: [{ target: "flow" }],
+              resolve: ({ state, select }) =>
+                select.target("flow", {
                   data: state,
                   decoded: true,
                   states: { done: { data: new Success({ requestId: state.requestId }), decoded: true } }
@@ -7354,7 +7286,7 @@ describe("Machine", () => {
       states: {
         ConcurrentIdle: {
           on: {
-            ConcurrentPing: { none: true }
+            ConcurrentPing: { stay: true }
           }
         }
       }

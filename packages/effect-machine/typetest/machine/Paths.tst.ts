@@ -31,7 +31,7 @@ describe("declared state paths", () => {
     expect(definition.handle).type.toBeCallableWith(handle({ target: "Checkout.Pay" }))
     expect(definition.handle).type.toBeCallableWith(handle({ target: "Loading", data: { count: 1 } }))
     expect(definition.handle).type.toBeCallableWith(handle({ history: "Checkout.recent" }))
-    expect(definition.handle).type.toBeCallableWith(handle({ update: "root", data: { seed: 1 } }))
+    expect(definition.handle).type.toBeCallableWith(handle({ update: { root: { seed: 1 } } }))
     expect(definition.handle).type.toBeCallableWith(handle({ initialize: true }))
   })
 
@@ -40,33 +40,24 @@ describe("declared state paths", () => {
     expect(definition.handle).type.not.toBeCallableWith(handle({ target: "Review" }))
     expect(definition.handle).type.not.toBeCallableWith(handle({ target: "root" }))
     expect(definition.handle).type.not.toBeCallableWith(handle({ target: "" }))
-    expect(definition.handle).type.not.toBeCallableWith(handle({ update: "", data: { seed: 1 } }))
+    expect(definition.handle).type.not.toBeCallableWith(handle({ update: { "": { seed: 1 } } }))
     expect(definition.handle).type.not.toBeCallableWith(handle({ history: "Checkout.Review" }))
     expect(definition.handle).type.not.toBeCallableWith(handle({ target: "Loading" }))
     expect(definition.handle).type.not.toBeCallableWith(handle({ initialize: { seed: 1 } }))
     expect(definition.handle).type.not.toBeCallableWith(handle({ initialize: true, target: "Idle" }))
   })
 
-  it("checks branch declarations against the root passed to make", () => {
-    expect(Machine.make).type.toBeCallableWith({
-      root: Root,
-      events: Events,
-      branches: { go: { idle: { target: "Idle" }, reset: { initialize: true }, owner: { update: "Checkout" } } }
+  it("checks branch entries against the declared root", () => {
+    const entry = (branches: unknown) => ({
+      initial: { target: "Idle" },
+      states: {
+        Idle: {
+          on: { Go: { branches, resolve: ({ select }: any) => select.stay() } }
+        }
+      }
     })
-    expect(Machine.make).type.not.toBeCallableWith({
-      root: Root,
-      events: Events,
-      branches: { go: { missing: { target: "Missing" } } }
-    })
-    expect(Machine.make).type.not.toBeCallableWith({
-      root: Root,
-      events: Events,
-      branches: { go: { root: { target: "root" } } }
-    })
-    expect(Machine.make).type.not.toBeCallableWith({
-      root: Root,
-      events: Events,
-      branches: { go: { root: { initialize: true, target: "Idle" } } }
-    })
+    expect(definition.handle).type.not.toBeCallableWith(entry([{ target: "Missing" }]))
+    expect(definition.handle).type.not.toBeCallableWith(entry([{ target: "root" }]))
+    expect(definition.handle).type.not.toBeCallableWith(entry([{ initialize: true, target: "Idle" }]))
   })
 })

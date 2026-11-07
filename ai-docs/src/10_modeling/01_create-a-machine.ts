@@ -34,7 +34,7 @@ export const CounterMachine = Machine.make({
     },
     Running: {
       on: {
-        Increment: { update: "Running", data: ({ state }) => ({ count: state.count + 1 }) },
+        Increment: { update: { Running: ({ state }) => ({ count: state.count + 1 }) } },
         Stop: { target: "Idle" }
       }
     }

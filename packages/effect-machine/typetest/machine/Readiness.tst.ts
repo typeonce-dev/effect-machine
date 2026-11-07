@@ -125,7 +125,7 @@ describe("executable machine readiness", () => {
       }
     })
     expect(parent.handle).type.not.toBeCallableWith({
-      states: { Ready: { invoke: { src: "choice", onDone: { none: true } } } },
+      states: { Ready: { invoke: { src: "choice", onDone: { stay: true } } } },
       initial: {
         target: "Ready",
         data: () => {
@@ -150,7 +150,7 @@ describe("executable machine readiness", () => {
     expect(Machine.start).type.not.toBeCallableWith(historyIncomplete)
     expect(Machine.resume).type.not.toBeCallableWith(historyIncomplete, historySnapshot)
     expect(parent.handle).type.not.toBeCallableWith({
-      states: { Ready: { invoke: { src: "history", onDone: { none: true } } } },
+      states: { Ready: { invoke: { src: "history", onDone: { stay: true } } } },
       initial: {
         target: "Ready",
         data: () => {
@@ -175,7 +175,7 @@ describe("executable machine readiness", () => {
     expect(Machine.start).type.not.toBeCallableWith(outputIncomplete)
     expect(Machine.resume).type.not.toBeCallableWith(outputIncomplete, outputSnapshot)
     expect(parent.handle).type.not.toBeCallableWith({
-      states: { Ready: { invoke: { src: "output", onDone: { none: true } } } },
+      states: { Ready: { invoke: { src: "output", onDone: { stay: true } } } },
       initial: {
         target: "Ready",
         data: () => {

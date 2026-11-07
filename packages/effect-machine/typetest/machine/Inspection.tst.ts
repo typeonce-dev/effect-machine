@@ -47,7 +47,7 @@ describe("Machine inspection", () => {
           data: new Idle({})
         },
         on: {
-          Reset: { none: true }
+          Reset: { stay: true }
         },
         states: { idle: {} }
       }
@@ -67,7 +67,7 @@ describe("Machine inspection", () => {
       states: {
         Idle: {
           on: {
-            Reset: { none: true }
+            Reset: { stay: true }
           }
         }
       }

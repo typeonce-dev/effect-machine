@@ -22,11 +22,7 @@ const NestedEvents = Machine.events({ Bump: {} })
 describe("Machine target and update into a choice", () => {
   const definition = Machine.make({
     root: States,
-    events: Events,
-    branches: {
-      route: { low: { target: "Low" }, high: { target: "High" } },
-      bump: { toRoute: { target: "Route", update: "root" } }
-    }
+    events: Events
   })
 
   it("updates the owner while entering a choice with owner construction data", () => {
@@ -38,18 +34,20 @@ describe("Machine target and update into a choice", () => {
           on: {
             Bump: {
               target: "Route",
-              update: "root",
-              data: ({ root }) => {
-                expect(root.count).type.toBe<number>()
-                return { count: root.count + 1 }
+              update: {
+                root: ({ root }) => {
+                  expect(root.count).type.toBe<number>()
+                  return { count: root.count + 1 }
+                }
               }
             }
           }
         },
         Route: {
           choice: {
-            branches: "route",
-            resolve: ({ containingState, select }) => containingState.count > 0 ? select.high() : select.low()
+            branches: [{ target: "Low" }, { target: "High" }],
+            resolve: ({ containingState, select }) =>
+              containingState.count > 0 ? select.target("High") : select.target("Low")
           }
         },
         Low: {},
@@ -61,11 +59,16 @@ describe("Machine target and update into a choice", () => {
       root: { count: 0 },
       initial: { target: "Idle" },
       states: {
-        Idle: { on: { Bump: { target: "Route", update: "root", decoded: true, data: ({ root }) => root } } },
+        Idle: {
+          on: {
+            Bump: { target: "Route", update: { root: { decoded: true, data: ({ root }) => root } } }
+          }
+        },
         Route: {
           choice: {
-            branches: "route",
-            resolve: ({ containingState, select }) => containingState.count > 0 ? select.high() : select.low()
+            branches: [{ target: "Low" }, { target: "High" }],
+            resolve: ({ containingState, select }) =>
+              containingState.count > 0 ? select.target("High") : select.target("Low")
           }
         },
         Low: {},
@@ -82,8 +85,9 @@ describe("Machine target and update into a choice", () => {
         Idle: { on: { Bump: { target: "Route", update: "root" } } },
         Route: {
           choice: {
-            branches: "route",
-            resolve: ({ containingState, select }) => containingState.count > 0 ? select.high() : select.low()
+            branches: [{ target: "Low" }, { target: "High" }],
+            resolve: ({ containingState, select }) =>
+              containingState.count > 0 ? select.target("High") : select.target("Low")
           }
         },
         Low: {},
@@ -94,11 +98,12 @@ describe("Machine target and update into a choice", () => {
       root: { count: 0 },
       initial: { target: "Idle" },
       states: {
-        Idle: { on: { Bump: { target: "Route", update: "root", data: { target: undefined, update: { count: 1 } } } } },
+        Idle: { on: { Bump: { target: "Route", data: { count: 1 }, update: { root: { count: 1 } } } } },
         Route: {
           choice: {
-            branches: "route",
-            resolve: ({ containingState, select }) => containingState.count > 0 ? select.high() : select.low()
+            branches: [{ target: "Low" }, { target: "High" }],
+            resolve: ({ containingState, select }) =>
+              containingState.count > 0 ? select.target("High") : select.target("Low")
           }
         },
         Low: {},
@@ -112,11 +117,12 @@ describe("Machine target and update into a choice", () => {
       root: { count: 0 },
       initial: { target: "Idle" },
       states: {
-        Idle: { on: { Bump: { target: "Missing", update: "root", data: { count: 1 } } } },
+        Idle: { on: { Bump: { target: "Missing", update: { root: { count: 1 } } } } },
         Route: {
           choice: {
-            branches: "route",
-            resolve: ({ containingState, select }) => containingState.count > 0 ? select.high() : select.low()
+            branches: [{ target: "Low" }, { target: "High" }],
+            resolve: ({ containingState, select }) =>
+              containingState.count > 0 ? select.target("High") : select.target("Low")
           }
         },
         Low: {},
@@ -133,19 +139,23 @@ describe("Machine target and update into a choice", () => {
         Idle: {
           on: {
             Bump: {
-              branches: "bump",
+              branches: [{ target: "Route", update: "root" }],
               resolve: ({ root, select }) => {
-                expect(select.toRoute).type.not.toBeCallableWith()
-                expect(select.toRoute).type.not.toBeCallableWith({ data: { count: 1 }, update: { data: { count: 1 } } })
-                return select.toRoute({ update: { data: { count: root.count + 1 } } })
+                expect(select.target).type.not.toBeCallableWith("Route", { data: { count: 1 } })
+                expect(select.target).type.not.toBeCallableWith("Route", {
+                  data: { count: 1 },
+                  update: { root: { count: 1 } }
+                })
+                return select.target("Route", { update: { root: { count: root.count + 1 } } })
               }
             }
           }
         },
         Route: {
           choice: {
-            branches: "route",
-            resolve: ({ containingState, select }) => containingState.count > 0 ? select.high() : select.low()
+            branches: [{ target: "Low" }, { target: "High" }],
+            resolve: ({ containingState, select }) =>
+              containingState.count > 0 ? select.target("High") : select.target("Low")
           }
         },
         Low: {},
@@ -158,13 +168,7 @@ describe("Machine target and update into a choice", () => {
 describe("choice branches entered with an owner update", () => {
   const definition = Machine.make({
     root: Nested,
-    events: NestedEvents,
-    branches: {
-      first: { next: { target: "Flow.Second" } },
-      contained: { even: { target: "Flow.Even" }, odd: { target: "Flow.Odd" } },
-      escaping: { even: { target: "Flow.Even" }, out: { target: "Outside" } },
-      bump: { toFirst: { target: "Flow.First", update: "Flow" } }
-    }
+    events: NestedEvents
   })
 
   it("accepts nested choices whose reachable branches stay below the owner", () => {
@@ -178,13 +182,20 @@ describe("choice branches entered with an owner update", () => {
               on: {
                 Bump: {
                   target: "Flow.First",
-                  update: "Flow",
-                  data: ({ ancestors }) => ({ count: ancestors.Flow.count + 1 })
+                  update: { Flow: ({ ancestors }) => ({ count: ancestors.Flow.count + 1 }) }
                 }
               }
             },
-            First: { choice: { branches: "first", resolve: ({ select }) => select.next() } },
-            Second: { choice: { branches: "contained", resolve: ({ select }) => select.even() } },
+            First: {
+              choice: { branches: [{ target: "Flow.Second" }], resolve: ({ select }) => select.target("Flow.Second") }
+            },
+            Second: {
+              choice: {
+                branches: [{ target: "Flow.Even" }, { target: "Flow.Odd" }],
+                resolve: ({ containingState, select }) =>
+                  containingState.count > 0 ? select.target("Flow.Even") : select.target("Flow.Odd")
+              }
+            },
             Even: {},
             Odd: {},
             Done: {}
@@ -206,13 +217,20 @@ describe("choice branches entered with an owner update", () => {
               on: {
                 Bump: {
                   target: "Flow.First",
-                  update: "Flow",
-                  data: ({ ancestors }) => ({ count: ancestors.Flow.count + 1 })
+                  update: { Flow: ({ ancestors }) => ({ count: ancestors.Flow.count + 1 }) }
                 }
               }
             },
-            First: { choice: { branches: "first", resolve: ({ select }) => select.next() } },
-            Second: { choice: { branches: "escaping", resolve: ({ select }) => select.even() } },
+            First: {
+              choice: { branches: [{ target: "Flow.Second" }], resolve: ({ select }) => select.target("Flow.Second") }
+            },
+            Second: {
+              choice: {
+                branches: [{ target: "Flow.Even" }, { target: "Outside" }],
+                resolve: ({ containingState, select }) =>
+                  containingState.count > 0 ? select.target("Flow.Even") : select.target("Outside")
+              }
+            },
             Even: {},
             Odd: {},
             Done: {}
@@ -220,7 +238,9 @@ describe("choice branches entered with an owner update", () => {
         },
         Outside: {}
       }
-    })).type.toRaiseError("Choice 'Flow.Second' branch 'out' targets 'Outside' outside the updated owner 'Flow'")
+    })).type.toRaiseError(
+      "targets 'Outside' outside the updated owner 'Flow'"
+    )
   })
 
   it("checks direct choice transitions, declared branches, and invocation outcomes", () => {
@@ -234,8 +254,7 @@ describe("choice branches entered with an owner update", () => {
               on: {
                 Bump: {
                   target: "Flow.First",
-                  update: "Flow",
-                  data: ({ ancestors }) => ({ count: ancestors.Flow.count + 1 })
+                  update: { Flow: ({ ancestors }) => ({ count: ancestors.Flow.count + 1 }) }
                 }
               }
             },
@@ -258,8 +277,8 @@ describe("choice branches entered with an owner update", () => {
             Idle: {
               on: {
                 Bump: {
-                  branches: "bump",
-                  resolve: ({ ancestors, select }) => select.toFirst({ update: { data: ancestors.Flow } })
+                  branches: [{ target: "Flow.First", update: "Flow" }],
+                  resolve: ({ ancestors, select }) => select.target("Flow.First", { update: { Flow: ancestors.Flow } })
                 }
               }
             },
@@ -287,7 +306,7 @@ describe("choice branches entered with an owner update", () => {
             Idle: {
               invoke: {
                 src: "load",
-                onDone: { target: "Flow.First", update: "Flow", data: ({ output }) => ({ count: output }) }
+                onDone: { target: "Flow.First", update: { Flow: ({ output }) => ({ count: output }) } }
               }
             },
             First: { choice: { target: "Outside" } },
@@ -316,7 +335,7 @@ describe("choice branches entered with an owner update", () => {
         states: {
           Flow: {
             initial: { target: "Flow.Idle" },
-            states: { Idle: { on: { Bump: { target: "Route", update: "Flow", data: { count: 1 } } } } }
+            states: { Idle: { on: { Bump: { target: "Route", update: { Flow: { count: 1 } } } } } }
           },
           Route: { choice: { target: "Outside" } },
           Outside: {}

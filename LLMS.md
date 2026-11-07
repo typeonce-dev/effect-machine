@@ -58,7 +58,7 @@ export const CounterMachine = Machine.make({
     },
     Running: {
       on: {
-        Increment: { update: "Running", data: ({ state }) => ({ count: state.count + 1 }) },
+        Increment: { update: { Running: ({ state }) => ({ count: state.count + 1 }) } },
         Stop: { target: "Idle" }
       }
     }
@@ -437,24 +437,18 @@ const ReviewEvents = Machine.eventsFromSchemas(
 
 const ReviewMachine = Machine.make({
   root: ReviewStates,
-  events: ReviewEvents,
-  branches: {
-    evaluate: {
-      accepted: { target: "Accepted" },
-      rejected: { target: "Rejected" }
-    }
-  }
+  events: ReviewEvents
 }).handle({
   initial: { target: "Pending" },
   states: {
     Pending: {
       on: {
         Evaluate: {
-          branches: "evaluate",
+          branches: [{ target: "Accepted" }, { target: "Rejected" }],
           resolve: ({ event, select }) =>
             event.score >= 80
-              ? select.accepted()
-              : select.rejected()
+              ? select.target("Accepted")
+              : select.target("Rejected")
         }
       }
     },
@@ -469,31 +463,53 @@ Do not read the clock, generate randomness, call a service, or await work while
 choosing a transition. Receive such values in an event or produce them through
 state-owned work first.
 
-A `{ none: true }` branch accepts its event without changing state, so
-`Machine.can` reports `true` when a resolver selects it. When the event must be
-refused, for example to disable a control, use `guard`, or declare
-`declinable: true` and return `decline()` from the resolver.
+`resolve` is checked against `branches` in both directions, and each `select`
+call takes the values of the path it is given. An agent can edit this one
+transition without reading anything else: a missing entry, an entry that is never
+selected, and a path that returns nothing are all compile errors that name the fix.
+
+A `{ stay: true }` accepts its event without changing state, so `Machine.can`
+reports `true` when a resolver selects it. When the event must be refused, for
+example to disable a control, use `guard`, or list `{ decline: true }` and return
+`select.decline()` from the resolver. `guard` and `decline` exist only on `on`
+handlers and `always`: an invocation outcome, a completion, and a choice have no
+other candidate, so they use `{ stay: true }` or select a destination. A declined
+invocation outcome would strand the machine in its state.
+
+A `{ stay: true }` in one parallel region accepts the event, so it blocks a handler
+for that event on a parallel ancestor. `{ decline: true }` lets that handler run.
+
+Enqueue work with `commands` on any plain transition, and with `enqueue` in
+`resolve`:
+
+```ts
+Cancelled: {
+  target: "Archived",
+  commands: (_, enqueue) => enqueue.emit(Emitted.Cancelled())
+}
+```
 
 When only an active state's value changes, use `update` to preserve its active
 descendants and running work:
 
 ```ts
 Changed: {
-  update: "Document",
-  data: ({ ancestors }) => ({
-    ...ancestors.Document,
-    revision: ancestors.Document.revision + 1
-  })
+  update: {
+    Document: ({ ancestors }) => ({
+      ...ancestors.Document,
+      revision: ancestors.Document.revision + 1
+    })
+  }
 }
 ```
 
 Choose a valued source or retained ancestor explicitly. To change a parallel
 sibling, send an event handled by that sibling. Combine a destination and one
-retained owner update with `{ target, update, data }`; the callback returns
-`{ target: destinationInput, update: completeOwnerInput }`. Both values are
-validated atomically, and destination entry sees the new owner value. A named
-branch can declare the same pair when a resolver needs commands or nested
-construction. Its selector requires `update: { data: ownerValue }` in the construction object.
+retained owner update with `{ target, data, update: { Owner: ... } }`, where `data`
+only ever means the target's value. Both values are validated atomically, and
+destination entry sees the new owner value. A `branches` entry names the same pair
+as `{ target, update: "Owner" }`, and its call passes the value:
+`select.target(target, { data, update: { Owner: value } })`.
 
 The destination of `{ target, update, data }` can be a choice. The owner is
 updated before the choice resolves, so its resolver reads the new value through
@@ -639,7 +655,7 @@ export const CounterMachine = Machine.make({
     },
     Running: {
       on: {
-        Increment: { update: "Running", data: ({ state }) => ({ count: state.count + 1 }) },
+        Increment: { update: { Running: ({ state }) => ({ count: state.count + 1 }) } },
         Stop: { target: "Idle" }
       }
     }
@@ -732,9 +748,9 @@ that name. It is not a transition destination.
 `{ initialize: ... }` reconstructs root data and follows its initial
 declarations using fresh machine input: a value or a callback of the transition
 context. A machine without input declares `{ initialize: true }`. `initialize`
-rejects `target`, `update`, `history`, `none`, `data`, and `decoded`. A named
-branch declares `{ initialize: true }`, and its resolver passes the input with
-`select.branch({ input })`.
+rejects `target`, `update`, `history`, `stay`, `data`, and `decoded`. A `branches`
+entry declares `{ initialize: true }`, and its resolver passes the input with
+`select.initialize({ input })`.
 
 Initializing root retains its lifecycle unless it is reentered. Put a machine-wide
 reset handler at root and use `reenter: true` to exit and enter root as well as
@@ -743,11 +759,11 @@ reentry, retained root work continues; it does not automatically acquire new
 construction values. Ordinary transition conflict and lifecycle rules still apply.
 This does not create a new machine reference or discard history records.
 
-`{ update: "root", data: ... }` instead replaces root's complete value,
+`{ update: { root: ... } }` instead replaces root's complete value,
 retaining its active children and running work. It takes no input and does not
 run initial constructors. Other source/ancestor updates follow the same rules.
 
-### Inline and named construction
+### Inline and branching construction
 
 Ordinary transitions stay inline:
 
@@ -760,32 +776,21 @@ Load: {
 
 Targeting a compound or parallel state follows its initial declarations. Event
 transitions use `target`, never `initial`. `initial` names only handler startup
-edges. `history` restores a declared history state; `none: true` accepts an
+edges. `history` restores a declared history state; `stay: true` accepts an
 event without changing its target configuration.
 
-Declare branch topology in `make` when a resolver chooses an outcome, builds an
-explicit subtree, or enqueues commands:
-
-```ts
-branches: {
-  open: {
-    checkout: { target: "Checkout" },
-    unchanged: { none: true }
-  }
-}
-```
-
-The resolver calls a constructor bound to that declaration:
+List `branches` next to `resolve` when a transition chooses an outcome or builds
+an explicit subtree. The compiler checks one against the other in both directions:
 
 ```ts
 Open: {
-  branches: "open",
+  branches: [{ target: "Checkout" }, { stay: true }],
   resolve: ({ event, select }) => event.open
-    ? select.checkout({
+    ? select.target("Checkout", {
       data: { cartId: event.cartId },
       states: { Review: { data: { total: event.total } } }
     })
-    : select.unchanged()
+    : select.stay()
 }
 ```
 
@@ -800,35 +805,34 @@ requires every region. Source-local parallel construction can select a single
 region while retaining its active siblings, preserving the existing scope rules.
 Names under `states` cannot collide with construction metadata.
 
-Declared branch targets remain inspectable without executing a resolver.
+Each branch's destination remains inspectable without executing `resolve`.
 Dynamically selected descendants are visible after resolution; this API does not
 add static analysis of resolver bodies.
 
 ### Retained-owner updates
 
-An inline combined transition keeps `target` and `update` paths separate:
+An inline combined transition keeps the target's value and the owner's value
+separate, so `data` only ever means the target's value:
 
 ```ts
 Save: {
   target: "Checkout.Saving",
-  update: "Checkout",
-  data: ({ event }) => ({
-    target: { requestId: event.requestId },
-    update: { cartId: event.cartId }
-  })
+  data: ({ event }) => ({ requestId: event.requestId }),
+  update: { Checkout: ({ event }) => ({ cartId: event.cartId }) }
 }
 ```
 
-For the same pair declared as a named branch, construct both in one call:
+A `branches` entry names the same pair, `{ target: "Checkout.Saving", update: "Checkout" }`,
+and its call constructs both:
 
 ```ts
-select.saved({
+select.target("Checkout.Saving", {
   data: { requestId: event.requestId },
-  update: { data: { cartId: event.cartId } }
+  update: { Checkout: { cartId: event.cartId } }
 })
 ```
 
-`update` is required only for a branch declaring an owner update. It is not an
+`update` takes exactly one owner. It is not an
 arbitrary nested-state operation. The owner must be active and retained across
 the transition. Both complete values validate before either is committed.
 
@@ -856,8 +860,9 @@ including required ancestors and parallel siblings. Its root data is state data,
 not startup input. `Machine.resume` restores a validated snapshot without rerunning
 startup constructors.
 
-`guard` declines before construction. A resolver may return `decline()` only with
-`declinable: true`. Effect, Stream, timer, logic, child invocation, completion,
+`guard` declines before construction. A resolver may return `select.decline()` only
+when `branches` lists `{ decline: true }`. Both exist only on `on` handlers and
+`always`. Effect, Stream, timer, logic, child invocation, completion,
 entry/exit, and required outcome channels retain their existing contracts.
 
 ## Effect Atom and React
@@ -1208,39 +1213,36 @@ Changes to `draftAtom` recompute acceptance. The event atom contains the event
 input itself rather than an `AsyncResult`.
 
 `can` is `true` whenever the active configuration selects a transition. A
-`{ none: true }` branch is a selected transition: it accepts the event without
-changing state. A resolver that falls back to a `none` branch therefore keeps
-the button enabled:
+`{ stay: true }` branch is a selected transition: it accepts the event without
+changing state. A resolver that falls back to `stay` therefore keeps the button
+enabled:
 
 ```ts
 // Before: an incomplete form still accepts Submitted, so `can` is true.
-// In make: branches: { submit: { review: { target: "Reviewing" }, incomplete: { none: true } } }
 Submitted: {
-  branches: "submit",
+  branches: [{ target: "Reviewing" }, { stay: true }],
   resolve: ({ state, select }) =>
-    state.email.length > 0 ? select.review() : select.incomplete()
+    state.email.length > 0 ? select.target("Reviewing") : select.stay()
 }
 ```
 
 When the event must be refused, decline it. Use `guard` for an ordinary
-transition, or `declinable: true` with `decline()` in a resolver:
+transition, or `{ decline: true }` with `select.decline()` in a resolver:
 
 ```ts
 // After: an incomplete form declines Submitted, so `can` is false.
 Submitted: { target: "Reviewing", guard: ({ state }) => state.email.length > 0 }
 
 // A resolver that needs commands or construction declines explicitly.
-// In make: branches: { submit: { review: { target: "Reviewing" } } }
 Submitted: {
-  branches: "submit",
-  declinable: true,
-  resolve: ({ state, select, decline }) =>
-    state.email.length > 0 ? select.review() : decline()
+  branches: [{ target: "Reviewing" }, { decline: true }],
+  resolve: ({ state, select }) =>
+    state.email.length > 0 ? select.target("Reviewing") : select.decline()
 }
 ```
 
-Keep `none` for events that are deliberately accepted and ignored. The
-`effect-machine/no-conditional-none-branch` lint rule reports the conditional
+Keep `stay` for events that are deliberately accepted and ignored. The
+`effect-machine/no-conditional-stay-branch` lint rule reports the conditional
 fallback.
 
 Query acceptance during render through `AtomMachine.can(event)(machine)`. Do
@@ -1504,12 +1506,10 @@ Reserve named branch groups and `resolve` for conditional outcomes, commands,
 or nested construction. The group lives in `make`; its resolver selects only
 constructors derived from those declarations. Avoid an extra branch group for
 an ordinary transition. Use `reenter: true` when the source must restart.
-An empty targetless resolver simplifies to `{ none: true }`.
-
-A `{ none: true }` branch accepts its event, so `Machine.can` and
+A `{ stay: true }` branch accepts its event, so `Machine.can` and
 `AtomMachine.can` return `true` when a resolver selects it. Review check: for
 every event that enables or disables a control, refuse it with `guard` or with
-`declinable: true` and `decline()`. Keep `none` only for events that are
+`{ decline: true }` and `select.decline()`. Keep `stay` only for events that are
 deliberately accepted and ignored.
 
 ### Choose React ownership or keyed family lookup

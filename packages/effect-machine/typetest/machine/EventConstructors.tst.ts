@@ -116,8 +116,8 @@ describe("Machine event constructor collections", () => {
             src: "source1",
             id: "load",
             onDone: {
-              none: true,
-              resolve: ({ output }, enqueue) => {
+              stay: true,
+              commands: ({ output }, enqueue) => {
                 enqueue.raise(internalEvents.Loaded({ value: output }))
                 return undefined
               }
@@ -126,8 +126,8 @@ describe("Machine event constructor collections", () => {
             src: "source2",
             id: "timeout",
             onDone: {
-              none: true,
-              resolve: (_, enqueue) => {
+              stay: true,
+              commands: (_, enqueue) => {
                 enqueue.raise(internalEvents.Failed())
                 return undefined
               }

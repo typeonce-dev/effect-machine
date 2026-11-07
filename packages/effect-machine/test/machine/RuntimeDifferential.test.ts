@@ -73,8 +73,8 @@ describe("pure planning and managed runtime differential", () => {
           Count: {
             on: {
               Cascade: {
-                none: true,
-                resolve: (_, enqueue) => {
+                stay: true,
+                commands: (_, enqueue) => {
                   enqueue.raise(new Increment({}))
                   return undefined
                 }
@@ -168,10 +168,6 @@ describe("pure planning and managed runtime differential", () => {
         readonly right: number
       }> = []
       const machine = Machine.make({
-        branches: {
-          transition1: { destination: { target: "Done" } },
-          transition2: { destination: { target: "Running.Left" } }
-        },
         root: states,
         events: Machine.eventsFromSchemas(Advance, Inspect, Finish),
         internalEvents: Machine.internalEventsFromSchemas(Bump)
@@ -189,12 +185,12 @@ describe("pure planning and managed runtime differential", () => {
             },
             on: {
               Finish: {
-                branches: "transition1",
-                resolve: ({ snapshot, select: { destination: target } }) => {
+                branches: [{ target: "Done" }],
+                resolve: ({ snapshot, select }) => {
                   if (snapshot.state.path !== "Running") {
                     throw new Error("expected Running snapshot")
                   }
-                  return target({
+                  return select.target("Done", {
                     data: new Done({
                       value: snapshot.state.states.Left.value.value + snapshot.state.states.Right.value.value
                     }),
@@ -207,10 +203,13 @@ describe("pure planning and managed runtime differential", () => {
               Left: {
                 on: {
                   Advance: {
-                    branches: "transition2",
-                    resolve: ({ state, select: { destination: target } }, enqueue) => {
+                    branches: [{ target: "Running.Left" }],
+                    resolve: ({ state, select }, enqueue) => {
                       enqueue.raise(new Bump({}))
-                      return target({ data: new Left({ value: state.value + 1 }), decoded: true })
+                      return select.target("Running.Left", {
+                        data: new Left({ value: state.value + 1 }),
+                        decoded: true
+                      })
                     }
                   }
                 }
@@ -228,8 +227,8 @@ describe("pure planning and managed runtime differential", () => {
                     data: ({ state }) => (new Right({ value: state.value + 100 }))
                   },
                   Inspect: {
-                    none: true,
-                    resolve: (context) => {
+                    stay: true,
+                    commands: (context) => {
                       const { state, containingState, ancestors, snapshot } = context
                       if (snapshot.state.path !== "Running") {
                         throw new Error("expected Running snapshot")
@@ -241,8 +240,7 @@ describe("pure planning and managed runtime differential", () => {
                         "ancestors",
                         "event",
                         "snapshot",
-                        "root",
-                        "decline"
+                        "root"
                       ]
                       const spread = { ...context }
                       assert.deepStrictEqual(Object.keys(context), expectedKeys)
@@ -260,7 +258,6 @@ describe("pure planning and managed runtime differential", () => {
                         left: snapshot.state.states.Left.value.value,
                         right: snapshot.state.states.Right.value.value
                       })
-                      return undefined
                     }
                   }
                 }
@@ -497,10 +494,6 @@ describe("pure planning and managed runtime differential", () => {
         }
       })
       const machine = Machine.make({
-        branches: {
-          transition1: { destination: { target: "Working" } },
-          transition2: { destination: { target: "Finished" } }
-        },
         root: states,
         events: Machine.eventsFromSchemas(Begin),
         internalEvents: Machine.internalEventsFromSchemas(RaisedOne, RaisedTwo),
@@ -519,12 +512,12 @@ describe("pure planning and managed runtime differential", () => {
             },
             on: {
               Begin: {
-                branches: "transition1",
-                resolve: ({ select: { destination: target } }, enqueue) => {
+                branches: [{ target: "Working" }],
+                resolve: ({ select }, enqueue) => {
                   record("transition:begin")
                   enqueue.emit(new Notice({ label: "transition" }))
                   enqueue.raise(new RaisedOne({}))
-                  return target({ data: new Working({}), decoded: true })
+                  return select.target("Working", { data: new Working({}), decoded: true })
                 }
               }
             }
@@ -537,19 +530,19 @@ describe("pure planning and managed runtime differential", () => {
             },
             on: {
               RaisedOne: {
-                none: true,
-                resolve: (_, enqueue) => {
+                stay: true,
+                commands: (_, enqueue) => {
                   record("raised:one")
                   enqueue.emit(new Notice({ label: "raised-one" }))
                   return undefined
                 }
               },
               RaisedTwo: {
-                branches: "transition2",
-                resolve: ({ select: { destination: target } }, enqueue) => {
+                branches: [{ target: "Finished" }],
+                resolve: ({ select }, enqueue) => {
                   record("raised:two")
                   enqueue.emit(new Notice({ label: "raised-two" }))
-                  return target({ data: new Finished({}), decoded: true })
+                  return select.target("Finished", { data: new Finished({}), decoded: true })
                 }
               }
             }

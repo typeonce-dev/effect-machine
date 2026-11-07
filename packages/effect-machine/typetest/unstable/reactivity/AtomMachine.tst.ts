@@ -479,7 +479,7 @@ describe("AtomMachine", () => {
         decoded: true,
         data: new Idle({})
       },
-      states: { Idle: { invoke: { src: "source1", id: "read-multiplier", onDone: { none: true } } } }
+      states: { Idle: { invoke: { src: "source1", id: "read-multiplier", onDone: { stay: true } } } }
     })
     const runtime = Atom.runtime(
       Layer.merge(

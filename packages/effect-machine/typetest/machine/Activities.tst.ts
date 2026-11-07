@@ -16,8 +16,8 @@ const machine = Machine.make({
     data: new Loading({})
   },
   states: {
-    Loading: { invoke: { src: "source1", id: "timeout", onDone: { none: true } } },
-    Dynamic: { invoke: { src: "source2", id: "dynamic", input: () => undefined, onDone: { none: true } } }
+    Loading: { invoke: { src: "source1", id: "timeout", onDone: { stay: true } } },
+    Dynamic: { invoke: { src: "source2", id: "dynamic", input: () => undefined, onDone: { stay: true } } }
   }
 })
 describe("Machine activity inspection", () => {

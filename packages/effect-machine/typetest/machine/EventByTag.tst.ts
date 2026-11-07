@@ -52,8 +52,8 @@ describe("Machine.EventByTag", () => {
         Idle: {
           on: {
             Alpha: {
-              none: true,
-              resolve: ({ event }) => {
+              stay: true,
+              commands: ({ event }) => {
                 expect(event).type.toBe<{
                   readonly _tag: "Alpha"
                   readonly payload: string
@@ -63,8 +63,8 @@ describe("Machine.EventByTag", () => {
               }
             },
             Beta: {
-              none: true,
-              resolve: ({ event }) => {
+              stay: true,
+              commands: ({ event }) => {
                 expect(event).type.toBe<{
                   readonly _tag: "Beta"
                   readonly payload: string

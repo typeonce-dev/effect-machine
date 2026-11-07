@@ -16,7 +16,7 @@ const make = (data: unknown) => {
       data: { _tag: "State", data }
     },
     states: {
-      State: { on: { Ping: { none: true } } }
+      State: { on: { Ping: { stay: true } } }
     }
   })
 }

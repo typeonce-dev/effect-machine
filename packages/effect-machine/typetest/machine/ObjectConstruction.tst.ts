@@ -25,25 +25,28 @@ describe("object construction", () => {
     })
     Machine.make({
       root,
-      events: Machine.events({ Open: {} }),
-      branches: {
-        open: { checkout: { target: "Checkout" }, work: { target: "Work" } }
-      }
+      events: Machine.events({ Open: { toWork: Schema.Boolean } })
     }).handle({
       initial: { target: "Idle" },
       states: {
         Idle: {
           on: {
             Open: {
-              branches: "open",
-              resolve: ({ select }) => {
-                expect(select.checkout).type.not.toBeCallableWith()
-                expect(select.checkout).type.not.toBeCallableWith({ data: { cartId: 1 } })
-                expect(select.checkout).type.not.toBeCallableWith({ data: () => ({ cartId: "a" }) })
-                expect(select.checkout).type.not.toBeCallableWith({ data: { cartId: "a" }, states: {} })
-                expect(select.checkout).type.not.toBeCallableWith({ data: { cartId: "a" }, states: { Missing: {} } })
-                expect(select.checkout).type.not.toBeCallableWith({ data: { cartId: "a" }, states: { Review: {} } })
-                expect(select.checkout).type.not.toBeCallableWith({
+              branches: [{ target: "Checkout" }, { target: "Work" }],
+              resolve: ({ event, select }) => {
+                expect(select.target).type.not.toBeCallableWith("Checkout")
+                expect(select.target).type.not.toBeCallableWith("Checkout", { data: { cartId: 1 } })
+                expect(select.target).type.not.toBeCallableWith("Checkout", { data: () => ({ cartId: "a" }) })
+                expect(select.target).type.not.toBeCallableWith("Checkout", { data: { cartId: "a" }, states: {} })
+                expect(select.target).type.not.toBeCallableWith("Checkout", {
+                  data: { cartId: "a" },
+                  states: { Missing: {} }
+                })
+                expect(select.target).type.not.toBeCallableWith("Checkout", {
+                  data: { cartId: "a" },
+                  states: { Review: {} }
+                })
+                expect(select.target).type.not.toBeCallableWith("Checkout", {
                   data: { cartId: "a" },
                   states: { Review: { data: { total: "wrong" } } }
                 })
@@ -51,23 +54,27 @@ describe("object construction", () => {
                   data: { cartId: "a" },
                   states: { Review: { data: { total: 1 } }, Form: { data: { email: "a" } } }
                 }
-                expect(select.checkout).type.not.toBeCallableWith(two)
-                expect(select.checkout).type.toBeCallableWith({ data: { cartId: "a" } })
-                expect(select.checkout).type.toBeCallableWith({
+                expect(select.target).type.not.toBeCallableWith("Checkout", two)
+                expect(select.target).type.toBeCallableWith("Checkout", { data: { cartId: "a" } })
+                expect(select.target).type.toBeCallableWith("Checkout", {
                   data: { cartId: "a" },
                   states: { Review: { data: { total: 1 } } }
                 })
-                expect(select.checkout).type.not.toBeCallableWith({ decoded: true, data: { cartId: "a" } })
-                expect(select.checkout).type.toBeCallableWith({
+                expect(select.target).type.not.toBeCallableWith("Checkout", { decoded: true, data: { cartId: "a" } })
+                expect(select.target).type.toBeCallableWith("Checkout", {
                   decoded: true,
                   data: { _tag: "Checkout", cartId: "a" },
                   states: { Review: { data: { total: 1 } } }
                 })
-                expect(select.work).type.not.toBeCallableWith({ data: {} })
-                expect(select.work).type.not.toBeCallableWith({ states: {} })
-                expect(select.work).type.not.toBeCallableWith({ states: { Left: { data: { count: 1 } } } })
-                expect(select.work).type.toBeCallableWith({ states: { Left: { data: { count: 1 } }, Right: {} } })
-                return select.checkout({ data: { cartId: "a" }, states: { Review: { data: { total: 1 } } } })
+                expect(select.target).type.not.toBeCallableWith("Work", { data: {} })
+                expect(select.target).type.not.toBeCallableWith("Work", { states: {} })
+                expect(select.target).type.not.toBeCallableWith("Work", { states: { Left: { data: { count: 1 } } } })
+                expect(select.target).type.toBeCallableWith("Work", {
+                  states: { Left: { data: { count: 1 } }, Right: {} }
+                })
+                return event.toWork
+                  ? select.target("Work", { states: { Left: { data: { count: 1 } }, Right: {} } })
+                  : select.target("Checkout", { data: { cartId: "a" }, states: { Review: { data: { total: 1 } } } })
               }
             }
           }

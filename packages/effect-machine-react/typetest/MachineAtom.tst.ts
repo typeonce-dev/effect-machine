@@ -22,7 +22,7 @@ const machine = Machine.make({
   states: {
     Idle: {
       on: {
-        Continue: { none: true }
+        Continue: { stay: true }
       }
     }
   }

@@ -27,10 +27,6 @@ describe("state value updates", () => {
         readonly request: string
       } | undefined
       const machine = Machine.make({
-        branches: {
-          transition1: { destination: { target: "Ready.SavingPlan", update: "Ready" } },
-          transition2: { destination: { target: "Ready.SavingPlan", update: "Ready" } }
-        },
         root: states,
         events: Machine.eventsFromSchemas(Event)
       }).handle({
@@ -47,17 +43,20 @@ describe("state value updates", () => {
               Idle: {
                 on: {
                   CreatePlan: {
-                    branches: "transition1",
-                    resolve: ({ ancestors: { Ready: current }, event, select: { destination: target } }) =>
-                      target({
+                    branches: [{ target: "Ready.SavingPlan", update: "Ready" }],
+                    resolve: ({ ancestors: { Ready: current }, event, select }) =>
+                      select.target("Ready.SavingPlan", {
                         data: { request: event.input },
-                        update: { data: State.cases.Ready.make({ ...current, notice: null }), decoded: true }
+                        update: { Ready: { decoded: true, data: State.cases.Ready.make({ ...current, notice: null }) } }
                       })
                   },
                   InvalidPlan: {
-                    branches: "transition2",
-                    resolve: ({ select: { destination: target } }) =>
-                      target({ data: { request: "invalid" }, update: { data: { notice: 1 } as any } })
+                    branches: [{ target: "Ready.SavingPlan", update: "Ready" }],
+                    resolve: ({ select }) =>
+                      select.target("Ready.SavingPlan", {
+                        data: { request: "invalid" },
+                        update: { Ready: { notice: 1 } as any }
+                      })
                   }
                 }
               },
@@ -73,8 +72,7 @@ describe("state value updates", () => {
       })
       assert.deepStrictEqual(Machine.transitionDefinitions(machine)[0]?.branches, [{
         type: "branch",
-        key: "destination",
-        title: "destination",
+        key: "target:Ready.SavingPlan+update:Ready",
         target: "Ready.SavingPlan",
         selection: { kind: "state", scope: "branch", path: "Ready.SavingPlan" },
         updates: ["Ready"]
@@ -120,7 +118,6 @@ describe("state value updates", () => {
       })
       let idleSawDay: string | undefined
       const machine = Machine.make({
-        branches: { transition1: { destination: { target: "Ready.Idle", update: "Ready" } } },
         effects: { source1: Effect.suspend(() => Effect.succeed("Monday")) },
         root: states,
         events: Machine.eventsFromSchemas()
@@ -147,12 +144,14 @@ describe("state value updates", () => {
                   src: "source1",
                   id: "save",
                   onDone: {
-                    branches: "transition1",
-                    resolve: ({ ancestors: { Ready: current }, output, select: { destination: target } }) =>
-                      target({
+                    branches: [{ target: "Ready.Idle", update: "Ready" }],
+                    resolve: ({ ancestors: { Ready: current }, output, select }) =>
+                      select.target("Ready.Idle", {
                         update: {
-                          data: State.cases.Ready.make({ ...current, day: output, notice: "Saved" }),
-                          decoded: true
+                          Ready: {
+                            decoded: true,
+                            data: State.cases.Ready.make({ ...current, day: output, notice: "Saved" })
+                          }
                         }
                       })
                   }
@@ -221,8 +220,7 @@ describe("state value updates", () => {
                   idle: {
                     on: {
                       Increment: {
-                        update: "session",
-                        data: ({ ancestors: { session: current } }) => ({ count: current.count + 1 })
+                        update: { session: ({ ancestors: { session: current } }) => ({ count: current.count + 1 }) }
                       }
                     }
                   }
@@ -287,9 +285,6 @@ describe("state value updates", () => {
         }
       })
       const machine = Machine.make({
-        branches: {
-          transition1: { changed: { update: "scope", title: "Value changed" }, unchanged: { none: true } }
-        },
         root: states,
         events: Machine.eventsFromSchemas(Event)
       }).handle({
@@ -306,9 +301,9 @@ describe("state value updates", () => {
               idle: {
                 on: {
                   Set: {
-                    branches: "transition1",
+                    branches: [{ update: "scope" }, { stay: true }],
                     resolve: ({ event, select }) =>
-                      event.changed ? select.changed({ data: { count: 1 } }) : select.unchanged()
+                      event.changed ? select.update({ scope: { count: 1 } }) : select.stay()
                   }
                 }
               }
@@ -318,15 +313,13 @@ describe("state value updates", () => {
       })
       assert.deepStrictEqual(Machine.transitionDefinitions(machine)[0]?.branches, [{
         type: "branch",
-        key: "changed",
-        title: "Value changed",
+        key: "update:scope",
         target: undefined,
         selection: { kind: "update", scope: "branch", path: "scope" },
         updates: ["scope"]
       }, {
         type: "branch",
-        key: "unchanged",
-        title: "unchanged",
+        key: "stay",
         target: undefined,
         selection: { kind: "none", scope: "local", path: undefined },
         updates: []
@@ -334,10 +327,10 @@ describe("state value updates", () => {
       const initial = yield* Machine.planInitial(machine)
       const changed = yield* Machine.plan(machine, initial.state, Event.cases.Set.make({ changed: true }))
       assert.strictEqual(changed.next.state.value.count, 1)
-      assert.strictEqual(changed.microsteps[0]?.transitions[0]?.branchKey, "changed")
+      assert.strictEqual(changed.microsteps[0]?.transitions[0]?.branchKey, "update:scope")
       const unchanged = yield* Machine.plan(machine, initial.state, Event.cases.Set.make({ changed: false }))
       assert.deepStrictEqual(unchanged.next, initial.state)
-      assert.strictEqual(unchanged.microsteps[0]?.transitions[0]?.branchKey, "unchanged")
+      assert.strictEqual(unchanged.microsteps[0]?.transitions[0]?.branchKey, "stay")
     }))
   it.effect("reenters the handler source, not the updated owner", () =>
     Effect.gen(function*() {
@@ -385,13 +378,11 @@ describe("state value updates", () => {
                 },
                 on: {
                   Quiet: {
-                    update: "scope",
-                    data: ({ ancestors: { scope: current } }) => ({ count: current.count + 1 })
+                    update: { scope: ({ ancestors: { scope: current } }) => ({ count: current.count + 1 }) }
                   },
                   Loud: {
-                    update: "scope",
-                    reenter: true,
-                    data: ({ ancestors: { scope: current } }) => ({ count: current.count + 1 })
+                    update: { scope: ({ ancestors: { scope: current } }) => ({ count: current.count + 1 }) },
+                    reenter: true
                   }
                 }
               }
@@ -422,7 +413,6 @@ describe("state value updates", () => {
         }
       })
       const machine = Machine.make({
-        branches: { transition1: { destination: { update: "scope" } } },
         root: states,
         events: Machine.eventsFromSchemas()
       }).handle({
@@ -438,12 +428,11 @@ describe("state value updates", () => {
             states: {
               idle: {
                 always: {
-                  branches: "transition1",
-                  resolve: ({ ancestors: { scope: current }, decline, select: { destination: owner } }) =>
+                  branches: [{ update: "scope" }, { decline: true }],
+                  resolve: ({ ancestors: { scope: current }, select }) =>
                     current.count < 2
-                      ? owner({ data: { count: current.count + 1 } })
-                      : decline(),
-                  declinable: true
+                      ? select.update({ scope: { count: current.count + 1 } })
+                      : select.decline()
                 }
               }
             }
@@ -481,7 +470,6 @@ describe("state value updates", () => {
         }
       })
       const machine = Machine.make({
-        branches: { transition3: { destination: { history: "main.recent" } } },
         root: states,
         events: Machine.eventsFromSchemas(Event)
       }).handle({
@@ -503,8 +491,7 @@ describe("state value updates", () => {
                 on: {
                   Leave: { target: "outside" },
                   Update: {
-                    update: "main",
-                    data: ({ ancestors: { main: current } }) => ({ count: current.count + 1 })
+                    update: { main: ({ ancestors: { main: current } }) => ({ count: current.count + 1 }) }
                   }
                 }
               }
@@ -512,7 +499,7 @@ describe("state value updates", () => {
           },
           outside: {
             on: {
-              Return: { branches: "transition3", resolve: ({ select: { destination: target } }) => target() }
+              Return: { branches: [{ history: "main.recent" }], resolve: ({ select }) => select.history("main.recent") }
             }
           }
         }
@@ -576,8 +563,8 @@ describe("state value updates", () => {
                   target: "main.left.done"
                 },
                 onDone: {
-                  none: true,
-                  resolve: () => {
+                  stay: true,
+                  commands: () => {
                     completions += 1
                     return undefined
                   }
@@ -594,8 +581,7 @@ describe("state value updates", () => {
                   idle: {
                     on: {
                       Update: {
-                        update: "main",
-                        data: ({ ancestors: { main: current } }) => ({ revision: current.revision + 1 })
+                        update: { main: ({ ancestors: { main: current } }) => ({ revision: current.revision + 1 }) }
                       }
                     }
                   }
@@ -642,7 +628,7 @@ describe("state value updates", () => {
             states: {
               idle: {
                 on: {
-                  Break: { update: "scope", data: () => ({ count: "bad" } as any) }
+                  Break: { update: { scope: () => ({ count: "bad" } as any) } }
                 }
               }
             }
@@ -686,7 +672,7 @@ describe("state value updates", () => {
                 invoke: {
                   src: "source1",
                   id: "load",
-                  onDone: { update: "scope", data: ({ output }) => ({ count: output }) }
+                  onDone: { update: { scope: ({ output }) => ({ count: output }) } }
                 }
               }
             }
@@ -717,7 +703,6 @@ describe("state value updates", () => {
         }
       })
       const machine = Machine.make({
-        branches: { transition1: { destination: { update: "scope" } } },
         root: states,
         events: Events,
         emittedEvents: Emissions
@@ -735,15 +720,15 @@ describe("state value updates", () => {
               idle: {
                 on: {
                   Update: {
-                    branches: "transition1",
-                    resolve: ({ self, select: { destination: owner } }, enqueue) => {
+                    branches: [{ update: "scope" }],
+                    resolve: ({ self, select }, enqueue) => {
                       enqueue.raise(Events.Raised())
                       enqueue.emit(Emissions.Changed({ count: 1 }))
                       enqueue.sendTo(self, Events.Raised())
-                      return owner({ data: { count: 1 } })
+                      return select.update({ scope: { count: 1 } })
                     }
                   },
-                  Raised: { none: true }
+                  Raised: { stay: true }
                 }
               }
             }

@@ -61,8 +61,8 @@ export const parallelOwnerRoutingChildMachine = Machine.make({
         src: "source1",
         id: "signal-parent",
         input: (context) => context,
-        onDone: { none: true },
-        onFailure: { none: true }
+        onDone: { stay: true },
+        onFailure: { stay: true }
       }
     }
   }

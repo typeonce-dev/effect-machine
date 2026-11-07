@@ -12,7 +12,6 @@ const states = Machine.state({ states: { Idle } })
 const Events = Machine.eventsFromSchemas(Increment)
 const Emissions = Machine.emittedEventsFromSchemas(Notice)
 const machine = Machine.make({
-  branches: { transition1: { destination: { target: "Idle" } } },
   id: "counter",
   root: states,
   events: Events,
@@ -27,10 +26,10 @@ const machine = Machine.make({
     Idle: {
       on: {
         Increment: {
-          branches: "transition1",
-          resolve: ({ event, select: { destination: target } }, enqueue) => {
+          branches: [{ target: "Idle" }],
+          resolve: ({ event, select }, enqueue) => {
             enqueue.emit(Emissions.Notice({ value: event.by }))
-            return target({ data: new Idle({}), decoded: true })
+            return select.target("Idle", { data: new Idle({}), decoded: true })
           }
         }
       }
@@ -84,7 +83,7 @@ describe("Machine live inspection", () => {
           trigger: { type: "event", event: "Increment" },
           reenter: false,
           branchIndex: 0,
-          branchKey: "destination",
+          branchKey: "target:Idle",
           target: "Idle",
           resolvedTarget: "Idle",
           updates: []
@@ -195,7 +194,7 @@ describe("Machine live inspection", () => {
         },
         states: {
           Idle: {
-            invoke: { src: "source1", id: "updates", onDone: { none: true } }
+            invoke: { src: "source1", id: "updates", onDone: { stay: true } }
           }
         }
       })
@@ -247,8 +246,8 @@ describe("Machine live inspection", () => {
           ChildIdle: {
             on: {
               Trigger: {
-                none: true,
-                resolve: ({ parent }, enqueue) => {
+                stay: true,
+                commands: ({ parent }, enqueue) => {
                   enqueue.sendTo(parent, ParentEvents.ChildReady())
                   return undefined
                 }

@@ -10,7 +10,7 @@ const machine = Machine.make({
   events: Events
 }).handle({
   initial: { target: "Idle", data: ({ input }) => ({ name: input }) },
-  states: { Idle: { on: { Add: { update: "Idle", data: ({ state }) => state } } } }
+  states: { Idle: { on: { Add: { update: { Idle: ({ state }) => state } } } } }
 })
 
 describe("MachineTest.check", () => {

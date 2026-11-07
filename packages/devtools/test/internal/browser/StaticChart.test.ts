@@ -453,15 +453,14 @@ describe("Static chart", () => {
         accessibleLabel: edge.accessibleLabel,
         badges: edge.badges
       })),
-      [{
-        label: "Begin",
-        accessibleLabel: "Begin · 2 branches",
-        badges: [{ type: "branches", count: 2 }]
-      }]
+      [
+        { label: "Begin · target:Working", accessibleLabel: "Begin · target:Working", badges: [] },
+        { label: "Begin · target:Finished", accessibleLabel: "Begin · target:Finished", badges: [] }
+      ]
     )
     assert.deepStrictEqual(
       model.edges.find((edge) => edge.transitionId === "Idle:transition:0")?.branchIds,
-      ["Idle:transition:0:branch:0", "Idle:transition:0:branch:1"]
+      ["Idle:transition:0:branch:0"]
     )
     assert.deepStrictEqual(model.initials.map(({ target }) => target), ["", "Idle"])
   })
@@ -506,8 +505,7 @@ describe("Static chart", () => {
         "choice",
         "failure",
         "element",
-        "snapshot",
-        "branches"
+        "snapshot"
       ])
     )
 
@@ -770,7 +768,7 @@ describe("Static chart", () => {
     const source = layout.nodes.find(({ node }) => node.path === "Workflow.Review")
     const target = layout.nodes.find(({ node }) => node.path === "Workflow.Review.Failed")
     const parentTransition = layout.edges.find((edge) =>
-      edge.kind === "transition" && edge.edge.label === "Submit · Show validation failure"
+      edge.kind === "transition" && edge.edge.label === "Submit · target:Workflow.Review.Failed"
     )
     const externalFailure = layout.edges.find((edge) =>
       edge.kind === "transition" &&

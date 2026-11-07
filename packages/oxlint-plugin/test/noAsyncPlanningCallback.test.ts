@@ -49,7 +49,7 @@ Machine.make({}).handle({ states: { Ready: { entry: () =>
   invalid: [
     {
       code: `import { Machine } from "@typeonce/effect-machine"
-Machine.make({}).handle({ states: { Loading: { invoke: { src: "load", input: async () => 1, onDone: { none: true, resolve: async () => {} } } } } })`,
+Machine.make({}).handle({ states: { Loading: { invoke: { src: "load", input: async () => 1, onDone: { stay: true, commands: async () => {} } } } } })`,
       errors: [{ messageId: "asyncPlanning" }, { messageId: "asyncPlanning" }]
     },
     {

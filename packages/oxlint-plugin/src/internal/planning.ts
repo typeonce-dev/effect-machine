@@ -130,11 +130,19 @@ const isPropertyPlanningCallback = (
 
   const name = propertyName(property)
   if (
-    name !== undefined && ["resolve", "data", "guard", "initialize"].includes(name) &&
+    name !== undefined && ["resolve", "data", "guard", "initialize", "commands"].includes(name) &&
     isTransitionConfig(property.parent, bindings)
   ) return true
   if (name === "input" && isInvocationConfig(property.parent, bindings)) return true
   const owner = property.parent.parent
+  // A value in `update: { owner: value }`, or the `data` of its decoded construction.
+  const updateRecord = name === "data" && owner.type === "Property" && owner.value === property.parent
+    ? owner.parent.parent
+    : owner
+  if (
+    updateRecord?.type === "Property" && propertyName(updateRecord) === "update" &&
+    updateRecord.parent.type === "ObjectExpression" && isTransitionConfig(updateRecord.parent, bindings)
+  ) return true
   if (
     owner.type === "Property" && propertyName(owner) === "initial" && owner.parent.type === "ObjectExpression" &&
     isStateConfig(owner.parent, bindings)

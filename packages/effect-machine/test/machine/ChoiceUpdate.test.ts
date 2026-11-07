@@ -13,19 +13,18 @@ const Events = Machine.events({ Bump: {} })
 let observed: Array<number> = []
 const machine = Machine.make({
   root: States,
-  events: Events,
-  branches: { route: { low: { target: "Low" }, high: { target: "High" } } }
+  events: Events
 }).handle({
   root: { count: 0 },
   initial: { target: "Idle" },
   states: {
-    Idle: { on: { Bump: { target: "Route", update: "root", data: ({ root }) => ({ count: root.count + 1 }) } } },
+    Idle: { on: { Bump: { target: "Route", update: { root: ({ root }) => ({ count: root.count + 1 }) } } } },
     Route: {
       choice: {
-        branches: "route",
+        branches: [{ target: "Low" }, { target: "High" }],
         resolve: ({ containingState, ancestors, root, select }) => {
           observed.push(containingState.count, ancestors[""].count, root.count)
-          return containingState.count > 0 ? select.high() : select.low()
+          return containingState.count > 0 ? select.target("High") : select.target("Low")
         }
       }
     },
@@ -44,47 +43,41 @@ const NestedStates = Machine.state({
   }
 })
 const NestedEvents = Machine.events({ Bump: {}, Stay: {}, Reset: {} })
-const makeNested = (second: Readonly<Record<string, { readonly target: string }>>) =>
+const makeNested = (second: ReadonlyArray<{ readonly target: string }>) =>
   Machine.make({
     root: NestedStates,
-    events: NestedEvents,
-    branches: {
-      first: { next: { target: "Flow.Second" } },
-      second: second as {
-        readonly even: { readonly target: "Flow.Even" }
-        readonly odd: { readonly target: "Flow.Odd" }
-      }
-    }
+    events: NestedEvents
   }).handle({
     initial: { target: "Flow", data: { count: 0 } },
     states: {
       Flow: {
-        on: { Reset: { update: "Flow", data: () => ({ count: 0 }) } },
+        on: { Reset: { update: { Flow: () => ({ count: 0 }) } } },
         initial: { target: "Flow.Idle" },
         states: {
           Idle: {
             on: {
               Bump: {
                 target: "Flow.First",
-                update: "Flow",
-                data: ({ ancestors }) => ({ count: ancestors.Flow.count + 1 })
+                update: { Flow: ({ ancestors }) => ({ count: ancestors.Flow.count + 1 }) }
               }
             }
           },
-          First: { choice: { branches: "first", resolve: ({ select }) => select.next() } },
+          First: {
+            choice: { branches: [{ target: "Flow.Second" }], resolve: ({ select }) => select.target("Flow.Second") }
+          },
           Second: {
             choice: {
-              branches: "second",
-              resolve: ({ containingState, select }) => containingState.count % 2 === 0 ? select.even() : select.odd()
+              branches: second as readonly [{ readonly target: "Flow.Even" }, { readonly target: "Flow.Odd" }],
+              resolve: ({ containingState, select }) =>
+                containingState.count % 2 === 0 ? select.target("Flow.Even") : select.target("Flow.Odd")
             }
           },
           Even: {
             on: {
               Stay: {
                 target: "Flow.First",
-                update: "Flow",
-                reenter: true,
-                data: ({ ancestors }) => ({ count: ancestors.Flow.count + 2 })
+                update: { Flow: ({ ancestors }) => ({ count: ancestors.Flow.count + 2 }) },
+                reenter: true
               }
             }
           },
@@ -92,8 +85,7 @@ const makeNested = (second: Readonly<Record<string, { readonly target: string }>
             on: {
               Bump: {
                 target: "Flow.First",
-                update: "Flow",
-                data: ({ ancestors }) => ({ count: ancestors.Flow.count + 1 })
+                update: { Flow: ({ ancestors }) => ({ count: ancestors.Flow.count + 1 }) }
               }
             }
           }
@@ -107,7 +99,7 @@ const flowOf = (snapshot: Machine.Snapshot<typeof NestedStates>) => {
   if (snapshot.state.path !== "Flow") throw new Error("Expected Flow")
   return { count: snapshot.state.value.count, path: snapshot.state.state.path }
 }
-const nested = makeNested({ even: { target: "Flow.Even" }, odd: { target: "Flow.Odd" } })
+const nested = makeNested([{ target: "Flow.Even" }, { target: "Flow.Odd" }])
 
 describe("Machine target and update into a choice", () => {
   it.effect("updates the owner before the choice resolves and enters the chosen branch", () =>
@@ -134,7 +126,7 @@ describe("Machine target and update into a choice", () => {
           trigger: { type: "choice" },
           reenter: false,
           branchIndex: 1,
-          branchKey: "high",
+          branchKey: "target:High",
           target: "High",
           resolvedTarget: "High",
           updates: []
@@ -159,11 +151,11 @@ describe("Machine target and update into a choice", () => {
       const mermaid = makeMermaidRenderer<typeof nested, typeof initial.state>(Machine)(nested, initial.state)
       assert.include(text, "├─ ● Idle\n   │  │  └─ ◇ on: Bump\n   │  │     └┄ → First / update Flow")
       assert.include(text, "└─ ◇ on: Stay [reenter]\n   │  │     └┄ → First / update Flow")
-      assert.include(text, "├─ ○ First [choice]\n   │  │  └─ ◇ choice\n   │  │     └┄ [next] → Second")
+      assert.include(text, "├─ ○ First [choice]\n   │  │  └─ ◇ choice\n   │  │     └┄ [target:Flow.Second] → Second")
       assert.include(mermaid, "state state_3 <<choice>>")
       assert.include(mermaid, "state_2 --> state_3: Bump / update Flow")
       assert.include(mermaid, "state_5 --> state_3: Stay [reenter] / update Flow")
-      assert.include(mermaid, "state_4 --> state_6: choice [odd]")
+      assert.include(mermaid, "state_4 --> state_6: choice [target:Flow.Odd]")
     }))
 
   it.effect("applies the update and the chosen target in a running machine", () =>
@@ -197,12 +189,18 @@ describe("Machine target and update into a choice", () => {
           },
           {
             source: "Flow.First",
-            branchKey: "next",
+            branchKey: "target:Flow.Second",
             target: "Flow.Second",
             resolvedTarget: "Flow.Second",
             updates: []
           },
-          { source: "Flow.Second", branchKey: "odd", target: "Flow.Odd", resolvedTarget: "Flow.Odd", updates: [] }
+          {
+            source: "Flow.Second",
+            branchKey: "target:Flow.Odd",
+            target: "Flow.Odd",
+            resolvedTarget: "Flow.Odd",
+            updates: []
+          }
         ]
       )
       const second = yield* Machine.plan(nested, first.next, NestedEvents.Bump())
@@ -246,11 +244,7 @@ describe("Machine target and update into a choice", () => {
     Effect.gen(function*() {
       const grouped = Machine.make({
         root: States,
-        events: Events,
-        branches: {
-          route: { low: { target: "Low" }, high: { target: "High" } },
-          bump: { toRoute: { target: "Route", update: "root", title: "Bump and route" } }
-        }
+        events: Events
       }).handle({
         root: { count: 0 },
         initial: { target: "Idle" },
@@ -258,15 +252,16 @@ describe("Machine target and update into a choice", () => {
           Idle: {
             on: {
               Bump: {
-                branches: "bump",
-                resolve: ({ root, select }) => select.toRoute({ update: { data: { count: root.count + 1 } } })
+                branches: [{ target: "Route", update: "root" }],
+                resolve: ({ root, select }) => select.target("Route", { update: { root: { count: root.count + 1 } } })
               }
             }
           },
           Route: {
             choice: {
-              branches: "route",
-              resolve: ({ containingState, select }) => containingState.count > 0 ? select.high() : select.low()
+              branches: [{ target: "Low" }, { target: "High" }],
+              resolve: ({ containingState, select }) =>
+                containingState.count > 0 ? select.target("High") : select.target("Low")
             }
           },
           Low: {},
@@ -277,8 +272,7 @@ describe("Machine target and update into a choice", () => {
         Machine.transitionDefinitions(grouped).find(({ source }) => source === "Idle")?.branches,
         [{
           type: "branch",
-          key: "toRoute",
-          title: "Bump and route",
+          key: "target:Route+update:root",
           target: "Route",
           selection: { path: "Route", kind: "choice", scope: "branch" },
           updates: [""]
@@ -291,16 +285,16 @@ describe("Machine target and update into a choice", () => {
       assert.deepStrictEqual(
         plan.microsteps[0]?.transitions.map(({ source, branchKey, updates }) => ({ source, branchKey, updates })),
         [
-          { source: "Idle", branchKey: "toRoute", updates: [""] },
-          { source: "Route", branchKey: "high", updates: [] }
+          { source: "Idle", branchKey: "target:Route+update:root", updates: [""] },
+          { source: "Route", branchKey: "target:High", updates: [] }
         ]
       )
     }))
 
   it("rejects a choice branch that can leave the updated owner", () => {
     assert.throws(
-      () => makeNested({ out: { target: "Outside" }, even: { target: "Flow.Even" }, odd: { target: "Flow.Odd" } }),
-      "Machine transition from \"Flow.Idle\" updates \"Flow\" before choice \"Flow.Second\", whose branch \"out\" targets \"Outside\" outside that owner"
+      () => makeNested([{ target: "Outside" }, { target: "Flow.Even" }, { target: "Flow.Odd" }]),
+      "Machine transition from \"Flow.Idle\" updates \"Flow\" before choice \"Flow.Second\", whose branch \"target:Outside\" targets \"Outside\" outside that owner"
     )
   })
 
@@ -318,8 +312,7 @@ describe("Machine target and update into a choice", () => {
                   on: {
                     Bump: {
                       target: "Flow.First",
-                      update: "Flow",
-                      data: ({ ancestors }: any) => ({ count: ancestors.Flow.count + 1 })
+                      update: { Flow: ({ ancestors }: any) => ({ count: ancestors.Flow.count + 1 }) }
                     } as any
                   }
                 },
@@ -346,7 +339,7 @@ describe("Machine target and update into a choice", () => {
             Flow: {
               initial: { target: "Flow.Idle" },
               states: {
-                Idle: { on: { Bump: { target: "Flow.First", update: "Flow.Idle" } as any } },
+                Idle: { on: { Bump: { target: "Flow.First", update: { "Flow.Idle": {} } } as any } },
                 First: { choice: { target: "Flow.Even" } },
                 Second: { choice: { target: "Flow.Even" } },
                 Even: {},

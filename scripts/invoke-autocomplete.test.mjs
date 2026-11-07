@@ -62,7 +62,6 @@ Machine.make({ /*invoke-sources*/root: States, events: Machine.eventsFromSchemas
 const definition = Machine.make({
   effects: { load: (tag: symbol) => Effect.fail("offline").pipe(Effect.as(tag)) },
   streams: { updates: Stream.make(1) },
-  branches: { complete: { ready: { target: "Done" }, unchanged: { none: true } } },
   root: States, events: Machine.eventsFromSchemas(), input: Schema.String
 })
 definition.handle({
@@ -71,7 +70,7 @@ definition.handle({
 })
 definition.handle({ root: { count: 0 }, initial: { target: "Loading" }, states: { Loading: { invoke: {
   src: "load", input: ({ /*invoke-source-context*/ ...context }) => context.event._tag,
-  onDone: { branches: "complete", resolve: ({ /*done-context*/ ...context }) => context.select.ready({ /*done-exact-target*/ }) },
+  onDone: { branches: [{ target: "Done" }], resolve: ({ /*done-context*/ ...context }) => context.select.target("Done", { /*done-exact-target*/ }) },
   onFailure: { target: "Failed", data: ({ /*failure-context*/ ...context }) => ({}) }
 } } } })
 definition.handle({ root: { count: 0 }, initial: { target: "Loading" }, states: { Loading: {
@@ -80,7 +79,7 @@ invoke: {
   src: "load", input: () => Machine.InitialEventTypeId, /*invoke-properties*/
 } } } })
 definition.handle({ root: { count: 0 }, initial: { target: "Loading" }, states: { Loading: { invoke: {
-  src: "updates", onElement: { none: true, resolve: ({ /*element-context*/ ...context }) => undefined }, onDone: { none: true }
+  src: "updates", onElement: { stay: true, commands: ({ /*element-context*/ ...context }) => undefined }, onDone: { stay: true }
 } } } })
 const requiredParentDefinition = Machine.make({ root: States, events: Machine.eventsFromSchemas(), parent: Machine.parent(Machine.eventsFromSchemas()), effects: { wait: (_input: undefined) => Effect.never } })
 requiredParentDefinition.handle({ root: { count: 0 }, initial: { target: "Loading" }, states: { Loading: { invoke: { src: "wait", input: ({ /*required-parent-context*/ ...context }) => undefined } } } })
@@ -91,11 +90,11 @@ definition.handle({ root: { count: 0 }, initial: { target: "Loading" }, states: 
 always: { /*transition-selector*/ }
 } } })
 definition.handle({ root: { count: 0 }, initial: { target: "Loading" }, states: { Loading: { on: {}, always: { target: "Done", /*selected-operations*/ } } } })
-definition.handle({ root: { count: 0 }, initial: { target: "Loading" }, states: { Loading: { always: { none: true, resolve: ({ /*targetless-context*/ ...context }) => undefined } } } })
+definition.handle({ root: { count: 0 }, initial: { target: "Loading" }, states: { Loading: { always: { stay: true, commands: ({ /*targetless-context*/ ...context }) => undefined } } } })
 definition.handle({ root: { count: 0 }, initial: { target: "Loading" }, states: { Loading: { always: { target: "Done", data: ({ /*transition-context*/ ...context }) => ({}) } } } })
-definition.handle({ root: { count: 0 }, initial: { target: "Loading" }, states: { Loading: { always: { branches: "complete", resolve: ({ /*branch-resolve-context*/ ...context }) => context.select./*branch-select-keys*/ready({ /*transition-exact-target*/ }) } } } })
-definition.handle({ root: { count: 0 }, initial: { target: "Loading" }, states: { Loading: { always: { none: true, resolve: ({ /*required-context*/ ...context }) => undefined } } } })
-definition.handle({ root: { count: 0 }, initial: { target: "Loading" }, states: { Loading: { always: { none: true, declinable: true, resolve: ({ /*declinable-context*/ ...context }) => context.decline() } } } })
+definition.handle({ root: { count: 0 }, initial: { target: "Loading" }, states: { Loading: { always: { branches: [{ target: "Done" }, { stay: true }], resolve: ({ /*branch-resolve-context*/ ...context }) => context.state === undefined ? context.select.stay() : context.select./*branch-select-keys*/target("Done", { /*transition-exact-target*/ }) } } } })
+definition.handle({ root: { count: 0 }, initial: { target: "Loading" }, states: { Loading: { always: { stay: true, commands: ({ /*required-context*/ ...context }) => undefined } } } })
+definition.handle({ root: { count: 0 }, initial: { target: "Loading" }, states: { Loading: { always: { branches: [{ stay: true }, { decline: true }], resolve: ({ /*declinable-context*/ ...context }) => context.state === undefined ? context.select.stay() : context.select.decline() } } } })
 
 // @ts-expect-error Empty paths keep the completion position unfiltered.
 definition.handle({ root: { count: 0 }, initial: { target: "" } })
@@ -106,13 +105,15 @@ definition.handle({ root: { count: 0 }, initial: { target: "Loading" }, states: 
 // @ts-expect-error Empty paths keep the completion position unfiltered.
 definition.handle({ root: { count: 0 }, initial: { target: "Loading" }, states: { Loading: { always: { target: "" } } } })
 // @ts-expect-error Empty paths keep the completion position unfiltered.
-definition.handle({ root: { count: 0 }, initial: { target: "Loading" }, states: { Loading: { always: { update: "", data: {} } } } })
+definition.handle({ root: { count: 0 }, initial: { target: "Loading" }, states: { Loading: { always: { update: { "": {} } } } } })
+// @ts-expect-error An empty update record keeps the owner position unfiltered.
+definition.handle({ root: { count: 0 }, initial: { target: "Loading" }, states: { Loading: { always: { update: {  } } } } })
 // @ts-expect-error Empty paths keep the completion position unfiltered.
-Machine.make({ root: States, events: Machine.eventsFromSchemas(), branches: { probe: { destination: { target: "" } } } })
+definition.handle({ root: { count: 0 }, initial: { target: "Loading" }, states: { Loading: { always: { branches: [{ target: "" }], resolve: ({ select }) => select.stay() } } } })
 
 const eventDefinition = Machine.make({ root: States, events: Machine.events({ Retry: {} }) })
 eventDefinition.handle({ root: { count: 0 }, initial: { target: "Loading" }, states: { Loading: { on: { /*event-handler-on*/ } } } })
-eventDefinition.handle({ root: { count: 0 }, initial: { target: "Loading" }, /*event-handler-root*/ states: { Loading: { /*event-handler-node*/ on: { Retry: { none: true } } } } })
+eventDefinition.handle({ root: { count: 0 }, initial: { target: "Loading" }, /*event-handler-root*/ states: { Loading: { /*event-handler-node*/ on: { Retry: { stay: true } } } } })
 
 `
 
@@ -264,7 +265,7 @@ test("contextually completes transition definitions while authoring", () => {
 
 
   const selector = completions("transition-selector")
-  assert.equal(selector.has("none"), true)
+  assert.equal(selector.has("stay"), true)
   assert.equal(selector.has("branches"), true)
   assert.equal(selector.has("full"), false)
 
@@ -273,7 +274,7 @@ test("contextually completes transition definitions while authoring", () => {
   assert.equal(targets.has("Failed"), true)
   assert.equal(targets.has("root"), false)
 
-  const owners = probeCompletions('always: { update: "|", data: {} }')
+  const owners = probeCompletions('always: { update: { | } } } } })')
   assert.equal(owners.has("root"), true)
   assert.equal(owners.has("Loading"), true)
   assert.equal(owners.has("Done"), false)
@@ -293,7 +294,7 @@ test("contextually completes transition definitions while authoring", () => {
   assert.equal(targetless.has("state"), true)
   assert.equal(targetless.has("target"), false)
 
-  const branchTargets = probeCompletions('destination: { target: "|" }')
+  const branchTargets = probeCompletions('branches: [{ target: "|" }], resolve: ({ select }) => select.stay() }')
   assert.equal(branchTargets.has("Done"), true)
   assert.equal(branchTargets.has("Loading"), true)
   assert.equal(branchTargets.has("root"), false)
@@ -304,15 +305,16 @@ test("contextually completes transition definitions while authoring", () => {
   assert.equal(resolve.has("target"), false)
 
   const select = completions("branch-select-keys")
-  assert.equal(select.has("ready"), true)
-  assert.equal(select.has("unchanged"), true)
+  assert.equal(select.has("target"), true)
+  assert.equal(select.has("stay"), true)
+  assert.equal(select.has("decline"), true)
   assert.equal(select.has("Done"), false)
 
   const required = completions("required-context")
-  assert.equal(required.has("decline"), true)
+  assert.equal(required.has("decline"), false)
 
   const declinable = completions("declinable-context")
-  assert.equal(declinable.has("decline"), true)
+  assert.equal(declinable.has("select"), true)
 
   const selected = completions("selected-operations")
   assert.equal(selected.has("data"), true)

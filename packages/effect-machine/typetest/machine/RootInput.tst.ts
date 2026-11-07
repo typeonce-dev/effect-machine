@@ -13,8 +13,7 @@ describe("root input construction", () => {
     const definition = Machine.make({
       root,
       input: Schema.Struct({ request: Schema.String }),
-      events: Machine.events({ Reload: { request: Schema.String }, Branch: {} }),
-      branches: { reset: { root: { initialize: true } } }
+      events: Machine.events({ Reload: { request: Schema.String }, Branch: {} })
     })
     const machine = definition.handle({
       initial: {
@@ -27,13 +26,13 @@ describe("root input construction", () => {
       on: {
         Reload: { initialize: ({ event }) => ({ request: event.request }) },
         Branch: {
-          branches: "reset",
+          branches: [{ initialize: true }],
           resolve: ({ select }) => {
-            expect(select.root).type.not.toBeCallableWith()
-            expect(select.root).type.not.toBeCallableWith({ data: { request: "a" } })
-            expect(select.root).type.not.toBeCallableWith({ input: { request: 1 } })
-            expect(select.root).type.not.toBeCallableWith({ input: () => ({ request: "a" }) })
-            return select.root({ input: { request: "a" } })
+            expect(select.initialize).type.not.toBeCallableWith()
+            expect(select.initialize).type.not.toBeCallableWith({ data: { request: "a" } })
+            expect(select.initialize).type.not.toBeCallableWith({ input: { request: 1 } })
+            expect(select.initialize).type.not.toBeCallableWith({ input: () => ({ request: "a" }) })
+            return select.initialize({ input: { request: "a" } })
           }
         }
       },
@@ -74,7 +73,7 @@ describe("root input construction", () => {
     expect(definition.handle).type.not.toBeCallableWith({
       initial,
       states,
-      on: { Reload: { initialize: { request: "a" }, update: "root" } }
+      on: { Reload: { initialize: { request: "a" }, update: { root: {} } } }
     })
     expect(definition.handle).type.toBeCallableWith({
       initial,

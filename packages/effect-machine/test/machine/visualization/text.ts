@@ -27,7 +27,7 @@ const triggerLabels = (definitions: ReadonlyArray<TransitionDefinition>): Readon
         return [
           branch.type === "direct"
             ? `update ${branch.updates.join(", ")}`
-            : `[${branch.title}] update ${branch.updates.join(", ")}`
+            : `[${branch.key}] update ${branch.updates.join(", ")}`
         ]
       }
       if (branch.target === undefined) return []
@@ -37,7 +37,7 @@ const triggerLabels = (definitions: ReadonlyArray<TransitionDefinition>): Readon
       return [
         branch.type === "direct" ?
           `→ ${target}${updates}` :
-          `[${branch.title}] → ${target}${updates}`
+          `[${branch.key}] → ${target}${updates}`
       ]
     })
     if (branches.length === 0) return []

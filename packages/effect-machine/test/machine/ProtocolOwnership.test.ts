@@ -22,8 +22,8 @@ describe("protocol ownership", () => {
           State: {
             on: {
               Set: {
-                none: true,
-                resolve: ({ event }) => {
+                stay: true,
+                commands: ({ event }) => {
                   retained = event
                 }
               }
@@ -59,7 +59,7 @@ describe("protocol ownership", () => {
             data: { _tag: "State" }
           },
           states: {
-            State: { on: { Internal: { none: true } } }
+            State: { on: { Internal: { stay: true } } }
           }
         })
       const initial = yield* Machine.planInitial(machine)

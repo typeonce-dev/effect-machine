@@ -18,8 +18,7 @@ const makeChild = (work: Effect.Effect<void>) =>
     events: ChildEvents,
     input: Schema.Struct({ id: Schema.String }),
     parent: Machine.parent(ParentEvents),
-    effects: { work: (_: unknown) => work },
-    branches: { finished: { done: { target: "Done" } } }
+    effects: { work: (_: unknown) => work }
   }).handle({
     root: ({ input }) => input,
     initial: { target: "Idle" },
@@ -30,10 +29,10 @@ const makeChild = (work: Effect.Effect<void>) =>
           src: "work",
           input: ({ root }) => root,
           onDone: {
-            branches: "finished",
+            branches: [{ target: "Done" }],
             resolve: ({ parent, select }, enqueue) => {
               enqueue.sendTo(parent, ParentEvents.Finished())
-              return select.done()
+              return select.target("Done")
             }
           }
         }

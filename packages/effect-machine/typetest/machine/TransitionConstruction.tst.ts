@@ -15,7 +15,6 @@ const root1 = Machine.state({
   }
 })
 const definition = Machine.make({
-  branches: { saved: { ready: { target: "Saved" } } },
   root: root1,
   events: Machine.events({ Save: { text: Schema.String } })
 })
@@ -30,14 +29,14 @@ describe("transition construction", () => {
           on: {
             Save: {
               target: "Saved",
-              update: "root",
+              update: { root: ({ root, event }) => ({ count: root.count + 1 }) },
               reenter: true,
               guard: ({ root, event }) => {
                 expect(root).type.toBe<Root>()
                 expect(event.text).type.toBe<string>()
                 return event.text.length > 0
               },
-              data: ({ root, event }) => ({ target: { text: event.text }, update: { count: root.count + 1 } })
+              data: ({ root, event }) => ({ text: event.text })
             }
           }
         },
@@ -78,8 +77,8 @@ describe("transition construction", () => {
           on: {
             Save: {
               target: "Saved",
-              update: "root",
-              data: () => ({ target: {}, update: { count: 1 } })
+              update: { root: () => ({ count: 1 }) },
+              data: () => ({})
             }
           }
         },
@@ -103,8 +102,8 @@ describe("transition construction", () => {
           on: {
             Save: {
               target: "Saved",
-              update: "root",
-              data: () => ({ target: { text: "" }, update: {} })
+              update: { root: () => ({}) },
+              data: () => ({ text: "" })
             }
           }
         },
@@ -147,9 +146,9 @@ describe("transition construction", () => {
           on: {
             Save: {
               target: "Saved",
-              update: "root",
+              update: { root: { decoded: true, data: () => (new Root({ count: 1 })) } },
               decoded: true,
-              data: () => ({ target: { text: "" }, update: new Root({ count: 1 }) })
+              data: () => ({ text: "" })
             }
           }
         },
@@ -173,9 +172,9 @@ describe("transition construction", () => {
           on: {
             Save: {
               target: "Saved",
-              update: "root",
+              update: { root: { decoded: true, data: () => ({ count: 1 }) } },
               decoded: true,
-              data: () => ({ target: new Saved({ text: "" }), update: { count: 1 } })
+              data: () => (new Saved({ text: "" }))
             }
           }
         },
@@ -202,9 +201,9 @@ describe("transition construction", () => {
           on: {
             Save: {
               target: "Saved",
-              update: "root",
+              update: { root: { decoded: true, data: () => (new Root({ count: 1 })) } },
               decoded: true,
-              data: () => ({ target: new Saved({ text: "" }), update: new Root({ count: 1 }) })
+              data: () => (new Saved({ text: "" }))
             }
           }
         },
@@ -229,8 +228,8 @@ describe("transition construction", () => {
           on: {
             Save: {
               target: "Nested",
-              update: "root",
-              data: () => ({ target: { label: "" }, update: { count: 1 } })
+              update: { root: () => ({ count: 1 }) },
+              data: () => ({ label: "" })
             }
           }
         },
@@ -250,7 +249,7 @@ describe("transition construction", () => {
     })
     expect(definition.handle).type.not.toBeCallableWith({
       states: {
-        Idle: { on: { Save: { update: "Idle", data: () => undefined } } },
+        Idle: { on: { Save: { update: { Idle: () => undefined } } } },
         Nested: {
           initial: {
             target: "Nested.Child",
@@ -273,13 +272,16 @@ describe("transition construction", () => {
       },
       on: {
         Save: {
-          update: "root",
-          guard: ({ root, event }) => root.count > event.text.length,
-          decoded: true,
-          data: ({ root }) => {
-            expect(root).type.toBe<Root>()
-            return root
-          }
+          update: {
+            root: {
+              decoded: true,
+              data: ({ root }) => {
+                expect(root).type.toBe<Root>()
+                return root
+              }
+            }
+          },
+          guard: ({ root, event }) => root.count > event.text.length
         }
       },
       states: {
@@ -300,7 +302,7 @@ describe("transition construction", () => {
       }
     })
     expect(definition.handle).type.not.toBeCallableWith({
-      on: { Save: { update: "root", data: () => ({}) } },
+      on: { Save: { update: { root: () => ({}) } } },
       root: () => {
         throw new Error("type-only constructor")
       },
@@ -317,7 +319,7 @@ describe("transition construction", () => {
       }
     })
     expect(definition.handle).type.not.toBeCallableWith({
-      on: { Save: { update: "root", reenter: true, data: () => ({ count: 1 }) } },
+      on: { Save: { update: { root: () => ({ count: 1 }) }, reenter: true } },
       root: () => {
         throw new Error("type-only constructor")
       },
@@ -343,11 +345,11 @@ describe("transition construction", () => {
         Idle: {
           on: {
             Save: {
-              branches: "saved",
+              branches: [{ target: "Saved" }],
               reenter: true,
               resolve: ({ event, select }) => {
                 expect(event.text).type.toBe<string>()
-                return select.ready({ data: { text: event.text } })
+                return select.target("Saved", { data: { text: event.text } })
               }
             }
           }

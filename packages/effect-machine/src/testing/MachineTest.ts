@@ -1460,7 +1460,7 @@ export type ExploreOptions<M extends AnyMachine, Key extends ExplorationKey = Ex
  *   states: {
  *     Count: {
  *       on: {
- *         Increment: { update: "Count", data: ({ state }) => ({ value: state.value + 1 }) }
+ *         Increment: { update: { Count: ({ state }) => ({ value: state.value + 1 }) } }
  *       }
  *     }
  *   }

@@ -20,14 +20,6 @@ const InternalEvents = Machine.internalEventsFromSchemas(InternalEvent)
 const machine = Machine.make({
   effects: { load: Effect.succeed("ready") },
   timers: { delay: "1 second" },
-  branches: {
-    start: {
-      cached: { target: "Loading" },
-      measured: { none: true },
-      named: { target: "Done" },
-      confirmed: { target: "Idle" }
-    }
-  },
   id: "Consumer",
   root: States,
   events: PublicEvents,
@@ -38,16 +30,16 @@ const machine = Machine.make({
     Idle: {
       on: {
         Start: {
-          branches: "start",
-          resolve: ({ select }) => select.cached({ data: State.cases.Loading.make({}), decoded: true })
+          branches: [{ target: "Loading" }],
+          resolve: ({ select }) => select.target("Loading", { data: State.cases.Loading.make({}), decoded: true })
         }
       }
     },
     Loading: {
-      invoke: [{ src: "load", id: "fixture-load", onDone: { none: true } }, {
+      invoke: [{ src: "load", id: "fixture-load", onDone: { stay: true } }, {
         src: "delay",
         id: "fixture-delay",
-        onDone: { none: true }
+        onDone: { stay: true }
       }],
       on: {
         Loaded: {

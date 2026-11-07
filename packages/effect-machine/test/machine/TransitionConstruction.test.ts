@@ -10,7 +10,6 @@ const events = Machine.events({
 })
 const root1 = Machine.state({ schema: Root, states: { Idle: {}, Saved: { schema: Saved } } })
 const definition = Machine.make({
-  branches: { rootUpdate: { updated: { update: "root" } } },
   root: root1,
   events
 })
@@ -33,11 +32,8 @@ describe("transition construction", () => {
             on: {
               Save: {
                 target: "Saved",
-                update: "root",
-                data: ({ event }) => ({
-                  target: { text: event.text },
-                  update: { count: event.count }
-                })
+                update: { root: ({ event }) => ({ count: event.count }) },
+                data: ({ event }) => ({ text: event.text })
               }
             }
           },
@@ -70,9 +66,9 @@ describe("transition construction", () => {
             on: {
               Save: {
                 target: "Saved",
-                update: "root",
+                update: { root: { decoded: true, data: () => rootValue } },
                 decoded: true,
-                data: () => ({ target: targetValue, update: rootValue })
+                data: () => targetValue
               }
             }
           },
@@ -99,8 +95,7 @@ describe("transition construction", () => {
             on: {
               Reset: {
                 target: "Idle",
-                update: "root",
-                data: () => ({ target: undefined, update: { count: 5 } })
+                update: { root: () => ({ count: 5 }) }
               }
             }
           }
@@ -127,11 +122,8 @@ describe("transition construction", () => {
               on: {
                 Save: {
                   target: "Saved",
-                  update: "root",
-                  data: () => ({
-                    target: { text: invalidOwner ? "valid" : 42 as unknown as string },
-                    update: { count: invalidOwner ? "invalid" as unknown as number : 1 }
-                  })
+                  update: { root: () => ({ count: invalidOwner ? "invalid" as unknown as number : 1 }) },
+                  data: () => ({ text: invalidOwner ? "valid" : 42 as unknown as string })
                 }
               }
             },
@@ -160,27 +152,26 @@ describe("transition construction", () => {
             target: "Idle"
           },
           root: () => ({ count: 0 }),
-          on: { Change: { update: "root", data: ({ root: current }) => ({ count: current.count + 10 }) } },
+          on: { Change: { update: { root: ({ root: current }) => ({ count: current.count + 10 }) } } },
           states: {
             Idle: {
               on: {
                 Change: combined ?
                   {
                     target: "Saved",
-                    update: "root",
+                    update: { root: () => ({ count: 1 }) },
                     guard: ({ root, event }) => root.count === 0 && event.allowed,
                     data: () => {
                       constructed++
-                      return { target: { text: "saved" }, update: { count: 1 } }
+                      return { text: "saved" }
                     }
                   } :
                   {
-                    branches: "rootUpdate",
+                    update: { root: { count: 1 } },
                     guard: ({ root, event }) => root.count === 0 && event.allowed,
-                    resolve: ({ select }, enqueue) => {
+                    commands: (_, enqueue) => {
                       constructed++
                       enqueue.raise(events.Reset())
-                      return select.updated({ data: { count: 1 } })
                     }
                   }
               }
@@ -224,18 +215,14 @@ describe("transition construction", () => {
             on: {
               Change: {
                 target: "Saved",
-                update: "root",
+                update: { root: ({ root: current }) => ({ count: current.count + 1 }) },
                 reenter: true,
                 guard: ({ event }) => event.allowed,
-                data: ({ root: current, state }) => ({
-                  target: { text: state.text },
-                  update: { count: current.count + 1 }
-                })
+                data: ({ state }) => ({ text: state.text })
               },
               Reset: {
-                none: true,
                 reenter: true,
-                resolve: (_, enqueue) => {
+                commands: (_, enqueue) => {
                   enqueue.raise(events.Change({ allowed: false }))
                 }
               }
@@ -269,7 +256,7 @@ describe("transition construction", () => {
             entry: () => {
               entered++
             },
-            on: { Change: { none: true, reenter: true, guard: ({ event }) => event.allowed } }
+            on: { Change: { reenter: true, guard: ({ event }) => event.allowed } }
           },
           Saved: {}
         }
@@ -294,11 +281,11 @@ describe("transition construction", () => {
         states: {
           Idle: {
             on: {
-              Reset: { none: true, resolve: () => undefined, data: () => undefined } as any
+              Reset: { stay: true, commands: () => undefined, data: () => undefined } as any
             }
           },
           Saved: {}
         }
-      }), /data and resolve are mutually exclusive/)
+      }), /targetless transition accepts no data/)
   })
 })

@@ -34,6 +34,22 @@ export const construction = (value: unknown): Constructor => {
   return (context) => Topology.makeStateInput(value === undefined ? {} : resolve(context))
 }
 
+/** One `update` record value: a make input, a function of the context, or a decoded construction. */
+export const ownerUpdate = (value: unknown): Constructor => {
+  const descriptor = typeof value === "object" && value !== null &&
+    hasProperty(value, "decoded") && value.decoded === true && hasProperty(value, "data")
+  if (descriptor) {
+    const config = record(value, "decoded construction")
+    if (Reflect.ownKeys(config).some((key) => key !== "decoded" && key !== "data")) {
+      throw new Error("Machine decoded construction accepts only decoded and data")
+    }
+    const resolve = evaluate(config.data)
+    return (context) => ({ decoded: true, data: resolve(context) })
+  }
+  const resolve = evaluate(value)
+  return (context) => ({ data: resolve(context) })
+}
+
 export const edgeConstruction = (config: Readonly<Record<string, unknown>>): Constructor => {
   if (config.decoded !== undefined && typeof config.decoded !== "boolean") {
     throw new Error("Machine decoded construction flag must be a boolean")

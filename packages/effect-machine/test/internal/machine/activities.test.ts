@@ -58,9 +58,9 @@ const activityMachine = Machine.make({
     Loading: {
       invoke: [
         { src: "source1", id: "poll-server", address: Machine.childAddress("poll-server") },
-        { src: "source2", id: "load-document", onDone: { none: true }, onFailure: { none: true } },
-        { src: "source3", id: "load-timeout", onDone: { none: true } },
-        { src: "source4", id: "updates", onDone: { none: true } },
+        { src: "source2", id: "load-document", onDone: { stay: true }, onFailure: { stay: true } },
+        { src: "source3", id: "load-timeout", onDone: { stay: true } },
+        { src: "source4", id: "updates", onDone: { stay: true } },
         { src: "source5" }
       ]
     },
@@ -183,7 +183,7 @@ describe("machine activity metadata", () => {
         },
         states: {
           Loading: {
-            invoke: { src: "source1", id: id, onDone: { none: true } }
+            invoke: { src: "source1", id: id, onDone: { stay: true } }
           },
           Dynamic: {}
         }

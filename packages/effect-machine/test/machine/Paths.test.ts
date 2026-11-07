@@ -34,26 +34,26 @@ describe("declared state paths", () => {
       definition.handle({ root: { count: 0 }, initial: { target: "Idle" }, on: { Go: on } } as never)
     assert.throws(() => handle({ target: "Missing" }), /not a declared state path/)
     assert.throws(() => handle({ target: "Idle.Missing" }), /not a declared state path/)
-    assert.throws(() => handle({ update: "" }), /not a declared state path/)
+    assert.throws(() => handle({ update: { "": {} } }), /not a declared state path/)
     assert.throws(() => handle({ target: "root" }), /use initialize/)
     assert.throws(() => handle({ initialize: {} }), /requires true/)
     assert.throws(() => handle({ initialize: true, target: "Idle" }), /exactly one destination/)
-    assert.throws(() => handle({ initialize: true, update: "root" }), /cannot update/)
+    assert.throws(() => handle({ initialize: true, update: { root: {} } }), /cannot update/)
     assert.throws(() => handle({ initialize: true, data: {} }), /instead of data/)
-    assert.doesNotThrow(() => handle({ update: "root", data: { count: 1 } }))
+    assert.doesNotThrow(() => handle({ update: { root: { count: 1 } } }))
   })
 
-  it("rejects branch declarations that supply initialize input", () => {
+  it("rejects a branch entry that supplies initialize input", () => {
     const root = Machine.state({ states: { Idle: {} } })
     assert.throws(
       () =>
-        Machine.make({
-          root,
-          input: Schema.Number,
-          events: Machine.events({}),
-          branches: { reset: { root: { initialize: 1 } } }
-        } as never),
-      /initialize: true/
+        Machine.make({ root, input: Schema.Number, events: Machine.events({ Reset: {} }) }).handle({
+          initial: { target: "Idle" },
+          states: {
+            Idle: { on: { Reset: { branches: [{ initialize: 1 }], resolve: () => undefined } as never } }
+          }
+        }),
+      /must be one destination/
     )
   })
 
@@ -82,7 +82,7 @@ describe("declared state paths", () => {
         on: { Reset: { initialize: true } },
         states: {
           Idle: { on: { Work: { target: "Busy" } } },
-          Busy: { on: { Work: { update: "root", data: ({ root }) => ({ count: root.count + 1 }) } } }
+          Busy: { on: { Work: { update: { root: ({ root }) => ({ count: root.count + 1 }) } } } }
         }
       })
       const initial = yield* Machine.planInitial(machine)

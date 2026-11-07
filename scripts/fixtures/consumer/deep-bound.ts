@@ -94,10 +94,6 @@ const Emissions = Machine.emittedEventsFromSchemas(Emitted.cases.Notice)
 const definition = Machine.make({
   effects: { load: Effect.asVoid(ExternalService) },
   children: { child: Child },
-  branches: {
-    ready: { ready: { target: "Ready" } },
-    notice: { saved: { target: "Ready.Editor.Saving" } }
-  },
   root: States,
   events: Machine.eventsFromSchemas(Event.cases.Begin, Event.cases.Save, ChildParentEvents),
   internalEvents: Machine.internalEventsFromSchemas(Internal.cases.Loaded, Internal.cases.ChildCompleted),
@@ -112,12 +108,12 @@ const machine = definition.handle({
   },
   states: {
     Idle: {
-      invoke: { src: "load", id: "deep-inline-invoke", onDone: { none: true } },
+      invoke: { src: "load", id: "deep-inline-invoke", onDone: { stay: true } },
       on: {
         Begin: {
-          branches: "ready",
-          resolve: ({ select: { ready: target } }) =>
-            target({
+          branches: [{ target: "Ready" }],
+          resolve: ({ select }) =>
+            select.target("Ready", {
               data: State.cases.Ready.make({}),
               decoded: true,
               states: {
@@ -149,17 +145,20 @@ const machine = definition.handle({
                   decoded: true,
                   data: ({ event }) => State.cases.Saving.make({ value: event.value })
                 },
-                Loaded: { none: true }
+                Loaded: { stay: true }
               }
             },
             Saving: {
-              invoke: { src: "child", input: ({ state }) => ({ value: state.value }), onDone: { none: true } },
+              invoke: { src: "child", input: ({ state }) => ({ value: state.value }), onDone: { stay: true } },
               on: {
                 ChildNotice: {
-                  branches: "notice",
+                  branches: [{ target: "Ready.Editor.Saving" }],
                   resolve: ({ event, select }, enqueue) => {
                     enqueue.emit(Emissions.Notice({ value: event.value }))
-                    return select.saved({ data: State.cases.Saving.make({ value: event.value }), decoded: true })
+                    return select.target("Ready.Editor.Saving", {
+                      data: State.cases.Saving.make({ value: event.value }),
+                      decoded: true
+                    })
                   }
                 },
                 ChildCompleted: {

@@ -16,10 +16,6 @@ const States = Machine.state({
   }
 })
 const base = Machine.make({
-  branches: {
-    transition3: { destination: { target: "opened" } },
-    transition4: { destination: { target: "opened" } }
-  },
   root: States,
   events: Machine.eventsFromSchemas(Open)
 })
@@ -87,9 +83,9 @@ describe("declared initial entry types", () => {
         closed: {
           on: {
             Open: {
-              branches: "transition3",
-              resolve: ({ select: { destination: target } }) =>
-                target({
+              branches: [{ target: "opened" }],
+              resolve: ({ select }) =>
+                select.target("opened", {
                   data: new Opened({ id: "team-1" }),
                   decoded: true,
                   states: { loading: { data: new Loading({}), decoded: true } }
@@ -121,14 +117,16 @@ describe("declared initial entry types", () => {
         closed: {
           on: {
             Open: {
-              branches: "transition4",
-              resolve: ({ select: { destination: target } }) => {
-                expect(target).type.not.toBeCallableWith()
-                expect(target).type.not.toHaveProperty("initial")
-                expect(target).type.not.toBeCallableWith({ decoded: true })
-                expect(target).type.toBeCallableWith({ data: new Opened({ id: "team-1" }), decoded: true })
-                expect(target).type.toBeCallableWith({ data: { id: "team-1" } })
-                return target({
+              branches: [{ target: "opened" }],
+              resolve: ({ select }) => {
+                expect(select.target).type.not.toBeCallableWith("opened")
+                expect(select.target).type.not.toBeCallableWith("opened", { decoded: true })
+                expect(select.target).type.toBeCallableWith("opened", {
+                  data: new Opened({ id: "team-1" }),
+                  decoded: true
+                })
+                expect(select.target).type.toBeCallableWith("opened", { data: { id: "team-1" } })
+                return select.target("opened", {
                   data: new Opened({ id: "team-1" }),
                   decoded: true,
                   states: { loading: { data: new Loading({}), decoded: true } }

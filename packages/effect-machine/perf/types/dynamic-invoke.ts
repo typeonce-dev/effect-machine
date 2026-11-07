@@ -20,16 +20,16 @@ const invoked = machine.handle({
         src: "load-user",
         input: ({ state }) => state.userId,
         onDone: {
-          none: true,
-          resolve: ({ output }) => {
+          stay: true,
+          commands: ({ output }) => {
             const user: User = output
             void user
             return undefined
           }
         },
         onFailure: {
-          none: true,
-          resolve: ({ error }) => {
+          stay: true,
+          commands: ({ error }) => {
             const loadError: LoadError = error
             void loadError
             return undefined

@@ -89,7 +89,7 @@ const activityLabel = (activity: VisualizationActivity): string => {
 
 const transitionLabel = (transition: VisualizationTransition, branch: VisualizationBranch): string => {
   const trigger = triggerLabel(transition)
-  return branch.type === "branch" ? `${trigger} · ${branch.title}` : trigger
+  return branch.type === "branch" ? `${trigger} · ${branch.key}` : trigger
 }
 
 interface TriggerPresentation {
@@ -118,7 +118,7 @@ const triggerPresentation = (transition: VisualizationTransition): TriggerPresen
 const visibleLabel = (transition: VisualizationTransition, branches: ReadonlyArray<VisualizationBranch>): string => {
   const presentation = triggerPresentation(transition)
   if (branches.length !== 1 || branches[0]?.type !== "branch") return presentation.label
-  return [presentation.label, branches[0].title].filter((part) => part.length > 0).join(" · ")
+  return [presentation.label, branches[0].key].filter((part) => part.length > 0).join(" · ")
 }
 
 const labelBadges = (

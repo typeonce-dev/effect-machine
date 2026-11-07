@@ -670,7 +670,6 @@ describe("Machine", () => {
   it("types the closed enqueue protocol without exposing Effects", () => {
     const worker = Machine.childAddress<SignIn>("worker")
     const machine = Machine.make({
-      branches: { transition1: { destination: { target: "down" } } },
       root: UpStates,
       events: Machine.eventsFromSchemas(SignIn),
       emittedEvents: Machine.emittedEventsFromSchemas(SignInCompleted)
@@ -714,8 +713,8 @@ describe("Machine", () => {
         down: {
           on: {
             SignIn: {
-              branches: "transition1",
-              resolve: ({ event, select: { destination: target } }, enqueue) => {
+              branches: [{ target: "down" }],
+              resolve: ({ event, select }, enqueue) => {
                 expect(enqueue.raise).type.toBeCallableWith(event)
                 expect(enqueue.raise).type.not.toBeCallableWith(new Down({}))
                 expect(enqueue.emit).type.toBeCallableWith(new SignInCompleted({ userId: event.userId }))
@@ -724,7 +723,7 @@ describe("Machine", () => {
                 expect(enqueue.sendTo).type.not.toBeCallableWith(worker, new Down({}))
                 expect(enqueue.stop).type.toBeCallableWith(worker)
                 expect(enqueue.stop).type.not.toBeCallableWith("worker")
-                return target({ data: new Down({}), decoded: true })
+                return select.target("down", { data: new Down({}), decoded: true })
               }
             }
           }
@@ -898,7 +897,7 @@ describe("Machine", () => {
     // Lazy Effects are valid registered values; a value source forbids an input mapper.
     expect(machine.handle).type.not.toBeCallableWith({
       states: {
-        down: { invoke: { src: "source1", input: () => undefined, onDone: { none: true } } },
+        down: { invoke: { src: "source1", input: () => undefined, onDone: { stay: true } } },
         up: {
           initial: {
             auth: () => {
@@ -1098,15 +1097,15 @@ describe("Machine", () => {
             id: "updates",
             input: (context) => context,
             onElement: {
-              none: true,
-              resolve: ({ element }) => {
+              stay: true,
+              commands: ({ element }) => {
                 expect(element).type.toBe<1>()
               }
             },
-            onDone: { none: true },
+            onDone: { stay: true },
             onFailure: {
-              none: true,
-              resolve: ({ error }) => {
+              stay: true,
+              commands: ({ error }) => {
                 expect(error).type.toBe<StreamFailure>()
               }
             }
@@ -1159,15 +1158,15 @@ describe("Machine", () => {
             id: "static-updates",
             input: (context) => context,
             onElement: {
-              none: true,
-              resolve: ({ element }) => {
+              stay: true,
+              commands: ({ element }) => {
                 expect(element).type.toBe<1>()
               }
             },
-            onDone: { none: true },
+            onDone: { stay: true },
             onFailure: {
-              none: true,
-              resolve: ({ error }) => {
+              stay: true,
+              commands: ({ error }) => {
                 expect(error).type.toBe<StreamFailure>()
               }
             }
@@ -1224,7 +1223,7 @@ describe("Machine", () => {
     })
     expect(machine.handle).type.not.toBeCallableWith({
       states: {
-        down: { invoke: { src: "values", onDone: { none: true } } },
+        down: { invoke: { src: "values", onDone: { stay: true } } },
         up: {
           initial: {
             auth: () => {
@@ -1263,7 +1262,7 @@ describe("Machine", () => {
     })
     expect(machine.handle).type.not.toBeCallableWith({
       states: {
-        down: { invoke: { src: "values", onElement: { none: true } } },
+        down: { invoke: { src: "values", onElement: { stay: true } } },
         up: {
           initial: {
             auth: () => {
@@ -1302,7 +1301,7 @@ describe("Machine", () => {
     })
     expect(machine.handle).type.not.toBeCallableWith({
       states: {
-        down: { invoke: { src: "failure", onDone: { none: true } } },
+        down: { invoke: { src: "failure", onDone: { stay: true } } },
         up: {
           initial: {
             auth: () => {
@@ -1342,7 +1341,7 @@ describe("Machine", () => {
     expect(machine.handle).type.not.toBeCallableWith({
       states: {
         down: {
-          invoke: { src: "failure", onDone: { none: true }, onFailure: { none: true }, onElement: { none: true } }
+          invoke: { src: "failure", onDone: { stay: true }, onFailure: { stay: true }, onElement: { stay: true } }
         },
         up: {
           initial: {
@@ -1451,8 +1450,8 @@ describe("Machine", () => {
             src: "source1",
             id: "dynamic",
             input: (context) => context,
-            onDone: { none: true },
-            onFailure: { none: true }
+            onDone: { stay: true },
+            onFailure: { stay: true }
           }
         }
       }
@@ -1577,15 +1576,15 @@ describe("Machine", () => {
         },
         down: {
           invoke: [
-            { src: "source1", id: "success", input: (context) => context, onDone: { none: true } },
+            { src: "source1", id: "success", input: (context) => context, onDone: { stay: true } },
             {
               src: "source2",
               id: "failure",
               input: (context) => context,
-              onFailure: { none: true }
+              onFailure: { stay: true }
             },
             { src: "source3", id: "never", input: (context) => context },
-            { src: "source4", id: "requirements", input: (context) => context, onDone: { none: true } }
+            { src: "source4", id: "requirements", input: (context) => context, onDone: { stay: true } }
           ]
         }
       }
@@ -1628,7 +1627,7 @@ describe("Machine", () => {
           }
         },
         down: {
-          invoke: { src: "source5", id: "requirements-only", input: (context) => context, onDone: { none: true } }
+          invoke: { src: "source5", id: "requirements-only", input: (context) => context, onDone: { stay: true } }
         }
       }
     })
@@ -1768,8 +1767,8 @@ describe("Machine", () => {
           invoke: {
             src: "success",
             input: () => "id",
-            onDone: { none: true },
-            onFailure: { none: true }
+            onDone: { stay: true },
+            onFailure: { stay: true }
           }
         },
         up: {
@@ -1814,8 +1813,8 @@ describe("Machine", () => {
           invoke: {
             src: "failure",
             input: () => "id",
-            onFailure: { none: true },
-            onDone: { none: true }
+            onFailure: { stay: true },
+            onDone: { stay: true }
           }
         },
         up: {
@@ -1856,7 +1855,7 @@ describe("Machine", () => {
     })
     expect(machine.handle).type.not.toBeCallableWith({
       states: {
-        down: { invoke: { src: "pending", input: () => "id", onDone: { none: true } } },
+        down: { invoke: { src: "pending", input: () => "id", onDone: { stay: true } } },
         up: {
           initial: {
             auth: () => {
@@ -1895,7 +1894,7 @@ describe("Machine", () => {
     })
     expect(machine.handle).type.not.toBeCallableWith({
       states: {
-        down: { invoke: { src: "pending", input: () => "id", onFailure: { none: true } } },
+        down: { invoke: { src: "pending", input: () => "id", onFailure: { stay: true } } },
         up: {
           initial: {
             auth: () => {
@@ -2019,15 +2018,15 @@ describe("Machine", () => {
         down: {
           on: {
             SignIn: {
-              none: true,
-              resolve: ({ event }) => {
+              stay: true,
+              commands: ({ event }) => {
                 expect(event).type.toBe<SignIn>()
                 return undefined
               }
             },
             SignInCompleted: {
-              none: true,
-              resolve: ({ event }) => {
+              stay: true,
+              commands: ({ event }) => {
                 expect(event).type.toBe<SignInCompleted>()
                 return undefined
               }
@@ -2166,7 +2165,7 @@ describe("Machine", () => {
     })
     expect(machine.handle).type.not.toBeCallableWith({
       states: {
-        down: { invoke: { src: "source1", onDone: { none: true } } },
+        down: { invoke: { src: "source1", onDone: { stay: true } } },
         up: {
           initial: {
             auth: () => {
@@ -2240,14 +2239,13 @@ describe("Machine", () => {
             }
           }
         },
-        down: { invoke: { src: "source1", id: "erased-failure", onFailure: { none: true } } }
+        down: { invoke: { src: "source1", id: "erased-failure", onFailure: { stay: true } } }
       }
     })
   })
   it("constructs sibling targets from destructured source fields", () => {
     const states = Machine.state({ states: { source: Up, target: RetaggedUp } })
     Machine.make({
-      branches: { transition1: { destination: { target: "target" } } },
       root: states,
       events: Machine.eventsFromSchemas(SignIn)
     }).handle({
@@ -2260,13 +2258,13 @@ describe("Machine", () => {
         source: {
           on: {
             SignIn: {
-              branches: "transition1",
-              resolve: ({ state, select: { destination: target } }) => {
+              branches: [{ target: "target" }],
+              resolve: ({ state, select }) => {
                 const { _tag: _, ...fields } = state
-                expect(target).type.toBeCallableWith({ data: { ...fields, attempt: 1 } })
-                expect(target).type.not.toBeCallableWith({ data: fields })
-                expect(target).type.not.toBeCallableWith({ data: { ...fields, attempt: "invalid" } })
-                return target({ data: { ...fields, attempt: 1 } })
+                expect(select.target).type.toBeCallableWith("target", { data: { ...fields, attempt: 1 } })
+                expect(select.target).type.not.toBeCallableWith("target", { data: fields })
+                expect(select.target).type.not.toBeCallableWith("target", { data: { ...fields, attempt: "invalid" } })
+                return select.target("target", { data: { ...fields, attempt: 1 } })
               }
             }
           }
@@ -2349,15 +2347,15 @@ describe("Machine", () => {
             src: "source1",
             input: () => ({ userId: "child" }),
             onSnapshot: {
-              none: true,
-              resolve: ({ snapshot }) => {
+              stay: true,
+              commands: ({ snapshot }) => {
                 expect(snapshot.state).type.toBe<Machine.Snapshot<typeof childStates>>()
                 return undefined
               }
             },
             onDone: {
-              none: true,
-              resolve: ({ output, state }) => {
+              stay: true,
+              commands: ({ output, state }) => {
                 expect(output).type.toBe<SignIn>()
                 expect(state).type.toBe<Down>()
                 return undefined
@@ -2489,7 +2487,7 @@ describe("Machine", () => {
           invoke: {
             src: "source1",
             input: () => ({ userId: "child" }),
-            onDone: { none: true },
+            onDone: { stay: true },
             onSnapshot: () => new Down({})
           }
         },
@@ -2553,7 +2551,7 @@ describe("Machine", () => {
                 }
               },
               states: {
-                signedOut: { invoke: { src: "source1", id: "nested", onDone: { none: true } } },
+                signedOut: { invoke: { src: "source1", id: "nested", onDone: { stay: true } } },
                 signedIn: {}
               }
             },
@@ -2892,16 +2890,6 @@ describe("Machine", () => {
   })
   it("branching transitions infer unbounded named targets", () => {
     const machine = Machine.make({
-      branches: {
-        transition1: {
-          recognized: { target: "down", title: "recognized user" },
-          measured: { none: true, title: "measured user id" },
-          named: { target: "down", title: "named user" },
-          active: { none: true, title: "active user" }
-        },
-        transition2: { accepted: { target: "down" }, consumed: { none: true } },
-        transition3: { ignored: { none: true } }
-      },
       root: UpStates,
       events: Machine.eventsFromSchemas(SignIn)
     })
@@ -2945,22 +2933,22 @@ describe("Machine", () => {
         down: {
           on: {
             SignIn: {
-              branches: "transition1",
+              branches: [{ target: "down" }, { stay: true }],
               reenter: true,
               resolve: ({ event, select, state }) => {
                 expect(event).type.toBe<SignIn>()
                 expect(state).type.toBe<Down>()
-                expect(select.recognized).type.toBeCallableWith({ data: new Down({}), decoded: true })
-                expect(select.measured).type.toBeCallableWith()
+                expect(select.target).type.toBeCallableWith("down", { data: new Down({}), decoded: true })
+                expect(select.stay).type.toBeCallableWith()
                 switch (event.userId.length) {
                   case 0:
-                    return select.measured()
+                    return select.stay()
                   case 1:
-                    return select.named({ data: new Down({}), decoded: true })
+                    return select.target("down", { data: new Down({}), decoded: true })
                   case 2:
-                    return select.active()
+                    return select.stay()
                   default:
-                    return select.recognized({ data: new Down({}), decoded: true })
+                    return select.target("down", { data: new Down({}), decoded: true })
                 }
               }
             }
@@ -3007,10 +2995,10 @@ describe("Machine", () => {
         },
         down: {
           on: {
-            SignIn: { none: true, reenter: true }
+            SignIn: { reenter: true }
           },
           // @ts-expect-error! Unconditional eventless reentry cannot stabilize.
-          always: { none: true, reenter: true }
+          always: { reenter: true }
         }
       }
     })
@@ -3099,66 +3087,15 @@ describe("Machine", () => {
         down: {
           on: {
             SignIn: {
-              branches: "transition2",
+              branches: [{ target: "down" }, { stay: true }, { decline: true }],
               resolve: (context) => {
-                expect(context.decline()).type.toBe<Machine.Machine.Declined>()
                 if (context.event.userId === "decline") {
-                  return context.decline()
+                  return context.select.decline()
                 }
                 if (context.event.userId === "consume") {
-                  return context.select.consumed()
+                  return context.select.stay()
                 }
-                return context.select.accepted({ data: new Down({}), decoded: true })
-              },
-              declinable: true
-            }
-          }
-        }
-      }
-    })
-    machine.handle({
-      initial: {
-        target: "down",
-        decoded: true,
-        data: new Down({})
-      },
-      states: {
-        up: {
-          states: {
-            auth: {
-              initial: {
-                target: "up.auth.signedOut",
-                data: () => {
-                  throw new Error("type-only constructor")
-                }
-              },
-              states: { signedOut: {}, signedIn: {} }
-            },
-            sync: {
-              initial: {
-                target: "up.sync.idle",
-                data: () => {
-                  throw new Error("type-only constructor")
-                }
-              },
-              states: { idle: {}, syncing: {} }
-            }
-          },
-          initial: {
-            auth: () => {
-              throw new Error("type-only constructor")
-            },
-            sync: () => {
-              throw new Error("type-only constructor")
-            }
-          }
-        },
-        down: {
-          on: {
-            SignIn: {
-              none: true,
-              resolve: (context) => {
-                expect(context.decline).type.toBeCallableWith()
+                return context.select.target("down", { data: new Down({}), decoded: true })
               }
             }
           }
@@ -3204,54 +3141,11 @@ describe("Machine", () => {
         },
         down: {
           on: {
-            // @ts-expect-error!
-            SignIn: { none: true, resolve: ({ decline }) => decline() }
-          }
-        }
-      }
-    })
-    const widenedDeclinable = true as boolean
-    machine.handle({
-      initial: {
-        target: "down",
-        decoded: true,
-        data: new Down({})
-      },
-      states: {
-        up: {
-          states: {
-            auth: {
-              initial: {
-                target: "up.auth.signedOut",
-                data: () => {
-                  throw new Error("type-only constructor")
-                }
-              },
-              states: { signedOut: {}, signedIn: {} }
-            },
-            sync: {
-              initial: {
-                target: "up.sync.idle",
-                data: () => {
-                  throw new Error("type-only constructor")
-                }
-              },
-              states: { idle: {}, syncing: {} }
+            SignIn: {
+              branches: [{ stay: true }, { decline: true }],
+              resolve: (context) =>
+                context.event.userId === "decline" ? context.select.decline() : context.select.stay()
             }
-          },
-          initial: {
-            auth: () => {
-              throw new Error("type-only constructor")
-            },
-            sync: () => {
-              throw new Error("type-only constructor")
-            }
-          }
-        },
-        down: {
-          on: {
-            // @ts-expect-error!
-            SignIn: { none: true, resolve: () => undefined, declinable: widenedDeclinable }
           }
         }
       }
@@ -3296,7 +3190,96 @@ describe("Machine", () => {
         down: {
           on: {
             // @ts-expect-error!
-            SignIn: { branches: "transition3", resolve: () => undefined }
+            SignIn: { branches: [{ stay: true }, { decline: true }], resolve: ({ select }) => select.decline() }
+          }
+        }
+      }
+    })
+    machine.handle({
+      initial: {
+        target: "down",
+        decoded: true,
+        data: new Down({})
+      },
+      states: {
+        up: {
+          states: {
+            auth: {
+              initial: {
+                target: "up.auth.signedOut",
+                data: () => {
+                  throw new Error("type-only constructor")
+                }
+              },
+              states: { signedOut: {}, signedIn: {} }
+            },
+            sync: {
+              initial: {
+                target: "up.sync.idle",
+                data: () => {
+                  throw new Error("type-only constructor")
+                }
+              },
+              states: { idle: {}, syncing: {} }
+            }
+          },
+          initial: {
+            auth: () => {
+              throw new Error("type-only constructor")
+            },
+            sync: () => {
+              throw new Error("type-only constructor")
+            }
+          }
+        },
+        down: {
+          on: {
+            SignIn: { stay: true, commands: () => undefined }
+          }
+        }
+      }
+    })
+    machine.handle({
+      initial: {
+        target: "down",
+        decoded: true,
+        data: new Down({})
+      },
+      states: {
+        up: {
+          states: {
+            auth: {
+              initial: {
+                target: "up.auth.signedOut",
+                data: () => {
+                  throw new Error("type-only constructor")
+                }
+              },
+              states: { signedOut: {}, signedIn: {} }
+            },
+            sync: {
+              initial: {
+                target: "up.sync.idle",
+                data: () => {
+                  throw new Error("type-only constructor")
+                }
+              },
+              states: { idle: {}, syncing: {} }
+            }
+          },
+          initial: {
+            auth: () => {
+              throw new Error("type-only constructor")
+            },
+            sync: () => {
+              throw new Error("type-only constructor")
+            }
+          }
+        },
+        down: {
+          on: {
+            // @ts-expect-error!
+            SignIn: { branches: [{ stay: true }], resolve: () => undefined }
           }
         }
       }
@@ -3309,23 +3292,22 @@ describe("Machine", () => {
     expect(Machine.make).type.not.toBeCallableWith({
       root: UpStates,
       events: Machine.eventsFromSchemas(SignIn),
-      branches: { invalid: { "": { none: true } } }
+      branches: { invalid: { "": { stay: true } } }
     })
     expect(Machine.make).type.not.toBeCallableWith({
       root: UpStates,
       events: Machine.eventsFromSchemas(SignIn),
-      branches: { invalid: { 0: { none: true } } }
+      branches: { invalid: { 0: { stay: true } } }
     })
     const symbolBranch = Symbol("branch")
     expect(Machine.make).type.not.toBeCallableWith({
       root: UpStates,
       events: Machine.eventsFromSchemas(SignIn),
-      branches: { invalid: { valid: { none: true }, [symbolBranch]: { none: true } } }
+      branches: { invalid: { valid: { stay: true }, [symbolBranch]: { stay: true } } }
     })
   })
   it("handle accepts nested states through reserved states objects", () => {
     const machine = Machine.make({
-      branches: { transition1: { destination: { target: "up.auth.signedIn" } } },
       root: UpStates,
       events: Machine.eventsFromSchemas(SignIn)
     })
@@ -3349,11 +3331,14 @@ describe("Machine", () => {
                 signedOut: {
                   on: {
                     SignIn: {
-                      branches: "transition1",
-                      resolve: ({ event, state, select: { destination: target } }) => {
+                      branches: [{ target: "up.auth.signedIn" }],
+                      resolve: ({ event, state, select }) => {
                         expect(event).type.toBe<SignIn>()
                         expect(state).type.toBe<SignedOut>()
-                        return target({ data: new SignedIn({ userId: event.userId }), decoded: true })
+                        return select.target("up.auth.signedIn", {
+                          data: new SignedIn({ userId: event.userId }),
+                          decoded: true
+                        })
                       }
                     }
                   }
@@ -3408,8 +3393,8 @@ describe("Machine", () => {
             void id
           },
           always: {
-            none: true,
-            resolve: ({ event }) => {
+            stay: true,
+            commands: ({ event }) => {
               expect(event).type.toBe<SignIn | Machine.InitialEvent>()
               return undefined
             }
@@ -3468,7 +3453,6 @@ describe("Machine", () => {
   })
   it("onDone handlers receive typed state context without Effect requirements", () => {
     const machine = Machine.make({
-      branches: { transition1: { destination: { target: "down" } } },
       root: UpStates,
       events: Machine.eventsFromSchemas(SignIn)
     }).handle({
@@ -3488,12 +3472,12 @@ describe("Machine", () => {
                 }
               },
               onDone: {
-                branches: "transition1",
-                resolve: ({ event, output, state, select: { destination: target } }) => {
+                branches: [{ target: "down" }],
+                resolve: ({ event, output, state, select }) => {
                   expect(event).type.toBe<SignIn | Machine.InitialEvent>()
                   expect(output).type.toBe<undefined>()
                   expect(state).type.toBe<Auth>()
-                  return target({ data: new Down({}), decoded: true })
+                  return select.target("down", { data: new Down({}), decoded: true })
                 }
               },
               states: { signedOut: {}, signedIn: {} }
@@ -3803,7 +3787,7 @@ describe("Machine", () => {
     })
     expect(parent.handle).type.not.toBeCallableWith({
       states: {
-        down: { invoke: { src: "incomplete", onDone: { none: true } } },
+        down: { invoke: { src: "incomplete", onDone: { stay: true } } },
         up: {
           initial: {
             auth: () => {
@@ -3913,7 +3897,6 @@ describe("Machine", () => {
       }
     })
     const machine = Machine.make({
-      branches: { transition1: { destination: { target: "down" } } },
       root: States,
       events: Machine.eventsFromSchemas(SignIn)
     })
@@ -3931,10 +3914,10 @@ describe("Machine", () => {
             data: new SignedOut({})
           },
           onDone: {
-            branches: "transition1",
-            resolve: ({ output, select: { destination: target } }) => {
+            branches: [{ target: "down" }],
+            resolve: ({ output, select }) => {
               expect(output).type.toBe<string>()
-              return target({ data: new Down({}), decoded: true })
+              return select.target("down", { data: new Down({}), decoded: true })
             }
           },
           states: { signedOut: {}, signedIn: { output: ({ state }) => state.userId } }
@@ -4046,8 +4029,8 @@ describe("Machine", () => {
             data: new PendingPayment({})
           },
           onDone: {
-            none: true,
-            resolve: ({ output }) => {
+            stay: true,
+            commands: ({ output }) => {
               expect(output.status).type.toBe<"approved" | "declined">()
               if (output.status === "approved") {
                 expect(output.authId).type.toBe<string>()
@@ -4134,8 +4117,8 @@ describe("Machine", () => {
             }
           },
           onDone: {
-            none: true,
-            resolve: ({ output }) => {
+            stay: true,
+            commands: ({ output }) => {
               expect(output.userId).type.toBe<string>()
               expect(output.requestId).type.toBe<string>()
               return undefined
@@ -5056,8 +5039,8 @@ describe("Machine", () => {
         down: {
           on: {
             SignIn: {
-              none: true,
-              resolve: ({ event }, enqueue) => {
+              stay: true,
+              commands: ({ event }, enqueue) => {
                 expect(event).type.toBe<SignIn>()
                 expect(enqueue.raise).type.toBeCallableWith(event)
               }
@@ -5106,7 +5089,7 @@ describe("Machine", () => {
         down: {
           on: {
             // @ts-expect-error! Targetless resolvers cannot return unrelated values.
-            SignIn: { none: true, resolve: () => 1 }
+            SignIn: { stay: true, commands: () => 1 }
           }
         }
       }
