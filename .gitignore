@@ -7,3 +7,6 @@ references/
 .DS_Store
 .pnpm-store
 *.tsbuildinfo
+packages/effect-machine/AGENTS.md
+packages/effect-machine/CLAUDE.md
+packages/effect-machine/ai-docs/

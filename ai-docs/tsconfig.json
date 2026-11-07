@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  "extends": "../tsconfig.base.json",
+  "include": ["src/**/*.ts"],
+  "compilerOptions": {
+    "composite": false,
+    "incremental": false,
+    "rootDir": "..",
+    "noEmit": true,
+    "declaration": false,
+    "declarationMap": false,
+    "sourceMap": false,
+    "paths": {
+      "@typeonce/effect-machine": ["../packages/effect-machine/src/index.ts"],
+      "@typeonce/effect-machine/testing": ["../packages/effect-machine/src/testing/index.ts"],
+      "@typeonce/effect-machine/reactivity": ["../packages/effect-machine/src/unstable/reactivity/index.ts"],
+      "@typeonce/effect-machine/cluster": ["../packages/effect-machine/src/unstable/cluster/index.ts"],
+      "effect": ["../packages/effect-machine/node_modules/effect/dist/index.d.ts"],
+      "effect/*": ["../packages/effect-machine/node_modules/effect/dist/*.d.ts"]
+    }
+  }
+}

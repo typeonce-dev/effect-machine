@@ -1,14 +1,13 @@
-# Effect Machine agent guide
+## Effect Machine agent guide
 
 Use this guide to model a statechart with `@typeonce/effect-machine`. It covers
 the decisions that shape the machine. Use the API reference for method
 signatures, history states, and choice states.
 
-Read [Effect Atom and React patterns](./effect-atom-react.md) when React needs
-to consume a machine. Keep React ownership and atom lookup out of the machine
-model.
+Read [Effect Atom and React](#effect-atom-and-react) when React needs to consume
+a machine. Keep React ownership and atom lookup out of the machine model.
 
-## Create a machine
+### Create a machine
 
 Define schemas first, then states, events, the machine definition, and its
 handlers. Export the state descriptor, public event descriptor, and implemented
@@ -22,10 +21,12 @@ const CounterState = Schema.TaggedUnion({
   Running: { count: Schema.Number }
 })
 
-export const CounterStates = Machine.state({ states: {
-  Idle: {},
-  Running: CounterState.cases.Running
-} })
+export const CounterStates = Machine.state({
+  states: {
+    Idle: {},
+    Running: CounterState.cases.Running
+  }
+})
 
 export const CounterEvents = Machine.eventsFromSchemas(
   Schema.TaggedUnion({
@@ -38,20 +39,23 @@ export const CounterEvents = Machine.eventsFromSchemas(
 export const CounterMachine = Machine.make({
   id: "Counter",
   root: CounterStates,
-  events: CounterEvents,
-}).handle({ initial: { target: "Idle" }, states: {
-  Idle: {
-    on: {
-      Start: { target: "Running", data: () => ({ count: 0 }) }
-    }
-  },
-  Running: {
-    on: {
-      Increment: { update: "Running", data: ({ state }) => ({ count: state.count + 1 }) },
-      Stop: { target: "Idle" }
+  events: CounterEvents
+}).handle({
+  initial: { target: "Idle" },
+  states: {
+    Idle: {
+      on: {
+        Start: { target: "Running", data: () => ({ count: 0 }) }
+      }
+    },
+    Running: {
+      on: {
+        Increment: { update: "Running", data: ({ state }) => ({ count: state.count + 1 }) },
+        Stop: { target: "Idle" }
+      }
     }
   }
-} })
+})
 ```
 
 Each step has one job:
@@ -69,7 +73,7 @@ when the module exports one machine implementation.
 Use `data` for schema make input. Constructor defaults and validation run while
 planning. Use `{ decoded: true, data }` for an existing schema Type; validation
 still applies. Named selectors take the same object format, with nested children
-under `states`. Structural states omit data. See [Root API](./root-api.md) for
+under `states`. Structural states omit data. See [Root machine API](#root-machine-api) for
 startup input, root initialization, subtree construction, and history fallbacks.
 
 The examples below show one modeling decision at a time. They omit unchanged
@@ -92,7 +96,7 @@ const program = Effect.scoped(Effect.gen(function*() {
 `Machine.start` requires a `Scope`. Closing it stops the machine and everything
 it owns; use `ref.stop` to stop earlier.
 
-## Make impossible states unrepresentable
+### Make impossible states unrepresentable
 
 A finite state describes how the machine behaves now. State data holds values
 needed while that mode is active.
@@ -107,12 +111,14 @@ const RequestState = Schema.TaggedUnion({
   Failed: { message: Schema.String }
 })
 
-const RequestStates = Machine.state({ states: {
-  Idle: {},
-  Loading: {},
-  Ready: RequestState.cases.Ready,
-  Failed: RequestState.cases.Failed
-} })
+const RequestStates = Machine.state({
+  states: {
+    Idle: {},
+    Loading: {},
+    Ready: RequestState.cases.Ready,
+    Failed: RequestState.cases.Failed
+  }
+})
 ```
 
 The machine can now be `Loading`, `Ready`, or `Failed`. It cannot construct a
@@ -123,7 +129,7 @@ which events the machine should handle, which work runs, or how the machine
 behaves, model it as a state. Otherwise, keep it as data on the state that owns
 it.
 
-## Put data on the lowest state that owns it
+### Put data on the lowest state that owns it
 
 State data should exist only while it is valid. Put it on the lowest node whose
 active subtree needs it. If several sibling states need the same data, their
@@ -140,26 +146,28 @@ const DocumentState = Schema.TaggedUnion({
   }
 })
 
-const DocumentStates = Machine.state({ states: {
-  Closed: {},
-  Open: {
-    // Editing, Saving, and SaveFailed all need the document and draft.
-    schema: DocumentState.cases.Open,
-    states: {
-      Editing: {},
-      Saving: {},
-      // Only this state owns an error message.
-      SaveFailed: DocumentState.cases.SaveFailed
+const DocumentStates = Machine.state({
+  states: {
+    Closed: {},
+    Open: {
+      // Editing, Saving, and SaveFailed all need the document and draft.
+      schema: DocumentState.cases.Open,
+      states: {
+        Editing: {},
+        Saving: {},
+        // Only this state owns an error message.
+        SaveFailed: DocumentState.cases.SaveFailed
+      }
     }
   }
-} })
+})
 ```
 
 Do not copy `documentId` and `draft` into every child. Copies can disagree after
 a transition. Do not move `message` to `Open` either. That would allow an error
 message while `Editing` or `Saving` is active.
 
-## Put shared behavior on the lowest common ancestor
+### Put shared behavior on the lowest common ancestor
 
 Hierarchy owns behavior as well as data. Define a transition on the lowest
 compound state whose children share it.
@@ -174,28 +182,31 @@ const DocumentEvents = Machine.eventsFromSchemas(
 const DocumentMachine = Machine.make({
   root: DocumentStates,
   events: DocumentEvents
-}).handle({ initial: { target: "Closed" }, states: {
-  Closed: {},
-  Open: {
-    initial: { target: "Open.Editing" },
-    on: {
-      // All Open children close the document in the same way.
-      Close: { target: "Closed" }
-    },
-    states: {
-      Editing: {},
-      Saving: {},
-      SaveFailed: {}
+}).handle({
+  initial: { target: "Closed" },
+  states: {
+    Closed: {},
+    Open: {
+      initial: { target: "Open.Editing" },
+      on: {
+        // All Open children close the document in the same way.
+        Close: { target: "Closed" }
+      },
+      states: {
+        Editing: {},
+        Saving: {},
+        SaveFailed: {}
+      }
     }
   }
-} })
+})
 ```
 
 The machine checks the deepest active state first, then its ancestors. Put a
 handler on a child when that state needs different behavior. Keep the shared
 case on the parent instead of repeating it in every child.
 
-## Treat events as the domain protocol
+### Treat events as the domain protocol
 
 An event tells the machine what was requested or what happened. Name events
 after domain actions and outcomes. Do not expose state setters such as
@@ -212,20 +223,22 @@ export const CheckoutEvents = Machine.eventsFromSchemas(
 const CheckoutMachine = Machine.make({
   root: CheckoutStates,
   events: CheckoutEvents
-}).handle({ states: {
-  Editing: {
-    on: {
-      Submit: { target: "Submitting" }
-    }
-  },
-  Submitting: {
-    on: {
-      // Cancel has meaning while work is in progress.
-      Cancel: { target: "Editing" }
-    }
-  },
-  Complete: {}
-} })
+}).handle({
+  states: {
+    Editing: {
+      on: {
+        Submit: { target: "Submitting" }
+      }
+    },
+    Submitting: {
+      on: {
+        // Cancel has meaning while work is in progress.
+        Cancel: { target: "Editing" }
+      }
+    },
+    Complete: {}
+  }
+})
 ```
 
 The sender requests `Submit`. The machine decides whether `Submit` has a
@@ -235,40 +248,45 @@ Carry facts that the machine cannot read from its current snapshot in the event
 payload. Do not copy current state into an event to help a handler reconstruct
 what the machine already knows.
 
-## Use parallel states only for independent modes
+### Use parallel states only for independent modes
 
 A compound state activates one direct child. A parallel state activates one
 child in every region. A parallel model therefore accepts the full product of
 those regions.
 
 ```ts
-const ScreenStates = Machine.state({ states: {
-  Screen: {
-    type: "parallel",
-    states: {
-      connection: {
-        states: {
-          Online: {},
-          Offline: {}
-        }
-      },
-      panel: {
-        states: {
-          Closed: {},
-          Open: {}
+const ScreenStates = Machine.state({
+  states: {
+    Screen: {
+      type: "parallel",
+      states: {
+        connection: {
+          states: {
+            Online: {},
+            Offline: {}
+          }
+        },
+        panel: {
+          states: {
+            Closed: {},
+            Open: {}
+          }
         }
       }
     }
   }
-} })
+})
 const ScreenMachine = Machine.make({ root: ScreenStates, events: Machine.events({}) }).handle({
   initial: { target: "Screen" },
-  states: { Screen: { states: {
-    connection: { initial: { target: "Screen.connection.Online" } },
-    panel: { initial: { target: "Screen.panel.Closed" } }
-  } } }
+  states: {
+    Screen: {
+      states: {
+        connection: { initial: { target: "Screen.connection.Online" } },
+        panel: { initial: { target: "Screen.panel.Closed" } }
+      }
+    }
+  }
 })
-
 ```
 
 This model permits all four combinations: online with a closed panel, online
@@ -278,7 +296,7 @@ If one combination would break a domain rule, do not repair it with a UI check
 or repeated cross-region conditions. Change the topology. A compound hierarchy
 can place a mode only under the parent where it is valid.
 
-## Let states own running work
+### Let states own running work
 
 Put asynchronous work on the state whose meaning requires that work. The
 machine starts the work when it enters the state and interrupts it when it exits.
@@ -291,30 +309,35 @@ const LoadState = Schema.TaggedUnion({
   Failed: { message: Schema.String }
 })
 
-const LoadStates = Machine.state({ states: {
-  Idle: {},
-  Loading: LoadState.cases.Loading,
-  Ready: LoadState.cases.Ready,
-  Failed: LoadState.cases.Failed
-} })
+const LoadStates = Machine.state({
+  states: {
+    Idle: {},
+    Loading: LoadState.cases.Loading,
+    Ready: LoadState.cases.Ready,
+    Failed: LoadState.cases.Failed
+  }
+})
 
 const LoadMachine = Machine.make({
   root: LoadStates,
   effects: { loadDocument },
-  events: Machine.eventsFromSchemas(),
-}).handle({ initial: { target: "Idle" }, states: {
-  Idle: {},
-  Loading: {
-    invoke: {
-      src: "loadDocument",
-      input: ({ state }) => state.documentId,
-      onDone: { target: "Ready", data: ({ output }) => ({ content: output }) },
-      onFailure: { target: "Failed", data: ({ error }) => ({ message: String(error) }) }
-    }
-  },
-  Ready: {},
-  Failed: {}
-} })
+  events: Machine.eventsFromSchemas()
+}).handle({
+  initial: { target: "Idle" },
+  states: {
+    Idle: {},
+    Loading: {
+      invoke: {
+        src: "loadDocument",
+        input: ({ state }) => state.documentId,
+        onDone: { target: "Ready", data: ({ output }) => ({ content: output }) },
+        onFailure: { target: "Failed", data: ({ error }) => ({ message: String(error) }) }
+      }
+    },
+    Ready: {},
+    Failed: {}
+  }
+})
 ```
 
 `loadDocument` may require Effect services. Those requirements remain on the
@@ -325,7 +348,7 @@ Model a per-instance capability, such as a router or a callback owned by a UI
 component, as such a service. Do not put functions in state data or startup
 input: snapshots must remain encodable. A React owner provides the capability
 through its own runtime, as described in
-[Per-owner capabilities](./effect-atom-react.md#per-owner-capabilities).
+[Per-owner capabilities](#per-owner-capabilities).
 
 Do not start a promise inside a transition callback. A transition has no
 lifetime in which to own that work. A state does.
@@ -357,7 +380,8 @@ address as well:
 ```ts
 // Register timers: { loadTimeout: "10 seconds" } in make.
 Loading: {
-  invoke: [
+  invoke: ;
+  ;[
     {
       src: "loadDocument",
       input: ({ state }) => state.documentId,
@@ -375,14 +399,14 @@ the sequence with separate states and transition from the first outcome. Do
 not depend on one child completing quickly enough for another declaration to
 reuse its identity.
 
-### Choose state-owned or process-owned children
+#### Choose state-owned or process-owned children
 
 Register a descriptor in `make({ children: { worker: Worker } })` and use
 `invoke: { src: "worker", ...outcomes }` when a child belongs to one state and
 must stop when that state exits. Use a child family and `children.spawn(...)`
 inside a registered Effect when runtime events determine ids or cardinality
 and the children must survive owner state changes. See the
-[dynamic children example](../README.md#dynamic-children) for the complete
+dynamic children example in the package README for the complete
 input mapping and service requirements.
 
 The Effect owns the startup attempt. The machine process owns every child that
@@ -392,7 +416,7 @@ Stop one with `children.stop(Worker(id))` inside an Effect or
 instead of replacing the existing child, and a partially successful group is
 not rolled back automatically.
 
-## Keep transition decisions synchronous
+### Keep transition decisions synchronous
 
 A transition should choose the next state from the current snapshot and event.
 Use ordinary TypeScript conditions when one event has several valid outcomes.
@@ -413,20 +437,24 @@ const ReviewMachine = Machine.make({
       rejected: { target: "Rejected" }
     }
   }
-}).handle({ initial: { target: "Pending" }, states: {
-  Pending: {
-    on: {
-      Evaluate: {
-        branches: "evaluate",
-        resolve: ({ event, select }) => event.score >= 80
-          ? select.accepted()
-          : select.rejected()
+}).handle({
+  initial: { target: "Pending" },
+  states: {
+    Pending: {
+      on: {
+        Evaluate: {
+          branches: "evaluate",
+          resolve: ({ event, select }) =>
+            event.score >= 80
+              ? select.accepted()
+              : select.rejected()
+        }
       }
-    }
-  },
-  Accepted: {},
-  Rejected: {}
-} })
+    },
+    Accepted: {},
+    Rejected: {}
+  }
+})
 ```
 
 Given the same snapshot and event, the handler should choose the same result.
@@ -467,7 +495,7 @@ owner input. Every branch the choice can reach, including through nested
 choices, must stay below the owner; otherwise the definition does not compile
 and `handle` throws while naming the choice, branch, and escaping target.
 
-## Test paths and invariants
+### Test paths and invariants
 
 Test the statechart as a graph. Send domain events, inspect reached states, and
 state the rules that every trace must preserve. Do not duplicate the handler's
@@ -509,7 +537,7 @@ Use pure planner traces for state and transition rules. Start a live machine
 and use `MachineTest.probe` when a test depends on timers, invoked work, raised
 events, or runtime scheduling.
 
-## Choose observation deliberately
+### Choose observation deliberately
 
 Use atom selectors to render state, invocation outcomes to express workflow
 behavior, `ref.join` to await final output, and `ref.changes` for ongoing

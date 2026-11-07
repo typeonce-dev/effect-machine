@@ -195,7 +195,7 @@ Check: {
   branches: "expiry",
   declinable: true,
   resolve: ({ event, select, decline }) => event.now >= event.deadline
-    ? select.expired.from()
+    ? select.expired()
     : decline()
 }
 ```

@@ -19,7 +19,7 @@ const classify = (changedFiles, afterPackageJson = packageJson) =>
   })
 
 test("skips performance for documentation changes", () => {
-  assert.deepEqual(classify(["README.md", "docs/agent-guide.md"]), {
+  assert.deepEqual(classify(["README.md", "ai-docs/src/index.md"]), {
     runtimePerformance: false,
     typePerformance: false
   })

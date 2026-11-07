@@ -1,10 +1,10 @@
-# Root machine API
+## Root machine API
 
 A machine has one root state. It can own data, child topology, both, or neither.
 `Machine.state` declares that structure; `Machine.make` declares protocols and
 reusable sources; `.handle` supplies initialization and behavior.
 
-## Startup input and state data
+### Startup input and state data
 
 ```ts
 import { Machine } from "@typeonce/effect-machine"
@@ -66,7 +66,7 @@ optional region data. Compound handlers declare one direct initial child with
 `initial: { target, data }`; each compound has its own initial declaration.
 There is no `initialConfiguration` or initializer in `make`.
 
-## Root initialization and updates
+### Root initialization and updates
 
 The root is spelled `"root"` in declarations, so a top-level state cannot use
 that name. It is not a transition destination.
@@ -89,7 +89,7 @@ This does not create a new machine reference or discard history records.
 retaining its active children and running work. It takes no input and does not
 run initial constructors. Other source/ancestor updates follow the same rules.
 
-## Inline and named construction
+### Inline and named construction
 
 Ordinary transitions stay inline:
 
@@ -146,7 +146,7 @@ Declared branch targets remain inspectable without executing a resolver.
 Dynamically selected descendants are visible after resolution; this API does not
 add static analysis of resolver bodies.
 
-## Retained-owner updates
+### Retained-owner updates
 
 An inline combined transition keeps `target` and `update` paths separate:
 
@@ -174,7 +174,7 @@ select.saved({
 arbitrary nested-state operation. The owner must be active and retained across
 the transition. Both complete values validate before either is committed.
 
-## History and lifecycle
+### History and lifecycle
 
 History fallback uses a bound function with the same node object format:
 
@@ -201,20 +201,3 @@ startup constructors.
 `guard` declines before construction. A resolver may return `decline()` only with
 `declinable: true`. Effect, Stream, timer, logic, child invocation, completion,
 entry/exit, and required outcome channels retain their existing contracts.
-
-## Migration
-
-- Root initial constructors can read `input`; remove root fields used only to
-  forward that input to the initial child.
-- Remove `Machine.targets(Root)`. Replace `targets.root.A.B` with `"A.B"`,
-  `update: targets.root` with `update: "root"`, and
-  `{ target: targets.root, input }` with `{ initialize: input }` (or
-  `{ initialize: true }` without machine input). Rename a top-level state named
-  `root`.
-- Replace event `{ initial: path, data }` with `{ target: path, data }`.
-- Replace `select.branch.from(value)` with `select.branch({ data: value })`.
-- Replace `.decoded(value)` with `({ decoded: true, data: value })`.
-- Replace child callbacks with `states: { Child: { data, states } }`.
-- Replace `.update.from(value)` chaining with `update: { data: value }` inside
-  the same selector call.
-- Replace history fallback chains with `target({ states: ... })`.

@@ -7,8 +7,7 @@ Effect Schema. The same definition can be planned synchronously, run as a
 managed machine, mounted as an Atom, tested as a model, or hosted by the
 cluster adapter.
 
-> This is early-release software. Its API may change, and each release targets
-> one exact Effect beta.
+> This is early-release software. Its API may change.
 
 ## Design principles
 
@@ -18,8 +17,10 @@ cluster adapter.
 - **Explicit and opinionated:** give different semantics different names and
   contracts. Builders and inference remove ceremony without making behavior
   depend on ambiguous omissions.
-- **Readable models:** keep schemas, topology, behavior, and effects concise
-  enough that a human can understand the complete model from its definition.
+- **Local, unambiguous models:** keep each decision next to the state that owns
+  it, and give every key one meaning, so a model can be edited and verified one
+  transition at a time. Prefer an explicit declaration over a shorter ambiguous
+  one.
 - **Effect-native:** design toward eventual inclusion in Effect core and follow
   its API shape, module boundaries, ownership, and failure conventions.
 
@@ -34,7 +35,7 @@ Cluster and are exposed only through explicit integration boundaries.
 ## Install
 
 ```sh
-pnpm add @typeonce/effect-machine effect@4.0.0
+pnpm add @typeonce/effect-machine effect
 ```
 
 `effect` is a peer dependency requiring stable `^4.0.0`. Keep any installed
@@ -668,7 +669,7 @@ Each ESM entrypoint is independent and tree-shakeable.
 ## Reference and development
 
 - [API reference](https://effect-machine.typeonce.dev)
-- [Agent and implementation guide](./docs/agent-guide.md)
+- [Agent documentation](../../ai-docs/src/index.md), shipped in this package as `AGENTS.md` and `ai-docs/`
 - [Contributing guide](./CONTRIBUTING.md)
 
 Use pnpm 10 and Node.js 20 or newer:
