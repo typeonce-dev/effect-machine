@@ -223,7 +223,7 @@ export const checkArchitecture = ({
   const implementationSeams = new Map([
     ["src/Machine.ts", new Set(["src/internal/machine/machine.ts"])],
     ["src/testing/MachineTest.ts", new Set([
-      "verification", "runtime", "arbitrary", "finiteModel", "referenceModel", "invariant",
+      "check", "verification", "runtime", "arbitrary", "finiteModel", "referenceModel", "invariant",
       "runtimeInvariant", "exploration", "probe", "trace", "format"
     ].map((name) => `src/internal/testing/machine/${name}.ts`))],
     ["src/unstable/reactivity/AtomMachine.ts", new Set(["src/internal/machine/atom.ts"])],

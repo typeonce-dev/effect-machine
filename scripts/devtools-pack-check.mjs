@@ -128,6 +128,15 @@ try {
     throw new Error("installed CLI help does not document live and static workflows")
   }
 
+  const checked = JSON.parse(run(binary, ["check", "--root", consumer, "--json"], { cwd: consumer }).stdout)
+  if (checked.ok !== true || checked.machines?.[0]?.machine !== "packed-fixture") {
+    throw new Error(`installed CLI did not check the machine\n${JSON.stringify(checked)}`)
+  }
+  const missing = spawnSync(binary, ["check", "src/missing.ts", "--root", consumer], { cwd: consumer, encoding: "utf8" })
+  if (missing.status === 0) {
+    throw new Error("installed CLI reported success with nothing to check")
+  }
+
   run(process.execPath, [
     "--input-type=module",
     "--eval",

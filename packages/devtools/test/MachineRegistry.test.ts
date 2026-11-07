@@ -16,6 +16,7 @@ describe("MachineRegistry", () => {
       const inspector = Inspector.ProjectInspector.of({
         discover: () => Effect.succeed([]),
         evaluate: () => Effect.succeed([]),
+        check: () => Effect.succeed([]),
         inspect: (options) =>
           Effect.gen(function*() {
             revisions.push(options.revision)

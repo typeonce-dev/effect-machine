@@ -10,6 +10,7 @@ import type * as Graph from "effect/Graph"
 import type * as Schema from "effect/Schema"
 import type { EnsureExecutable } from "../internal/machine/readiness.js"
 import type { SchemaArbitraryReport } from "../internal/testing/machine/arbitrary.js"
+import * as CheckImpl from "../internal/testing/machine/check.js"
 import * as ExplorationImpl from "../internal/testing/machine/exploration.js"
 import type { FiniteModel } from "../internal/testing/machine/finiteModel.js"
 import * as Format from "../internal/testing/machine/format.js"
@@ -2168,6 +2169,268 @@ export const verify: <M extends AnyMachine>(
   trace: Trace<M>,
   options?: VerifyOptions
 ) => Effect.Effect<void, VerificationError> = internal.verify
+
+/**
+ * A problem found by reading a machine's declarations, without running any of
+ * its callbacks.
+ *
+ * @category models
+ * @since 0.47.0
+ */
+export type AnalysisFinding =
+  | {
+    readonly law: "topology.noPathFromInitial"
+    readonly severity: "error"
+    readonly path: string
+    /** Descendants of `path` that are unreachable for the same reason. */
+    readonly descendants: number
+    readonly message: string
+  }
+  | {
+    readonly law: "events.noHandler"
+    readonly severity: "error"
+    readonly event: string
+    readonly message: string
+  }
+
+/**
+ * Reads a machine's declared topology and reports states with no path from the
+ * initial state and public events with no handler.
+ *
+ * **When to use**
+ *
+ * Use when a question has to be answered without running the machine. Use
+ * {@link check} to also explore the machine and verify its planner laws.
+ *
+ * **Details**
+ *
+ * The analysis is conservative. A branch or history target can construct any of
+ * its descendants, so that whole subtree counts as reachable, and a state is
+ * only reported when no declaration could enter it.
+ *
+ * **Example** (Finding a state with no incoming transition)
+ *
+ * ```ts import.meta.vitest
+ * import { Machine } from "@typeonce/effect-machine"
+ * import { MachineTest } from "@typeonce/effect-machine/testing"
+ *
+ * const machine = Machine.make({
+ *   root: Machine.state({ states: { Idle: {}, Orphan: {} } }),
+ *   events: Machine.events({ Start: {} })
+ * }).handle({
+ *   initial: { target: "Idle" },
+ *   states: { Idle: { on: { Start: { target: "Idle" } } } }
+ * })
+ *
+ * MachineTest.analyze(machine).map((finding) => finding.law) // => ["topology.noPathFromInitial"]
+ * ```
+ *
+ * @category verification
+ * @since 0.47.0
+ */
+export const analyze: <M extends AnyMachine>(machine: M) => ReadonlyArray<AnalysisFinding> = CheckImpl.analyze
+
+/**
+ * The events and optional input that reproduce a finding from startup.
+ *
+ * @category models
+ * @since 0.47.0
+ */
+export interface CheckReplay {
+  readonly input?: unknown
+  readonly events: ReadonlyArray<unknown>
+}
+
+/**
+ * Why {@link check} could not prove it explored every behavior. An empty list
+ * is what makes a report `"exhaustive"`.
+ *
+ * @category models
+ * @since 0.47.0
+ */
+export type CheckExplorationLimit =
+  /** The depth, state, or transition limit stopped exploration early. */
+  | "depth"
+  | "states"
+  | "transitions"
+  /** Event payloads were sampled from their schemas. */
+  | "sampledEvents"
+  /** Machine input was sampled from its schema. */
+  | "sampledInput"
+  /** Exploration used caller-supplied events. */
+  | "customEvents"
+  /** A caller-supplied state key may merge distinct snapshots. */
+  | "customStateKey"
+  /** Invocations do not run during planning, so their outcomes were not explored. */
+  | "invocations"
+
+/**
+ * A problem found by {@link check}. An `"error"` finding fails the report and a
+ * `"warning"` does not.
+ *
+ * @category models
+ * @since 0.47.0
+ */
+export type CheckFinding =
+  | AnalysisFinding
+  | {
+    readonly law: "schema.underivable"
+    readonly severity: "error"
+    readonly message: string
+  }
+  | {
+    readonly law: "planning.failed"
+    readonly severity: "error"
+    readonly replay: CheckReplay
+    readonly message: string
+  }
+  | {
+    readonly law: "planning.deterministic"
+    readonly severity: "error"
+    /** `"initial"`, or the active state paths and event tag that were planned. */
+    readonly source: string
+    readonly replay: CheckReplay
+    readonly message: string
+  }
+  | {
+    readonly law: "planning.verification"
+    readonly severity: "error"
+    readonly verificationLaw: VerificationLaw
+    readonly replay: CheckReplay
+    readonly message: string
+  }
+  | {
+    readonly law: "invariant.violated"
+    readonly severity: "error"
+    readonly invariant: string
+    readonly replay: CheckReplay
+    readonly message: string
+  }
+  | {
+    readonly law: "transition.notCovered"
+    readonly severity: "warning"
+    readonly source: string
+    readonly trigger: Machine.Machine.TransitionTrigger
+    readonly target: string | undefined
+    readonly branchKey?: string
+    readonly message: string
+  }
+
+/**
+ * The result of {@link check}.
+ *
+ * @category models
+ * @since 0.47.0
+ */
+export interface CheckReport {
+  readonly machine: string
+  /** Whether the report has no `"error"` finding. */
+  readonly ok: boolean
+  /**
+   * `"exhaustive"` only when `limits` is empty. A `"bounded"` pass means nothing
+   * was found within what was explored, not that the machine is correct.
+   */
+  readonly exploration: "exhaustive" | "bounded"
+  readonly limits: ReadonlyArray<CheckExplorationLimit>
+  readonly stats: {
+    readonly states: number
+    readonly plannedTransitions: number
+    readonly transitions: { readonly total: number; readonly hit: number }
+    readonly branches: { readonly total: number; readonly hit: number }
+  }
+  readonly findings: ReadonlyArray<CheckFinding>
+}
+
+/**
+ * Options for {@link check}. Every option has a default derived from the machine.
+ *
+ * @category models
+ * @since 0.47.0
+ */
+export interface CheckOptions<M extends AnyMachine> {
+  /** Machine input. Defaults to a value sampled from the input schema. */
+  readonly input?: InputValue<M>
+  /** Events to try in every state. Defaults to samples derived from the event schemas. */
+  readonly events?: ReadonlyArray<Machine.Machine.EventInput<Machine.Machine.InputEvent<M>>>
+  /** Distinct values to sample for each event tag. Defaults to 3. */
+  readonly eventSamples?: number
+  /** Seed for sampled input and events. Defaults to 0, so reports are reproducible. */
+  readonly seed?: number
+  /** Identifies logical states. Defaults to the complete snapshot value. */
+  readonly stateKey?: (context: ExplorationStateContext<M>) => ExplorationKey
+  /** Defaults to `maxDepth: 16`, `maxStates: 256`, and `maxTransitions: 2048`. */
+  readonly limits?: ExplorationLimits
+  /** Application laws checked against every explored state and step. */
+  readonly invariants?: ReadonlyArray<Invariant<M>>
+}
+
+/**
+ * Checks a machine with one call and reports every problem as data.
+ *
+ * **When to use**
+ *
+ * Use as the first verification step after writing or changing a machine. Reach
+ * for {@link explore}, {@link verify}, and {@link coverage} directly when a test
+ * needs their complete evidence, such as a specific scenario.
+ *
+ * **Details**
+ *
+ * Runs {@link analyze}, then {@link explore} with events derived from the event
+ * schemas, then {@link verify} on every explored transition. It also plans each
+ * transition a second time, so nondeterminism is found even when hidden behind a
+ * helper. Declared branches that were never taken are reported as warnings.
+ *
+ * Findings are returned rather than failed, so the Effect only fails on
+ * interruption. Each finding that came from running the machine includes the
+ * events that reproduce it.
+ *
+ * **Gotchas**
+ *
+ * A passing `"bounded"` report means nothing was found in what was explored. It
+ * is not a proof. Invocations do not run during planning, so test them with
+ * {@link probe} on a started machine.
+ *
+ * **Example** (Finding nondeterministic planning)
+ *
+ * ```ts import.meta.vitest
+ * import { Machine } from "@typeonce/effect-machine"
+ * import { MachineTest } from "@typeonce/effect-machine/testing"
+ * import { Effect, Schema } from "effect"
+ *
+ * const nextAmount = () => Math.random()
+ * const machine = Machine.make({
+ *   root: Machine.state({
+ *     states: { Editing: {}, Charging: { fields: { amount: Schema.Number } } }
+ *   }),
+ *   events: Machine.events({ Pay: {} })
+ * }).handle({
+ *   initial: { target: "Editing" },
+ *   states: {
+ *     Editing: { on: { Pay: { target: "Charging", data: () => ({ amount: nextAmount() }) } } }
+ *   }
+ * })
+ *
+ * const report = await Effect.runPromise(MachineTest.check(machine))
+ *
+ * report.ok // => false
+ * report.findings.map((finding) => finding.law) // => ["planning.deterministic"]
+ * ```
+ *
+ * @category verification
+ * @since 0.47.0
+ */
+export const check: <M extends AnyMachine>(
+  machine: RootReadyMachine<M>,
+  options?: CheckOptions<M>
+) => Effect.Effect<CheckReport, never, RunServices<M>> = CheckImpl.check
+
+/**
+ * Formats a report as line-oriented text for a terminal or an agent transcript.
+ *
+ * @category verification
+ * @since 0.47.0
+ */
+export const formatCheckReport: (report: CheckReport) => string = CheckImpl.formatReport
 
 /**
  * Formats a trace as deterministic, line-oriented counterexample evidence.

@@ -17,6 +17,7 @@
     "**/dist",
     "**/build",
     "**/docs",
+    "ai-docs/src/**/*.md",
     "**/coverage",
     "packages/**/CHANGELOG.md",
     "!scratchpad/**/*",

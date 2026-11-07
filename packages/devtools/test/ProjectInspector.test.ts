@@ -3,6 +3,7 @@ import * as Effect from "effect/Effect"
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import * as CheckCommand from "../src/internal/checkCommand.js"
 import { parseCandidate } from "../src/internal/projectInspector.js"
 import * as ProjectInspector from "../src/ProjectInspector.js"
 
@@ -43,6 +44,51 @@ describe("ProjectInspector", () => {
         })
       }
     }).pipe(Effect.provide(ProjectInspector.layer)))
+
+  it.effect("checks exported machines in the isolated worker and reports problems as data", () =>
+    Effect.acquireUseRelease(
+      Effect.promise(() => mkdtemp(join(tmpdir(), "effect-machine-check-"))),
+      (root) =>
+        Effect.gen(function*() {
+          yield* Effect.promise(() => mkdir(join(root, "src"), { recursive: true }))
+          yield* Effect.promise(() =>
+            writeFile(
+              join(root, "src", "orphan.mjs"),
+              `import { Machine } from "@typeonce/effect-machine"
+export const orphan = Machine.make({
+  id: "orphan",
+  root: Machine.state({ states: { Idle: {}, Lost: {} } }),
+  events: Machine.events({ Go: {} })
+}).handle({ initial: { target: "Idle" }, states: { Idle: { on: { Go: { target: "Idle" } } } } })
+`
+            )
+          )
+          const results = yield* ProjectInspector.check({ root, include: "src/*.mjs" })
+          const failed = results[0]
+          // A temporary project cannot resolve the package, so this asserts the failure path.
+          assert.strictEqual(failed?._tag, "Failed")
+
+          const checked = yield* ProjectInspector.check({
+            root: process.cwd(),
+            include: "packages/devtools/src/internal/browser/example-machine.ts"
+          })
+          assert.strictEqual(checked.length, 1)
+          const result = checked[0]
+          assert.strictEqual(result?._tag, "Checked")
+          if (result?._tag === "Checked") {
+            const report = result.report as { readonly machine: string; readonly text: string }
+            assert.strictEqual(report.machine, "inspection-example")
+            assert.include(report.text, "inspection-example")
+            assert.isTrue(CheckCommand.renderJson(checked).includes("\"schemaVersion\": 1"))
+          }
+        }).pipe(Effect.provide(ProjectInspector.layer)),
+      (root) => Effect.promise(() => rm(root, { recursive: true, force: true }))
+    ))
+
+  it("treats a project with nothing to check as a failure", () => {
+    assert.isFalse(CheckCommand.isOk([]))
+    assert.strictEqual(CheckCommand.renderText([]), "No Effect Machine definitions found")
+  })
 
   it.effect("returns a failed result when one candidate cannot be loaded", () =>
     Effect.gen(function*() {
