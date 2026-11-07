@@ -81,7 +81,7 @@ const renderBranch = (
 ): HTMLElement => {
   const row = createElement("div", "branch-row")
   const main = createElement("div", "branch-main")
-  if (branch.type === "branch") main.append(badge(branch.title, "condition"))
+  if (branch.type === "branch") main.append(badge(branch.key, "condition"))
   if (branch.target !== null) {
     main.append(createElement("span", "branch-arrow", "→"), stateLink(branch.target, branch.target, navigate))
   } else if (branch.selection.kind === "update") {
@@ -158,7 +158,7 @@ const renderIncomingTransition = (
   if (api === undefined) {
     details.push(["Selection", incoming.branch.selection.kind], ["Scope", incoming.branch.selection.scope])
   }
-  if (incoming.branch.type === "branch") details.unshift(["Title", incoming.branch.title])
+  if (incoming.branch.type === "branch") details.unshift(["Branch", incoming.branch.key])
   card.append(metadata(details))
   return card
 }

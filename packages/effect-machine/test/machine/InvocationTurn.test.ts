@@ -41,8 +41,7 @@ const loopMachine = Machine.make({
         onDone: {
           target: "Ticking",
           reenter: true,
-          update: "root",
-          data: ({ root }) => ({ target: undefined, update: { hops: root.hops + 1 } })
+          update: { root: ({ root }) => ({ hops: root.hops + 1 }) }
         }
       }
     }
@@ -64,7 +63,7 @@ const makeHostMachine = (started: Array<string>, release: Deferred.Deferred<void
       }
     }).handle({
       initial: { target: "Working" },
-      states: { Working: { invoke: { src: "work", onDone: { none: true } } } }
+      states: { Working: { invoke: { src: "work", onDone: { stay: true } } } }
     })
   )
   return Machine.make({

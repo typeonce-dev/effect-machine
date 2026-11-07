@@ -56,7 +56,6 @@ export interface TransitionDefinition {
     | {
       readonly type: "branch"
       readonly key: string
-      readonly title: string
       readonly target: string | undefined
       readonly selection: {
         readonly kind: "state" | "initial" | "history" | "choice" | "update" | "none"

@@ -24,8 +24,8 @@ describe("event validation across execution strategies", () => {
             Ready: {
               on: {
                 Set: {
-                  none: true,
-                  resolve: ({ event }) => {
+                  stay: true,
+                  commands: ({ event }) => {
                     retained = event
                   }
                 }

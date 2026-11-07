@@ -131,8 +131,8 @@ describe("machine reference event channels", () => {
           Idle: {
             on: {
               Publish: {
-                none: true,
-                resolve: ({ event }, enqueue) => {
+                stay: true,
+                commands: ({ event }, enqueue) => {
                   enqueue.emit(Emissions.Published({ value: event.value }))
                   return undefined
                 }
@@ -187,8 +187,8 @@ describe("machine reference event channels", () => {
           Idle: {
             on: {
               Publish: {
-                none: true,
-                resolve: (_, enqueue) => {
+                stay: true,
+                commands: (_, enqueue) => {
                   enqueue.emit(Emissions.Published({ value: "invalid" } as never))
                   return undefined
                 }
@@ -238,7 +238,6 @@ describe("machine reference event channels", () => {
       const childStates = Machine.state({ states: { Waiting, Reported } })
       let rootHadParent = true
       const childMachine = Machine.make({
-        branches: { transition1: { destination: { target: "Reported" } } },
         root: childStates,
         events: ChildEvents,
         parent: Machine.optionalParent(ParentEvents),
@@ -253,14 +252,14 @@ describe("machine reference event channels", () => {
           Waiting: {
             on: {
               Trigger: {
-                branches: "transition1",
-                resolve: ({ parent, select: { destination: target } }, enqueue) => {
+                branches: [{ target: "Reported" }],
+                resolve: ({ parent, select }, enqueue) => {
                   rootHadParent = parent !== undefined
                   enqueue.emit(ChildEmissions.Notice({ value: 1 }))
                   if (parent !== undefined) {
                     enqueue.sendTo(parent, ParentEvents.ChildReported({ value: 1 }))
                   }
-                  return target({ data: new Reported({}), decoded: true })
+                  return select.target("Reported", { data: new Reported({}), decoded: true })
                 }
               }
             }
@@ -288,7 +287,6 @@ describe("machine reference event channels", () => {
         }
       })
       const parentMachine = Machine.make({
-        branches: { transition1: { destination: { target: "Finished" } } },
         children: { source1: Child },
         root: parentStates,
         events: Machine.eventsFromSchemas(ParentEvents, Notice)
@@ -378,8 +376,8 @@ describe("machine reference event channels", () => {
               src: "source1",
               id: "notify-ready",
               input: (context) => context,
-              onDone: { none: true },
-              onFailure: { none: true }
+              onDone: { stay: true },
+              onFailure: { stay: true }
             }
           }
         }

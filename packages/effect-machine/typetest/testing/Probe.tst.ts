@@ -25,8 +25,8 @@ describe("MachineTest probe", () => {
     states: {
       State: {
         on: {
-          PublicEvent: { none: true },
-          InternalEvent: { none: true }
+          PublicEvent: { stay: true },
+          InternalEvent: { stay: true }
         }
       }
     }

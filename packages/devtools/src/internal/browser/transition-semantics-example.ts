@@ -129,18 +129,6 @@ const defaultWorkspaceSnapshot = () => ({
   }
 })
 export const transitionSemanticsMachine = Machine.make({
-  branches: {
-    transition4: {
-      draft: { target: "Workspace.Draft", title: "Preferred route is draft" },
-      review: { target: "Workspace.Review", title: "Preferred route is review" }
-    },
-    transition7: {
-      review: { target: "Workspace.Review", title: "Enter the review flow" },
-      publish: { target: "Workspace.Finished", title: "Publish without review" }
-    },
-    transition14: { destination: { history: "Workspace.recent" } },
-    transition15: { destination: { history: "Workspace.exact" } }
-  },
   id: "transition-semantics",
   root: TransitionStates,
   events: Machine.eventsFromSchemas(
@@ -183,12 +171,15 @@ export const transitionSemanticsMachine = Machine.make({
           data: ({ event }) => (new Paused({ reason: event.reason }))
         },
         BumpWorkspace: {
-          update: "Workspace",
-          decoded: true,
-          data: ({ state: current }) => (new Workspace({
-            revision: current.revision + 1,
-            preferredRoute: current.preferredRoute
-          }))
+          update: {
+            Workspace: {
+              decoded: true,
+              data: ({ state: current }) => (new Workspace({
+                revision: current.revision + 1,
+                preferredRoute: current.preferredRoute
+              }))
+            }
+          }
         }
       },
       onDone: {
@@ -199,11 +190,14 @@ export const transitionSemanticsMachine = Machine.make({
       states: {
         Routing: {
           choice: {
-            branches: "transition4",
+            branches: [{ target: "Workspace.Draft" }, { target: "Workspace.Review" }],
             resolve: ({ containingState, select }) =>
               containingState.preferredRoute === "review"
-                ? select.review({ data: new Review({ requestedBy: "initial route" }), decoded: true })
-                : select.draft({ data: new Draft({ text: "", autosaves: 0 }), decoded: true })
+                ? select.target("Workspace.Review", {
+                  data: new Review({ requestedBy: "initial route" }),
+                  decoded: true
+                })
+                : select.target("Workspace.Draft", { data: new Draft({ text: "", autosaves: 0 }), decoded: true })
           }
         },
         Draft: {
@@ -215,18 +209,23 @@ export const transitionSemanticsMachine = Machine.make({
             },
             Save: { target: "Workspace.AutoSaving", decoded: true, data: () => (new AutoSaving({})) },
             Submit: {
-              branches: "transition7",
+              branches: [{ target: "Workspace.Review" }, { target: "Workspace.Finished" }],
               resolve: ({ event, select }) =>
                 event.mode === "publish"
-                  ? select.publish({ data: new WorkspaceFinished({ result: "published directly" }), decoded: true })
-                  : select.review({ data: new Review({ requestedBy: event.requestedBy }), decoded: true })
+                  ? select.target("Workspace.Finished", {
+                    data: new WorkspaceFinished({ result: "published directly" }),
+                    decoded: true
+                  })
+                  : select.target("Workspace.Review", {
+                    data: new Review({ requestedBy: event.requestedBy }),
+                    decoded: true
+                  })
             },
-            Refresh: { none: true, reenter: true },
-            Ignore: { none: true },
+            Refresh: { reenter: true },
+            Ignore: { stay: true },
             MaybeHandle: {
-              none: true,
-              resolve: ({ decline, event }) => event.accept ? undefined : decline(),
-              declinable: true
+              branches: [{ stay: true }, { decline: true }],
+              resolve: ({ select, event }) => event.accept ? select.stay() : select.decline()
             }
           }
         },
@@ -285,8 +284,14 @@ export const transitionSemanticsMachine = Machine.make({
           decoded: true,
           data: ({ event }) => (new Workspace({ revision: 0, preferredRoute: event.route }))
         },
-        ResumeShallow: { branches: "transition14", resolve: ({ select: { destination: target } }) => target() },
-        ResumeDeep: { branches: "transition15", resolve: ({ select: { destination: target } }) => target() },
+        ResumeShallow: {
+          branches: [{ history: "Workspace.recent" }],
+          resolve: ({ select }) => select.history("Workspace.recent")
+        },
+        ResumeDeep: {
+          branches: [{ history: "Workspace.exact" }],
+          resolve: ({ select }) => select.history("Workspace.exact")
+        },
         Restart: {
           target: "Workspace",
           decoded: true,

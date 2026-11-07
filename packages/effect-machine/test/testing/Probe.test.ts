@@ -16,7 +16,6 @@ class Reenter extends Schema.TaggedClass<Reenter>("ProbeReenter")("Reenter", {})
 class RaisedIncrement extends Schema.TaggedClass<RaisedIncrement>("ProbeRaisedIncrement")("RaisedIncrement", {}) {}
 const states = Machine.state({ states: { Counter } })
 const machine = Machine.make({
-  branches: { transition3: { destination: { target: "Counter" } } },
   root: states,
   events: Machine.eventsFromSchemas(Increment, Noop, Ignored, Decline, Burst, Reenter),
   internalEvents: Machine.internalEventsFromSchemas(RaisedIncrement)
@@ -34,8 +33,8 @@ const machine = Machine.make({
           decoded: true,
           data: ({ event, state }) => (new Counter({ count: state.count + event.amount }))
         },
-        Noop: { none: true },
-        Decline: { none: true, resolve: ({ decline }) => decline(), declinable: true },
+        Noop: { stay: true },
+        Decline: { stay: true, guard: () => false },
         Reenter: {
           target: "Counter",
           reenter: true,
@@ -43,10 +42,10 @@ const machine = Machine.make({
           data: ({ state }) => (new Counter({ count: state.count }))
         },
         Burst: {
-          branches: "transition3",
-          resolve: ({ state, select: { destination: target } }, enqueue) => {
+          branches: [{ target: "Counter" }],
+          resolve: ({ state, select }, enqueue) => {
             enqueue.raise(new RaisedIncrement({}))
-            return target({ data: new Counter({ count: state.count + 1 }), decoded: true })
+            return select.target("Counter", { data: new Counter({ count: state.count + 1 }), decoded: true })
           }
         },
         RaisedIncrement: {

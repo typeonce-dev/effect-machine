@@ -289,7 +289,7 @@ describe("AtomMachine", () => {
             }
           },
           ValueRead: {
-            invoke: { src: "source1", onDone: { none: true } },
+            invoke: { src: "source1", onDone: { stay: true } },
             on: {
               ReadValue: { target: "Count", decoded: true, data: () => (new Count({ value: 0 })) }
             }
@@ -412,8 +412,8 @@ describe("AtomMachine", () => {
               src: "source1",
               id: "spawn-counter",
               input: (context) => context,
-              onDone: { none: true },
-              onFailure: { none: true }
+              onDone: { stay: true },
+              onFailure: { stay: true }
             }
           }
         }
@@ -473,8 +473,8 @@ describe("AtomMachine", () => {
               src: "source1",
               id: "spawn-counter",
               input: (context) => context,
-              onDone: { none: true },
-              onFailure: { none: true }
+              onDone: { stay: true },
+              onFailure: { stay: true }
             }
           }
         }
@@ -672,7 +672,7 @@ describe("AtomMachine", () => {
         events: Machine.eventsFromSchemas(Finish)
       }).handle({
         initial: { target: "Count", decoded: true, data: new Count({ value: 0 }) },
-        states: { Count: { invoke: { src: "counter", onDone: { none: true } } } }
+        states: { Count: { invoke: { src: "counter", onDone: { stay: true } } } }
       })
       const childAtoms = AtomMachine.make(parent).child(Child)
       const count = AtomMachine.selectChild(childAtoms, "Count")
@@ -760,7 +760,6 @@ describe("AtomMachine", () => {
       let requiredResolverCalls = 0
       let declinableResolverCalls = 0
       const machine = Machine.make({
-        branches: { transition1: { destination: { target: "CanDone" } } },
         root: states,
         events
       }).handle({
@@ -773,18 +772,17 @@ describe("AtomMachine", () => {
           CanIdle: {
             on: {
               Check: {
-                none: true,
-                resolve: ({ event, decline }) => {
+                branches: [{ stay: true }, { decline: true }],
+                resolve: ({ event, select }) => {
                   declinableResolverCalls++
-                  return event.accept ? undefined : decline()
-                },
-                declinable: true
+                  return event.accept ? select.stay() : select.decline()
+                }
               },
               Complete: {
-                branches: "transition1",
-                resolve: ({ select: { destination: target } }) => {
+                branches: [{ target: "CanDone" }],
+                resolve: ({ select }) => {
                   requiredResolverCalls++
-                  return target({ data: new CanDone({}), decoded: true })
+                  return select.target("CanDone", { data: new CanDone({}), decoded: true })
                 }
               }
             }

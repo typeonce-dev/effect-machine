@@ -122,12 +122,6 @@ const GalleryStates = Machine.state({
   }
 })
 export const invokeOutcomesMachine = Machine.make({
-  branches: {
-    transition13: {
-      ready: { target: "Completed", title: "Worker reports ready" },
-      waiting: { none: true, title: "Worker is still starting" }
-    }
-  },
   effects: {
     source1: ({ state }: {
       readonly state: LoadingDocument
@@ -209,8 +203,8 @@ export const invokeOutcomesMachine = Machine.make({
             src: "source2",
             id: "document-updates",
             onElement: {
-              none: true,
-              resolve: ({ element }, enqueue) => {
+              stay: true,
+              commands: ({ element }, enqueue) => {
                 enqueue.raise(GalleryInternalEvents.StreamValue({ value: element }))
               }
             },
@@ -255,11 +249,14 @@ export const invokeOutcomesMachine = Machine.make({
               data: ({ error }) => (new Failed({ source: "process", message: String(error) }))
             },
             onSnapshot: {
-              branches: "transition13",
+              branches: [{ target: "Completed" }, { stay: true }],
               resolve: ({ select, snapshot }) =>
                 snapshot.state === "ready"
-                  ? select.ready({ data: new Completed({ source: "process", result: "ready" }), decoded: true })
-                  : select.waiting()
+                  ? select.target("Completed", {
+                    data: new Completed({ source: "process", result: "ready" }),
+                    decoded: true
+                  })
+                  : select.stay()
             }
           }
         },

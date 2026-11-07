@@ -44,13 +44,13 @@ const makeFlatMachine = () => {
     states: {
       Count: {
         on: {
-          Noop: { none: true },
+          Noop: { stay: true },
           Increment: {
             target: "Count",
             decoded: true,
             data: ({ state }) => (new Count({ value: state.value + 1 }))
           },
-          Reenter: { none: true, reenter: true, resolve: () => undefined },
+          Reenter: { reenter: true, commands: () => undefined },
           Finish: { target: "Done", decoded: true, data: ({ state }) => (new Done({ value: state.value })) }
         }
       },
@@ -86,7 +86,6 @@ describe("machine planner and runtime strategies", () => {
   it.effect("retains the selected named branch across generic and indexed-flat planning", () => {
     const states = Machine.state({ states: { Count } })
     const machine = Machine.make({
-      branches: { transition1: { negative: { none: true }, zero: { none: true }, positive: { none: true } } },
       root: states,
       events: Machine.eventsFromSchemas(Select)
     }).handle({
@@ -99,13 +98,13 @@ describe("machine planner and runtime strategies", () => {
         Count: {
           on: {
             Select: {
-              branches: "transition1",
+              branches: [{ stay: true }, { update: "Count" }, { target: "Count" }],
               resolve: ({ event, select }) =>
                 event.value < 0
-                  ? select.negative()
+                  ? select.stay()
                   : event.value === 0
-                  ? select.zero()
-                  : select.positive()
+                  ? select.update({ Count: { decoded: true, data: new Count({ value: 0 }) } })
+                  : select.target("Count", { decoded: true, data: new Count({ value: 1 }) })
             }
           }
         }
@@ -126,10 +125,95 @@ describe("machine planner and runtime strategies", () => {
       }
     })
   })
+  it.effect("matches strategies for commands on target, update, stay, and reenter transitions", () => {
+    const Emits = Machine.emittedEvents({ Noted: {} })
+    const events = Machine.events({ Go: {}, Set: { value: Schema.Number }, Keep: {}, Again: {}, Raised: {} })
+    const machine = Machine.make({
+      root: Machine.state({ states: { Count } }),
+      events,
+      emittedEvents: Emits
+    }).handle({
+      initial: { target: "Count", decoded: true, data: new Count({ value: 0 }) },
+      states: {
+        Count: {
+          on: {
+            Go: {
+              target: "Count",
+              decoded: true,
+              data: ({ state }) => new Count({ value: state.value + 1 }),
+              commands: (_, enqueue) => enqueue.emit(Emits.Noted())
+            },
+            Set: {
+              update: { Count: { decoded: true, data: ({ event }) => new Count({ value: event.value }) } },
+              commands: (_, enqueue) => enqueue.raise(events.Raised())
+            },
+            Keep: { stay: true, commands: (_, enqueue) => enqueue.emit(Emits.Noted()) },
+            Again: { reenter: true, commands: (_, enqueue) => enqueue.raise(events.Raised()) },
+            Raised: { stay: true }
+          }
+        }
+      }
+    })
+    return verifyPlannerStrategies({
+      machine,
+      events: [
+        events.Go(),
+        events.Set({ value: 7 }),
+        events.Keep(),
+        events.Again(),
+        events.Go()
+      ],
+      expected: "indexed-flat",
+      label: "transition commands"
+    })
+  })
+  it.effect("fails closed to generic planning when a parallel region's stay preempts its ancestor", () => {
+    const events = Machine.events({ Close: { handled: Schema.Boolean } })
+    const machine = Machine.make({
+      root: Machine.state({
+        states: {
+          Regions: {
+            type: "parallel",
+            states: { Left: { states: { A: {} } }, Right: { states: { B: {} } } }
+          },
+          Closed: {}
+        }
+      }),
+      events
+    }).handle({
+      initial: { target: "Regions" },
+      states: {
+        Regions: {
+          on: { Close: { target: "Closed" } },
+          states: {
+            Left: {
+              initial: { target: "Regions.Left.A" },
+              states: {
+                A: {
+                  on: {
+                    Close: {
+                      branches: [{ stay: true }, { decline: true }],
+                      resolve: ({ event, select }) => event.handled ? select.stay() : select.decline()
+                    }
+                  }
+                }
+              }
+            },
+            Right: { initial: { target: "Regions.Right.B" }, states: { B: {} } }
+          }
+        }
+      }
+    })
+    return verifyPlannerStrategies({
+      machine,
+      events: [events.Close({ handled: true }), events.Close({ handled: false })],
+      expected: "generic",
+      label: "parallel stay preemption"
+    })
+  })
   it.effect("fails closed to generic planning for declinable transitions", () => {
     const states = Machine.state({ states: { Count } })
     const machine = Machine.make({
-      branches: { transition1: { destination: { target: "Count" } } },
       root: states,
       events: Machine.eventsFromSchemas(Select)
     }).handle({
@@ -142,12 +226,11 @@ describe("machine planner and runtime strategies", () => {
         Count: {
           on: {
             Select: {
-              branches: "transition1",
-              resolve: ({ event, state, select: { destination: target }, decline }) =>
+              branches: [{ target: "Count" }, { decline: true }],
+              resolve: ({ event, state, select }) =>
                 event.value < 0
-                  ? decline()
-                  : target({ data: new Count({ value: state.value + event.value }), decoded: true }),
-              declinable: true
+                  ? select.decline()
+                  : select.target("Count", { data: new Count({ value: state.value + event.value }), decoded: true })
             }
           }
         }
@@ -247,25 +330,31 @@ describe("machine planner and runtime strategies", () => {
                     Leaf: {
                       on: {
                         UpdateRegions: {
-                          update: "Root.Work.Left",
-                          decoded: true,
-                          data: (
-                            { ancestors: { "Root.Work.Left": current } }
-                          ) => (new Left({ value: current.value + 1 }))
+                          update: {
+                            "Root.Work.Left": {
+                              decoded: true,
+                              data: (
+                                { ancestors: { "Root.Work.Left": current } }
+                              ) => (new Left({ value: current.value + 1 }))
+                            }
+                          }
                         },
-                        Compete: { update: "Root", decoded: true, data: () => (new Root({ revision: 1 })) },
+                        Compete: {
+                          update: { Root: { decoded: true, data: () => (new Root({ revision: 1 })) } }
+                        },
                         ExitRoot: {
-                          update: "Root",
-                          decoded: true,
-                          data: () => (new Root({ revision: 3 }))
+                          update: { Root: { decoded: true, data: () => (new Root({ revision: 3 })) } }
                         },
                         ReenterUpdate: {
-                          update: "Root.Work.Left",
-                          reenter: true,
-                          decoded: true,
-                          data: (
-                            { ancestors: { "Root.Work.Left": current } }
-                          ) => (new Left({ value: current.value + 1 }))
+                          update: {
+                            "Root.Work.Left": {
+                              decoded: true,
+                              data: (
+                                { ancestors: { "Root.Work.Left": current } }
+                              ) => (new Left({ value: current.value + 1 }))
+                            }
+                          },
+                          reenter: true
                         }
                       }
                     }
@@ -281,13 +370,18 @@ describe("machine planner and runtime strategies", () => {
                     Leaf: {
                       on: {
                         UpdateRegions: {
-                          update: "Root.Work.Right",
-                          decoded: true,
-                          data: (
-                            { ancestors: { "Root.Work.Right": current } }
-                          ) => (new Right({ value: current.value + 2 }))
+                          update: {
+                            "Root.Work.Right": {
+                              decoded: true,
+                              data: (
+                                { ancestors: { "Root.Work.Right": current } }
+                              ) => (new Right({ value: current.value + 2 }))
+                            }
+                          }
                         },
-                        Compete: { update: "Root", decoded: true, data: () => (new Root({ revision: 2 })) },
+                        Compete: {
+                          update: { Root: { decoded: true, data: () => (new Root({ revision: 2 })) } }
+                        },
                         ExitRoot: { target: "Outside", decoded: true, data: () => (new Outside({})) }
                       }
                     }
@@ -350,7 +444,6 @@ describe("machine planner and runtime strategies", () => {
       }
     })
     const machine = Machine.make({
-      branches: { transition1: { destination: { target: "Ready.Saving", update: "Ready" } } },
       root: states,
       events: Machine.eventsFromSchemas(Save)
     }).handle({
@@ -370,12 +463,12 @@ describe("machine planner and runtime strategies", () => {
             Idle: {
               on: {
                 Save: {
-                  branches: "transition1",
-                  resolve: ({ ancestors: { Ready: current }, event, select: { destination: target } }) =>
-                    target({
+                  branches: [{ target: "Ready.Saving", update: "Ready" }],
+                  resolve: ({ ancestors: { Ready: current }, event, select }) =>
+                    select.target("Ready.Saving", {
                       data: new Saving({ request: event.request }),
                       decoded: true,
-                      update: { data: new Ready({ revision: current.revision + 1 }), decoded: true }
+                      update: { Ready: { decoded: true, data: new Ready({ revision: current.revision + 1 }) } }
                     })
                 }
               }
@@ -729,8 +822,8 @@ describe("machine planner and runtime strategies", () => {
               src: "source1",
               id: "values",
               onElement: {
-                none: true,
-                resolve: ({ element }) => {
+                stay: true,
+                commands: ({ element }) => {
                   seen.push(element)
                 }
               },
@@ -828,8 +921,8 @@ describe("machine planner and runtime strategies", () => {
           Idle: {
             on: {
               Publish: {
-                none: true,
-                resolve: ({ self }, enqueue) => {
+                stay: true,
+                commands: ({ self }, enqueue) => {
                   assert.ok(self.sessionId.startsWith("machine:"))
                   enqueue.emit(Emissions.Published({ value } as never))
                   return undefined
@@ -961,8 +1054,8 @@ describe("machine planner and runtime strategies", () => {
             invoke: { src: "load", id: "load" },
             on: {
               Increment: {
-                none: true,
-                resolve: ({ state }, enqueue) => {
+                stay: true,
+                commands: ({ state }, enqueue) => {
                   enqueue.raise(new Select({ value: state.value + 1 }))
                   return undefined
                 }
@@ -1163,12 +1256,6 @@ describe("machine planner and runtime strategies", () => {
         let membershipAttempts = 0
         let navigationRuns = 0
         const machine = Machine.make({
-          branches: {
-            transition1: {
-              authenticated: { target: "Flow.Checking" },
-              anonymous: { target: "Flow.Plans" }
-            }
-          },
           effects: {
             source1: Effect.suspend(() =>
               Effect.suspend(() => {
@@ -1199,9 +1286,11 @@ describe("machine planner and runtime strategies", () => {
               states: {
                 Routing: {
                   choice: {
-                    branches: "transition1",
+                    branches: [{ target: "Flow.Checking" }, { target: "Flow.Plans" }],
                     resolve: ({ containingState, select }) =>
-                      containingState.authenticated ? select.authenticated({}) : select.anonymous({})
+                      containingState.authenticated
+                        ? select.target("Flow.Checking", {})
+                        : select.target("Flow.Plans", {})
                   }
                 },
                 Checking: {
@@ -1345,8 +1434,8 @@ describe("machine planner and runtime strategies", () => {
               src: "source1",
               id: "notify-parent",
               input: (context) => context,
-              onDone: { none: true },
-              onFailure: { none: true }
+              onDone: { stay: true },
+              onFailure: { stay: true }
             }
           }
         }
@@ -1418,12 +1507,6 @@ describe("machine planner and runtime strategies", () => {
               })
             }
           },
-          branches: {
-            transition1: {
-              stale: { target: "Failed", title: "Worker is stale" },
-              unchanged: { none: true }
-            }
-          },
           root: states,
           events: Machine.eventsFromSchemas(Reenter, Stale)
         })
@@ -1440,13 +1523,13 @@ describe("machine planner and runtime strategies", () => {
                 id: "worker",
                 address: Machine.childAddress("worker"),
                 input: () => undefined,
-                onFailure: { none: true },
+                onFailure: { stay: true },
                 onSnapshot: {
-                  branches: "transition1",
+                  branches: [{ target: "Failed" }, { stay: true }],
                   resolve: ({ snapshot, select }) =>
                     snapshot.state === "stale"
-                      ? select.stale({ data: new Failed({}), decoded: true })
-                      : select.unchanged()
+                      ? select.target("Failed", { data: new Failed({}), decoded: true })
+                      : select.stay()
                 }
               },
               on: {
@@ -1547,7 +1630,7 @@ describe("machine planner and runtime strategies", () => {
               id: "commission",
               input: (context) => context,
               onDone: { target: "Operating" },
-              onFailure: { none: true }
+              onFailure: { stay: true }
             }
           },
           Operating: {}
@@ -1586,42 +1669,38 @@ describe("machine planner and runtime strategies", () => {
       const Events = Machine.events({ Bump: {}, Stay: {}, Reset: {} })
       const machine = Machine.make({
         root: States,
-        events: Events,
-        branches: {
-          first: { next: { target: "Flow.Second" } },
-          second: { even: { target: "Flow.Even" }, odd: { target: "Flow.Odd" } }
-        }
+        events: Events
       }).handle({
         initial: { target: "Flow", data: { count: 0 } },
         states: {
           Flow: {
-            on: { Reset: { update: "Flow", data: () => ({ count: 0 }) } },
+            on: { Reset: { update: { Flow: () => ({ count: 0 }) } } },
             initial: { target: "Flow.Idle" },
             states: {
               Idle: {
                 on: {
                   Bump: {
                     target: "Flow.First",
-                    update: "Flow",
-                    data: ({ ancestors }) => ({ count: ancestors.Flow.count + 1 })
+                    update: { Flow: ({ ancestors }) => ({ count: ancestors.Flow.count + 1 }) }
                   }
                 }
               },
-              First: { choice: { branches: "first", resolve: ({ select }) => select.next() } },
+              First: {
+                choice: { branches: [{ target: "Flow.Second" }], resolve: ({ select }) => select.target("Flow.Second") }
+              },
               Second: {
                 choice: {
-                  branches: "second",
+                  branches: [{ target: "Flow.Even" }, { target: "Flow.Odd" }],
                   resolve: ({ containingState, select }) =>
-                    containingState.count % 2 === 0 ? select.even() : select.odd()
+                    containingState.count % 2 === 0 ? select.target("Flow.Even") : select.target("Flow.Odd")
                 }
               },
               Even: {
                 on: {
                   Stay: {
                     target: "Flow.First",
-                    update: "Flow",
-                    reenter: true,
-                    data: ({ ancestors }) => ({ count: ancestors.Flow.count + 2 })
+                    update: { Flow: ({ ancestors }) => ({ count: ancestors.Flow.count + 2 }) },
+                    reenter: true
                   }
                 }
               },
@@ -1629,8 +1708,7 @@ describe("machine planner and runtime strategies", () => {
                 on: {
                   Bump: {
                     target: "Flow.First",
-                    update: "Flow",
-                    data: ({ ancestors }) => ({ count: ancestors.Flow.count + 1 })
+                    update: { Flow: ({ ancestors }) => ({ count: ancestors.Flow.count + 1 }) }
                   }
                 }
               }

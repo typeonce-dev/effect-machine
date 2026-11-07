@@ -126,12 +126,6 @@ const makeCheckoutMachine = (
   exactDefault?: () => ReturnType<typeof checkoutShipping>
 ) => {
   return Machine.make({
-    branches: {
-      transition3: { destination: { history: "checkout.exact" } },
-      transition4: { destination: { target: "checkout.payment" } },
-      transition5: { destination: { history: "checkout.recent" } },
-      transition6: { destination: { history: "checkout.exact" } }
-    },
     root: CheckoutStates,
     events: Machine.eventsFromSchemas(Leave, ResumeShallow, ResumeDeep, GoShipping, EnterVerifying, ReenterHistory)
   }).handle({
@@ -169,18 +163,18 @@ const makeCheckoutMachine = (
             data: ({ event }) => (new Shipping({ address: event.address }))
           },
           ReenterHistory: {
-            branches: "transition3",
+            branches: [{ history: "checkout.exact" }],
             reenter: true,
-            resolve: ({ select: { destination: target } }) => target()
+            resolve: ({ select }) => select.history("checkout.exact")
           }
         },
         states: {
           shipping: {
             on: {
               EnterVerifying: {
-                branches: "transition4",
-                resolve: ({ select: { destination: target } }) =>
-                  target({
+                branches: [{ target: "checkout.payment" }],
+                resolve: ({ select }) =>
+                  select.target("checkout.payment", {
                     data: new Payment({ attempt: 2 }),
                     decoded: true,
                     states: { verifying: { data: new Verifying({ challengeId: "challenge-7" }), decoded: true } }
@@ -224,8 +218,14 @@ const makeCheckoutMachine = (
           lifecycle?.push("exit:support")
         },
         on: {
-          ResumeShallow: { branches: "transition5", resolve: ({ select: { destination: target } }) => target() },
-          ResumeDeep: { branches: "transition6", resolve: ({ select: { destination: target } }) => target() }
+          ResumeShallow: {
+            branches: [{ history: "checkout.recent" }],
+            resolve: ({ select }) => select.history("checkout.recent")
+          },
+          ResumeDeep: {
+            branches: [{ history: "checkout.exact" }],
+            resolve: ({ select }) => select.history("checkout.exact")
+          }
         }
       }
     }
@@ -324,10 +324,6 @@ const activeWorkspace: Machine.Snapshot<typeof WorkspaceStates> = {
 }
 const makeWorkspaceMachine = (initialized: Array<string>) => {
   return Machine.make({
-    branches: {
-      transition2: { destination: { history: "workspace.recent" } },
-      transition3: { destination: { history: "workspace.exact" } }
-    },
     root: WorkspaceStates,
     events: Machine.eventsFromSchemas(LeaveWorkspace, ResumeWorkspaceShallow, ResumeWorkspaceDeep)
   }).handle({
@@ -416,10 +412,13 @@ const makeWorkspaceMachine = (initialized: Array<string>) => {
       away: {
         on: {
           ResumeWorkspaceShallow: {
-            branches: "transition2",
-            resolve: ({ select: { destination: target } }) => target()
+            branches: [{ history: "workspace.recent" }],
+            resolve: ({ select }) => select.history("workspace.recent")
           },
-          ResumeWorkspaceDeep: { branches: "transition3", resolve: ({ select: { destination: target } }) => target() }
+          ResumeWorkspaceDeep: {
+            branches: [{ history: "workspace.exact" }],
+            resolve: ({ select }) => select.history("workspace.exact")
+          }
         }
       }
     }
@@ -470,11 +469,6 @@ const nestedParallelSnapshot: Machine.Snapshot<typeof NestedHistoryStates> = {
   }
 }
 const nestedHistoryMachine = Machine.make({
-  branches: {
-    transition1: { destination: { history: "workspace.editor.exact" } },
-    transition2: { destination: { history: "workspace.editor.exact" } },
-    transition3: { destination: { history: "workspace.editor.exact" } }
-  },
   root: NestedHistoryStates,
   events: Machine.eventsFromSchemas(RestoreEditor, DefaultEditor)
 }).handle({
@@ -520,17 +514,23 @@ const nestedHistoryMachine = Machine.make({
           states: {
             writing: {
               on: {
-                DefaultEditor: { branches: "transition3", resolve: ({ select: { destination: target } }) => target() }
+                DefaultEditor: {
+                  branches: [{ history: "workspace.editor.exact" }],
+                  resolve: ({ select }) => select.history("workspace.editor.exact")
+                }
               }
             },
             preview: {
               on: {
                 RestoreEditor: {
-                  branches: "transition1",
+                  branches: [{ history: "workspace.editor.exact" }],
                   reenter: true,
-                  resolve: ({ select: { destination: target } }) => target()
+                  resolve: ({ select }) => select.history("workspace.editor.exact")
                 },
-                DefaultEditor: { branches: "transition2", resolve: ({ select: { destination: target } }) => target() }
+                DefaultEditor: {
+                  branches: [{ history: "workspace.editor.exact" }],
+                  resolve: ({ select }) => select.history("workspace.editor.exact")
+                }
               }
             }
           }

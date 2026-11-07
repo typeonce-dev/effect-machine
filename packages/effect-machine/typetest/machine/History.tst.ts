@@ -262,7 +262,6 @@ describe("Machine history states", () => {
       }>
     >().type.toBe<"checkout.payment">()
     const definition = Machine.make({
-      branches: { transition1: { destination: { history: "checkout.recent" } } },
       root: States,
       events: Machine.eventsFromSchemas(Resume)
     })
@@ -295,7 +294,10 @@ describe("Machine history states", () => {
         },
         support: {
           on: {
-            Resume: { branches: "transition1", resolve: ({ select: { destination: target } }) => target() }
+            Resume: {
+              branches: [{ history: "checkout.recent" }],
+              resolve: ({ select }) => select.history("checkout.recent")
+            }
           }
         }
       }

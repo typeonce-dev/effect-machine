@@ -96,11 +96,6 @@ const initialWorkflow = (): Machine.Machine.CompleteSnapshotContaining<{
   readonly "": typeof States.node
 }, "application.workflow"> => snapshot
 export const machine = Machine.make({
-  branches: {
-    transition1: {
-      destination: { target: "application.workflow.running", update: "application.workflow" }
-    }
-  },
   id: "inspection-example",
   root: States,
   events: Machine.eventsFromSchemas(Start, Finish, Disconnect, Refresh)
@@ -138,19 +133,27 @@ export const machine = Machine.make({
             idle: {
               on: {
                 Start: {
-                  branches: "transition1",
-                  resolve: ({ select: { destination: target } }) =>
-                    target({
+                  branches: [{ target: "application.workflow.running", update: "application.workflow" }],
+                  resolve: ({ select }) =>
+                    select.target("application.workflow.running", {
                       data: new Running({}),
                       decoded: true,
                       states: { editing: { data: new Editing({}), decoded: true } },
-                      update: { data: new Workflow({ document: "Machine.ts", unsavedChanges: 3 }), decoded: true }
+                      update: {
+                        "application.workflow": {
+                          decoded: true,
+                          data: new Workflow({ document: "Machine.ts", unsavedChanges: 3 })
+                        }
+                      }
                     })
                 },
                 Refresh: {
-                  update: "application.workflow",
-                  decoded: true,
-                  data: () => (new Workflow({ document: "Machine.ts", unsavedChanges: 0 }))
+                  update: {
+                    "application.workflow": {
+                      decoded: true,
+                      data: () => (new Workflow({ document: "Machine.ts", unsavedChanges: 0 }))
+                    }
+                  }
                 }
               }
             },

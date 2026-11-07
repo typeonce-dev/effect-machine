@@ -238,7 +238,7 @@ describe("MachineWalkthrough", () => {
       choice.trigger.type === "event" && choice.trigger.event === "Begin"
     )
     assert.strictEqual(begin.length, 2)
-    assert.deepStrictEqual(begin.map(({ title }) => title), ["Finish immediately", "Wait in working"])
+    assert.deepStrictEqual(begin.map(({ title }) => title), ["target:Working", "target:Finished"])
     assert.isTrue(begin.every(({ decisions }) => decisions.includes("conditional-branch")))
     assert.isTrue(begin.every(({ input }) => input !== null))
   })

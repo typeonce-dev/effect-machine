@@ -29,12 +29,6 @@ const ReviewEvents = Machine.eventsFromSchemas(Schema.TaggedUnion({
 const saveReview: Effect.Effect<string, string> = Effect.succeed("deterministic-chart")
 const publishReview = Effect.succeed("deterministic-chart")
 export const hierarchyRoutingMachine = Machine.make({
-  branches: {
-    transition1: {
-      save: { target: "Workflow.Saving", title: "Save the review" },
-      invalid: { target: "Workflow.Review.Failed", title: "Show validation failure" }
-    }
-  },
   effects: { source1: Effect.suspend(() => saveReview), source2: Effect.suspend(() => publishReview) },
   id: "hierarchy-routing",
   root: ReviewStates,
@@ -56,11 +50,11 @@ export const hierarchyRoutingMachine = Machine.make({
           },
           on: {
             Submit: {
-              branches: "transition1",
+              branches: [{ target: "Workflow.Saving" }, { target: "Workflow.Review.Failed" }],
               resolve: ({ event, select }) =>
                 event.route === "save"
-                  ? select.save({})
-                  : select.invalid({ data: { message: "Add a title before continuing." } })
+                  ? select.target("Workflow.Saving", {})
+                  : select.target("Workflow.Review.Failed", { data: { message: "Add a title before continuing." } })
             }
           },
           states: {

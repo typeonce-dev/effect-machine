@@ -1393,7 +1393,7 @@ const collectEvaluatedTransition = <
     selection.transition.evaluate
   )
   if (transitionResult.declined) {
-    throw new Error("Machine transition returned decline without declaring declinable: true")
+    throw new Error("Machine transition declined where a transition must be selected")
   }
   const combined = isCombinedTarget(transitionResult.state) ? transitionResult.state : undefined
   const transitionState = combined?.target ?? transitionResult.state

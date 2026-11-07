@@ -39,7 +39,6 @@ const States = Machine.state({
 describe("Machine state-value updates", () => {
   it("exposes updates only for the valued active ancestor chain", () => {
     const machine = Machine.make({
-      branches: { auth: { owner: { update: "main.work.auth" } } },
       root: States,
       events: Machine.eventsFromSchemas(Tick)
     })
@@ -70,17 +69,18 @@ describe("Machine state-value updates", () => {
                     signedOut: {
                       on: {
                         Tick: {
-                          branches: "auth",
+                          branches: [{ update: "main.work.auth" }],
                           reenter: true,
                           resolve: ({ ancestors, select, state }) => {
                             expect(state).type.toBe<SignedOut>()
                             expect(ancestors["main.work.auth"]).type.toBe<Auth>()
-                            expect(select.owner).type.toBeCallableWith({
-                              data: new Auth({ user: "next" }),
-                              decoded: true
+                            expect(select.update).type.toBeCallableWith({
+                              "main.work.auth": { data: new Auth({ user: "next" }), decoded: true }
                             })
-                            expect(select.owner).type.toBeCallableWith({ data: { user: "next" } })
-                            return select.owner({ data: new Auth({ user: "next" }), decoded: true })
+                            expect(select.update).type.toBeCallableWith({ "main.work.auth": { user: "next" } })
+                            return select.update({
+                              "main.work.auth": { decoded: true, data: new Auth({ user: "next" }) }
+                            })
                           }
                         }
                       }
@@ -123,12 +123,7 @@ describe("Machine state-value updates", () => {
   it("requires the declared retained owner replacement", () => {
     const machine = Machine.make({
       root: States,
-      events: Machine.eventsFromSchemas(Tick),
-      branches: {
-        signIn: { signedIn: { target: "main.work.auth.signedIn", update: "main.work.auth" } },
-        wrongOwner: { signedIn: { target: "main.work.auth.signedIn", update: "main.work.sync" } },
-        change: { changed: { update: "main" }, unchanged: { none: true } }
-      }
+      events: Machine.eventsFromSchemas(Tick)
     })
     machine.handle({
       initial: {
@@ -156,22 +151,21 @@ describe("Machine state-value updates", () => {
                     signedOut: {
                       on: {
                         Tick: {
-                          branches: "signIn",
+                          branches: [{ target: "main.work.auth.signedIn", update: "main.work.auth" }],
                           resolve: ({ ancestors, select }) => {
                             expect(ancestors["main.work.auth"]).type.toBe<Auth>()
-                            expect(select.signedIn).type.not.toBeCallableWith({ data: {} })
-                            expect(select.signedIn).type.toBeCallableWith({
+                            expect(select.target).type.toBeCallableWith("main.work.auth.signedIn", {
                               data: {},
-                              update: { data: { user: "next" } }
+                              update: { "main.work.auth": { user: "next" } }
                             })
-                            expect(select.signedIn).type.not.toBeCallableWith({
+                            expect(select.target).type.not.toBeCallableWith("main.work.auth.signedIn", {
                               data: {},
-                              update: { data: { user: 1 } }
+                              update: { "main.work.auth": { user: 1 } }
                             })
-                            return select.signedIn({
+                            return select.target("main.work.auth.signedIn", {
                               data: new SignedIn({}),
                               decoded: true,
-                              update: { data: new Auth({ user: "next" }), decoded: true }
+                              update: { "main.work.auth": { decoded: true, data: new Auth({ user: "next" }) } }
                             })
                           }
                         }
@@ -238,9 +232,14 @@ describe("Machine state-value updates", () => {
                     signedOut: {
                       on: {
                         Tick: {
-                          branches: "signIn",
-                          // @ts-expect-error! The declared retained owner must be constructed before returning a branch.
-                          resolve: ({ select }) => select.signedIn({ data: new SignedIn({}), decoded: true })
+                          branches: [{ target: "main.work.auth.signedIn", update: "main.work.auth" }],
+                          resolve: ({ select }) =>
+                            // @ts-expect-error! The declared retained owner must be constructed before returning a branch.
+                            select.target("main.work.auth.signedIn", {
+                              data: new SignedIn({}),
+                              decoded: true,
+                              update: { "main.work.auth": {} }
+                            })
                         }
                       }
                     },
@@ -346,7 +345,7 @@ describe("Machine state-value updates", () => {
                     signedOut: {
                       on: {
                         Tick: {
-                          branches: "wrongOwner",
+                          branches: [{ target: "main.work.auth.signedIn", update: "main.work.sync" }],
                           resolve: () => undefined
                         }
                       }
@@ -427,10 +426,9 @@ describe("Machine state-value updates", () => {
                     signedOut: {
                       on: {
                         Tick: {
-                          branches: "change",
-                          declinable: true,
-                          resolve: ({ select, decline, ancestors }) =>
-                            ancestors.main.revision === 0 ? select.changed({ data: { revision: 1 } }) : decline()
+                          branches: [{ update: "main" }, { decline: true }],
+                          resolve: ({ select, ancestors }) =>
+                            ancestors.main.revision === 0 ? select.update({ main: { revision: 1 } }) : select.decline()
                         }
                       }
                     },
@@ -480,7 +478,7 @@ describe("Machine state-value updates", () => {
                     signedOut: {
                       on: {
                         Tick: {
-                          branches: "change",
+                          branches: [{ update: "main" }, { stay: true }],
                           resolve: () => undefined
                         }
                       }
@@ -597,7 +595,7 @@ describe("Machine state-value updates", () => {
     expect(machine.handle).type.not.toBeCallableWith({
       states: {
         structural: {
-          on: { Tick: { update: "structural", data: () => ({}) } },
+          on: { Tick: { update: { structural: () => ({}) } } },
           initial: {
             target: "structural.idle",
             data: () => {
@@ -655,7 +653,7 @@ describe("Machine state-value updates", () => {
       states: {
         main: {
           states: {
-            routing: { choice: { update: "main", data: () => ({ revision: 1 }) } },
+            routing: { choice: { update: { main: () => ({ revision: 1 }) } } },
             work: {
               initial: {
                 auth: () => {
@@ -717,7 +715,7 @@ describe("Machine state-value updates", () => {
                 auth: {
                   states: {
                     signedIn: {
-                      on: { Tick: { update: "main.work.auth", data: () => ({ user: "next" }) } }
+                      on: { Tick: { update: { "main.work.auth": () => ({ user: "next" }) } } }
                     }
                   },
                   initial: {

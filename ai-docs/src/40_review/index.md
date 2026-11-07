@@ -41,12 +41,10 @@ Reserve named branch groups and `resolve` for conditional outcomes, commands,
 or nested construction. The group lives in `make`; its resolver selects only
 constructors derived from those declarations. Avoid an extra branch group for
 an ordinary transition. Use `reenter: true` when the source must restart.
-An empty targetless resolver simplifies to `{ none: true }`.
-
-A `{ none: true }` branch accepts its event, so `Machine.can` and
+A `{ stay: true }` branch accepts its event, so `Machine.can` and
 `AtomMachine.can` return `true` when a resolver selects it. Review check: for
 every event that enables or disables a control, refuse it with `guard` or with
-`declinable: true` and `decline()`. Keep `none` only for events that are
+`{ decline: true }` and `select.decline()`. Keep `stay` only for events that are
 deliberately accepted and ignored.
 
 ### Choose React ownership or keyed family lookup

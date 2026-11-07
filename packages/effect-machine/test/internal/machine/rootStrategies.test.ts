@@ -42,8 +42,7 @@ it.effect("retains independent callback contexts across root, inline, and named 
     }> = []
     const machine = Machine.make({
       root,
-      events: Machine.events({ Increment: {}, Observe: {}, IncrementRoot: {} }),
-      branches: { observe: { stay: { none: true } } }
+      events: Machine.events({ Increment: {}, Observe: {}, IncrementRoot: {} })
     }).handle({
       initial: {
         target: "Idle"
@@ -51,10 +50,11 @@ it.effect("retains independent callback contexts across root, inline, and named 
       root: () => ({ count: 0 }),
       on: {
         IncrementRoot: {
-          update: "root",
-          data: (context) => {
-            retained.push(context)
-            return { count: context.root.count + 1 }
+          update: {
+            root: (context) => {
+              retained.push(context)
+              return { count: context.root.count + 1 }
+            }
           }
         }
       },
@@ -62,14 +62,15 @@ it.effect("retains independent callback contexts across root, inline, and named 
         Idle: {
           on: {
             Increment: {
-              update: "root",
-              data: (context) => {
-                retained.push(context)
-                return { count: context.root.count + 1 }
+              update: {
+                root: (context) => {
+                  retained.push(context)
+                  return { count: context.root.count + 1 }
+                }
               }
             },
             Observe: {
-              branches: "observe",
+              branches: [{ stay: true }],
               resolve: (context) => {
                 retained.push(context)
                 return context.select.stay()
@@ -127,10 +128,10 @@ it.effect("compares structural leaves, reentry, raised events and completion wit
       Idle: { on: { Begin: { target: "Busy" } } },
       Busy: {
         on: {
-          Reenter: { none: true, reenter: true },
+          Reenter: { reenter: true },
           Finish: {
-            none: true,
-            resolve: (_, enqueue) => {
+            stay: true,
+            commands: (_, enqueue) => {
               enqueue.raise({ _tag: "Complete" })
             }
           },
@@ -159,9 +160,9 @@ it.effect("keeps flat root updates and retained snapshots equal to generic plann
   }).handle({
     root: () => ({ count: 0 }),
     on: {
-      Increment: { update: "root", data: ({ root: current, event }) => ({ count: current.count + event.by }) },
-      Noop: { none: true },
-      Reenter: { none: true, reenter: true }
+      Increment: { update: { root: ({ root: current, event }) => ({ count: current.count + event.by }) } },
+      Noop: { stay: true },
+      Reenter: { reenter: true }
     }
   })
   return verifyPlannerStrategies({
@@ -187,7 +188,7 @@ it.effect("keeps root values and child transitions equal to generic planning", (
     },
     root: () => ({ count: 0 }),
     on: {
-      Increment: { update: "root", data: ({ root: current, event }) => ({ count: current.count + event.by }) }
+      Increment: { update: { root: ({ root: current, event }) => ({ count: current.count + event.by }) } }
     },
     states: {
       Idle: { on: { Start: { target: "Busy" } } },
@@ -255,7 +256,7 @@ it.effect("compares input-less root initialization across planners", () => {
     root: { count: 0 },
     initial: { target: "Idle" },
     on: {
-      Count: { update: "root", data: ({ root }) => ({ count: root.count + 1 }) },
+      Count: { update: { root: ({ root }) => ({ count: root.count + 1 }) } },
       Reset: { initialize: true },
       Restart: { initialize: true, reenter: true }
     },
@@ -318,8 +319,8 @@ it.effect("preserves owner updates while resolving compound initial descendants"
         on: {
           Open: {
             target: "Work",
-            update: "root",
-            data: { target: { title: "new" }, update: { count: 1 } }
+            update: { root: { count: 1 } },
+            data: { title: "new" }
           }
         }
       },

@@ -50,7 +50,7 @@ export const CounterMachine = Machine.make({
     },
     Running: {
       on: {
-        Increment: { update: "Running", data: ({ state }) => ({ count: state.count + 1 }) },
+        Increment: { update: { Running: ({ state }) => ({ count: state.count + 1 }) } },
         Stop: { target: "Idle" }
       }
     }
@@ -429,24 +429,18 @@ const ReviewEvents = Machine.eventsFromSchemas(
 
 const ReviewMachine = Machine.make({
   root: ReviewStates,
-  events: ReviewEvents,
-  branches: {
-    evaluate: {
-      accepted: { target: "Accepted" },
-      rejected: { target: "Rejected" }
-    }
-  }
+  events: ReviewEvents
 }).handle({
   initial: { target: "Pending" },
   states: {
     Pending: {
       on: {
         Evaluate: {
-          branches: "evaluate",
+          branches: [{ target: "Accepted" }, { target: "Rejected" }],
           resolve: ({ event, select }) =>
             event.score >= 80
-              ? select.accepted()
-              : select.rejected()
+              ? select.target("Accepted")
+              : select.target("Rejected")
         }
       }
     },
@@ -461,31 +455,53 @@ Do not read the clock, generate randomness, call a service, or await work while
 choosing a transition. Receive such values in an event or produce them through
 state-owned work first.
 
-A `{ none: true }` branch accepts its event without changing state, so
-`Machine.can` reports `true` when a resolver selects it. When the event must be
-refused, for example to disable a control, use `guard`, or declare
-`declinable: true` and return `decline()` from the resolver.
+`resolve` is checked against `branches` in both directions, and each `select`
+call takes the values of the path it is given. An agent can edit this one
+transition without reading anything else: a missing entry, an entry that is never
+selected, and a path that returns nothing are all compile errors that name the fix.
+
+A `{ stay: true }` accepts its event without changing state, so `Machine.can`
+reports `true` when a resolver selects it. When the event must be refused, for
+example to disable a control, use `guard`, or list `{ decline: true }` and return
+`select.decline()` from the resolver. `guard` and `decline` exist only on `on`
+handlers and `always`: an invocation outcome, a completion, and a choice have no
+other candidate, so they use `{ stay: true }` or select a destination. A declined
+invocation outcome would strand the machine in its state.
+
+A `{ stay: true }` in one parallel region accepts the event, so it blocks a handler
+for that event on a parallel ancestor. `{ decline: true }` lets that handler run.
+
+Enqueue work with `commands` on any plain transition, and with `enqueue` in
+`resolve`:
+
+```ts
+Cancelled: {
+  target: "Archived",
+  commands: (_, enqueue) => enqueue.emit(Emitted.Cancelled())
+}
+```
 
 When only an active state's value changes, use `update` to preserve its active
 descendants and running work:
 
 ```ts
 Changed: {
-  update: "Document",
-  data: ({ ancestors }) => ({
-    ...ancestors.Document,
-    revision: ancestors.Document.revision + 1
-  })
+  update: {
+    Document: ({ ancestors }) => ({
+      ...ancestors.Document,
+      revision: ancestors.Document.revision + 1
+    })
+  }
 }
 ```
 
 Choose a valued source or retained ancestor explicitly. To change a parallel
 sibling, send an event handled by that sibling. Combine a destination and one
-retained owner update with `{ target, update, data }`; the callback returns
-`{ target: destinationInput, update: completeOwnerInput }`. Both values are
-validated atomically, and destination entry sees the new owner value. A named
-branch can declare the same pair when a resolver needs commands or nested
-construction. Its selector requires `update: { data: ownerValue }` in the construction object.
+retained owner update with `{ target, data, update: { Owner: ... } }`, where `data`
+only ever means the target's value. Both values are validated atomically, and
+destination entry sees the new owner value. A `branches` entry names the same pair
+as `{ target, update: "Owner" }`, and its call passes the value:
+`select.target(target, { data, update: { Owner: value } })`.
 
 The destination of `{ target, update, data }` can be a choice. The owner is
 updated before the choice resolves, so its resolver reads the new value through

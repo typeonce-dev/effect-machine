@@ -32,7 +32,7 @@ describe("inline invoke", () => {
       },
       states: {
         Idle: {},
-        Loading: { invoke: { src: "timeout", onDone: { none: true } } },
+        Loading: { invoke: { src: "timeout", onDone: { stay: true } } },
         Complete: {},
         Failed: {}
       }
@@ -41,37 +41,27 @@ describe("inline invoke", () => {
     assert.lengthOf(definitions, 1)
     assert.deepStrictEqual(definitions[0]?.trigger, { type: "invoke", id: "timeout", outcome: "done" })
   })
-  it.effect("ignores an invocation outcome when its transition declines", () =>
-    Effect.gen(function*() {
-      const machine = Machine.make({
-        branches: { transition1: { destination: { target: "Complete" } } },
+  it("rejects guard and decline on an invocation outcome, which has no other candidate", () => {
+    const handle = (onDone: object) => () =>
+      Machine.make({
         effects: { source1: Effect.suspend(() => Effect.succeed("ignored")) },
         root: States,
         events: Machine.eventsFromSchemas()
       }).handle({
-        initial: {
-          target: "Loading"
-        },
+        initial: { target: "Loading" },
         states: {
           Idle: {},
-          Loading: {
-            invoke: {
-              src: "source1",
-              id: "load",
-              onDone: { branches: "transition1", resolve: ({ decline }) => decline(), declinable: true }
-            }
-          },
+          Loading: { invoke: { src: "source1", id: "load", onDone: onDone as any } },
           Complete: {},
           Failed: {}
         }
       })
-      assert.strictEqual(Machine.transitionDefinitions(machine)[0]?.acceptance, "declinable")
-      const ref = yield* Machine.start(machine)
-      for (let index = 0; index < 5; index += 1) {
-        yield* Effect.yieldNow
-      }
-      assert.deepStrictEqual((yield* ref.state).state, { path: "Loading" as const, value: new Loading({}) })
-    }))
+    assert.throws(handle({ target: "Complete", guard: () => true }), /guard and decline apply only to on and always/)
+    assert.throws(
+      handle({ branches: [{ target: "Complete" }, { decline: true }], resolve: ({ select }: any) => select.decline() }),
+      /guard and decline apply only to on and always/
+    )
+  })
   it.effect("handles Stream elements sequentially before completion", () =>
     Effect.gen(function*() {
       const states = Machine.state({ states: { Collecting, Complete } })
@@ -92,8 +82,8 @@ describe("inline invoke", () => {
               src: "source1",
               id: "numbers",
               onElement: {
-                none: true,
-                resolve: ({ element }, enqueue) => {
+                stay: true,
+                commands: ({ element }, enqueue) => {
                   enqueue.raise(new Add({ value: element }))
                 }
               },
@@ -180,7 +170,7 @@ describe("inline invoke", () => {
             invoke: {
               src: "source1",
               id: "updates",
-              onDone: { none: true },
+              onDone: { stay: true },
               onFailure: {
                 target: "Failed",
                 decoded: true,
@@ -218,7 +208,7 @@ describe("inline invoke", () => {
         states: {
           Idle: {},
           Loading: {
-            invoke: { src: "source1", id: "updates", onDone: { none: true } }
+            invoke: { src: "source1", id: "updates", onDone: { stay: true } }
           },
           Complete: {},
           Failed: {}
@@ -259,12 +249,12 @@ describe("inline invoke", () => {
               src: "source1",
               id: "updates",
               onElement: {
-                none: true,
-                resolve: ({ element }, enqueue) => {
+                stay: true,
+                commands: ({ element }, enqueue) => {
                   enqueue.raise(new FinishStream({ value: element }))
                 }
               },
-              onDone: { none: true }
+              onDone: { stay: true }
             },
             on: {
               FinishStream: {
@@ -395,7 +385,7 @@ describe("inline invoke", () => {
             }
           },
           Loading: {
-            invoke: { src: "source1", id: "load", onDone: { none: true } }
+            invoke: { src: "source1", id: "load", onDone: { stay: true } }
           },
           Complete: {},
           Failed: {}

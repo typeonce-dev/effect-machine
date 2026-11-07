@@ -35,8 +35,7 @@ describe("Interactive text visualization", () => {
       branches: [{
         id: "application.workflow.idle:transition:0:branch:0",
         type: "branch",
-        key: "destination",
-        title: "destination",
+        key: "target:application.workflow.running+update:application.workflow",
         target: "application.workflow.running",
         selection: { path: "application.workflow.running", kind: "state", scope: "branch" },
         updates: ["application.workflow"]
@@ -128,7 +127,7 @@ describe("Interactive text visualization", () => {
 
     assert.deepStrictEqual(
       begin?.branches.map((branch) => branchTargetApi(branch)),
-      ["{ target: \"Working\" }", "{ target: \"Working\" }"]
+      ["{ target: \"Working\" }", "{ target: \"Finished\" }"]
     )
 
     assert.strictEqual(
@@ -185,7 +184,7 @@ describe("Interactive text visualization", () => {
         kind: "none",
         scope: "local"
       }),
-      "{ none: true }"
+      "{ stay: true }"
     )
     assert.strictEqual(api("application", document.initial.selection), "initialConfiguration")
   })

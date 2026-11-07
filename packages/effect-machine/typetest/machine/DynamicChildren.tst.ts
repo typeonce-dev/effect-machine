@@ -34,7 +34,7 @@ describe("dynamic child machines", () => {
       data: ({ root: { input } }) => new ChildIdle({ id: input.id })
     },
     root: ({ input }) => ({ input }),
-    states: { ChildIdle: { on: { ChildEvent: { none: true } } } }
+    states: { ChildIdle: { on: { ChildEvent: { stay: true } } } }
   })
   const Child = Machine.childFamily(childMachine)
   const InitialRoot1 = Machine.state({ states: { ChildIdle } })
@@ -115,8 +115,8 @@ describe("dynamic child machines", () => {
             src: "source1",
             id: "spawn",
             input: (context) => context,
-            onDone: { none: true },
-            onFailure: { none: true }
+            onDone: { stay: true },
+            onFailure: { stay: true }
           }
         }
       }
@@ -165,7 +165,7 @@ describe("dynamic child machines", () => {
             src: "source1",
             id: "incompatible",
             input: (context) => context,
-            onDone: { none: true }
+            onDone: { stay: true }
           }
         }
       }

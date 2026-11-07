@@ -48,7 +48,7 @@ describe("machine reference event channels", () => {
     states: {
       Idle: {
         on: {
-          Ping: { none: true }
+          Ping: { stay: true }
         }
       }
     }
@@ -115,8 +115,8 @@ describe("machine reference event channels", () => {
         Idle: {
           on: {
             Ping: {
-              none: true,
-              resolve: (context) => {
+              stay: true,
+              commands: (context) => {
                 expect<"parent">().type.not.toBeAssignableTo<keyof typeof context>()
                 return undefined
               }
@@ -142,8 +142,8 @@ describe("machine reference event channels", () => {
         Idle: {
           on: {
             Ping: {
-              none: true,
-              resolve: ({ parent, self }, enqueue) => {
+              stay: true,
+              commands: ({ parent, self }, enqueue) => {
                 expect(self.send).type.toBeCallableWith(Events.Ping())
                 expect(self.send).type.not.toBeCallableWith(InternalEvents.Local())
                 expect(enqueue.sendTo).type.toBeCallableWith(self, Events.Ping())
@@ -281,8 +281,8 @@ describe("machine reference event channels", () => {
             id: "notify-parent",
             input: (context) => context,
             onDone: {
-              none: true,
-              resolve: ({ parent, self }, enqueue) => {
+              stay: true,
+              commands: ({ parent, self }, enqueue) => {
                 enqueue.sendTo(self, Events.Ping())
                 enqueue.sendTo(parent, ParentEvents.ParentNotice({ value: 1 }))
                 expect(enqueue.sendTo).type.not.toBeCallableWith(parent, Events.Ping())
@@ -311,8 +311,8 @@ describe("machine reference event channels", () => {
             src: "source1",
             id: "notify-parent-failure",
             onFailure: {
-              none: true,
-              resolve: ({ parent, self }, enqueue) => {
+              stay: true,
+              commands: ({ parent, self }, enqueue) => {
                 enqueue.sendTo(self, Events.Ping())
                 enqueue.sendTo(parent, ParentEvents.ParentNotice({ value: 1 }))
                 expect(enqueue.sendTo).type.not.toBeCallableWith(parent, Events.Ping())

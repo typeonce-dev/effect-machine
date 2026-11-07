@@ -25,7 +25,6 @@ describe("local compound target selection", () => {
         }
       })
       const machine = Machine.make({
-        branches: { transition1: { destination: { target: "search" } } },
         root: states,
         events: Machine.eventsFromSchemas(Events)
       }).handle({
@@ -40,10 +39,10 @@ describe("local compound target selection", () => {
             },
             on: {
               UpdateQuery: {
-                branches: "transition1",
+                branches: [{ target: "search" }],
                 reenter: true,
-                resolve: ({ event, select: { destination: target } }) =>
-                  target({ data: { query: event.query }, states: { Updated: {} } })
+                resolve: ({ event, select }) =>
+                  select.target("search", { data: { query: event.query }, states: { Updated: {} } })
               }
             },
             states: {
@@ -64,8 +63,7 @@ describe("local compound target selection", () => {
         acceptance: "required",
         branches: [{
           type: "branch",
-          key: "destination",
-          title: "destination",
+          key: "target:search",
           target: "search",
           selection: { path: "search", kind: "state", scope: "branch" },
           updates: []
@@ -121,7 +119,6 @@ describe("local compound target selection", () => {
         }
       })
       const machine = Machine.make({
-        branches: { transition1: { destination: { target: "search" } } },
         effects: { source1: Effect.suspend(() => Effect.succeed("resolved")) },
         root: states,
         events: Machine.eventsFromSchemas()
@@ -141,9 +138,9 @@ describe("local compound target selection", () => {
                   src: "source1",
                   id: "search",
                   onDone: {
-                    branches: "transition1",
-                    resolve: ({ output, select: { destination: target } }) =>
-                      target({ data: { query: output }, states: { Updated: {} } })
+                    branches: [{ target: "search" }],
+                    resolve: ({ output, select }) =>
+                      select.target("search", { data: { query: output }, states: { Updated: {} } })
                   }
                 }
               },
@@ -159,8 +156,7 @@ describe("local compound target selection", () => {
         acceptance: "required",
         branches: [{
           type: "branch",
-          key: "destination",
-          title: "destination",
+          key: "target:search",
           target: "search",
           selection: { path: "search", kind: "state", scope: "branch" },
           updates: []

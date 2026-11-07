@@ -206,8 +206,8 @@ export const parallelCompletionMachine = Machine.make({
                 src: "source1",
                 id: "packing-sla",
                 onDone: {
-                  none: true,
-                  resolve: (_, enqueue) => {
+                  stay: true,
+                  commands: (_, enqueue) => {
                     enqueue.raise(ParallelInternalEvents.AutoShip())
                   }
                 }

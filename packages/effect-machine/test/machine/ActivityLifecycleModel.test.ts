@@ -87,8 +87,8 @@ describe("machine activity lifecycle model", () => {
                   src: "source1",
                   id: "activity",
                   address: Machine.childAddress("activity"),
-                  onDone: { none: true },
-                  onFailure: { none: true }
+                  onDone: { stay: true },
+                  onFailure: { stay: true }
                 },
                 on: {
                   Leave: { target: "Idle", decoded: true, data: () => (new Idle({})) },
@@ -165,7 +165,7 @@ describe("machine activity lifecycle model", () => {
                 decoded: true,
                 data: ({ output }) => (new Done({ epoch: output.epoch }))
               },
-              onFailure: { none: true }
+              onFailure: { stay: true }
             }
           },
           Done: {
@@ -210,8 +210,8 @@ describe("machine activity lifecycle model", () => {
               src: "source1",
               id: "epoch",
               address: Machine.childAddress("epoch"),
-              onDone: { none: true },
-              onFailure: { none: true }
+              onDone: { stay: true },
+              onFailure: { stay: true }
             },
             on: {
               Restart: {
@@ -333,8 +333,8 @@ describe("machine activity lifecycle model", () => {
                       src: "source1",
                       id: "left-activity",
                       address: Machine.childAddress("left-activity"),
-                      onDone: { none: true },
-                      onFailure: { none: true }
+                      onDone: { stay: true },
+                      onFailure: { stay: true }
                     },
                     on: {
                       LeaveLeft: { target: "Root.left.idle", decoded: true, data: () => (new LeftIdle({})) }
@@ -355,8 +355,8 @@ describe("machine activity lifecycle model", () => {
                       src: "source2",
                       id: "right-activity",
                       address: Machine.childAddress("right-activity"),
-                      onDone: { none: true },
-                      onFailure: { none: true }
+                      onDone: { stay: true },
+                      onFailure: { stay: true }
                     }
                   }
                 }
@@ -404,8 +404,8 @@ describe("machine activity lifecycle model", () => {
               src: "source1",
               id: "timed-activity",
               address: Machine.childAddress("timed-activity"),
-              onDone: { none: true },
-              onFailure: { none: true }
+              onDone: { stay: true },
+              onFailure: { stay: true }
             }, {
               src: "source2",
               id: "deadline",
@@ -455,10 +455,10 @@ describe("machine activity lifecycle model", () => {
               src: "source1",
               id: "failing",
               address: Machine.childAddress("failing"),
-              onDone: { none: true },
+              onDone: { stay: true },
               onFailure: {
-                none: true,
-                resolve: ({ error }) => {
+                stay: true,
+                commands: ({ error }) => {
                   throw error
                 }
               }
@@ -466,8 +466,8 @@ describe("machine activity lifecycle model", () => {
               src: "source2",
               id: "sibling",
               address: Machine.childAddress("sibling"),
-              onDone: { none: true },
-              onFailure: { none: true }
+              onDone: { stay: true },
+              onFailure: { stay: true }
             }]
           }
         }
@@ -510,14 +510,14 @@ describe("machine activity lifecycle model", () => {
               src: "source1",
               id: "first",
               address: Machine.childAddress("first"),
-              onDone: { none: true },
-              onFailure: { none: true }
+              onDone: { stay: true },
+              onFailure: { stay: true }
             }, {
               src: "source2",
               id: "second",
               address: Machine.childAddress("second"),
-              onDone: { none: true },
-              onFailure: { none: true }
+              onDone: { stay: true },
+              onFailure: { stay: true }
             }]
           }
         }

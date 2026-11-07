@@ -46,7 +46,6 @@ const makeCounterMachine = () => {
   })
 }
 const causalMachine = Machine.make({
-  branches: { transition2: { destination: { target: "Counter" } } },
   root: CounterStates,
   events: Machine.eventsFromSchemas(Add, Noop, Ignored, Burst),
   internalEvents: Machine.internalEventsFromSchemas(InternalAdd)
@@ -64,12 +63,12 @@ const causalMachine = Machine.make({
           decoded: true,
           data: ({ event, state }) => (new Counter({ count: state.count + event.amount }))
         },
-        Noop: { none: true },
+        Noop: { stay: true },
         Burst: {
-          branches: "transition2",
-          resolve: ({ state, select: { destination: target } }, enqueue) => {
+          branches: [{ target: "Counter" }],
+          resolve: ({ state, select }, enqueue) => {
             enqueue.raise(new InternalAdd({ amount: 10 }))
-            return target({ data: new Counter({ count: state.count + 1 }), decoded: true })
+            return select.target("Counter", { data: new Counter({ count: state.count + 1 }), decoded: true })
           }
         },
         InternalAdd: {

@@ -14,7 +14,6 @@ class Select extends Schema.TaggedClass<Select>("ExplorationSelect")("Select", {
 class Seed extends Schema.Class<Seed>("Seed")({ count: Schema.Int }) {}
 const States = Machine.state({ states: { counter: Counter } })
 const machine = Machine.make({
-  branches: { transition1: { destination: { target: "counter" } } },
   root: States,
   events: Machine.eventsFromSchemas(Increment, Reset, Corrupt)
 }).handle({
@@ -40,7 +39,6 @@ const machine = Machine.make({
 const finiteEvents = ({ snapshot }: MachineTest.ExplorationStateContext<typeof machine>) =>
   snapshot.state.value.count < 2 ? [new Increment({})] : [new Reset({})]
 const branchMachine = Machine.make({
-  branches: { transition1: { negative: { none: true }, zero: { none: true }, positive: { none: true } } },
   root: States,
   events: Machine.eventsFromSchemas(Select)
 }).handle({
@@ -53,13 +51,13 @@ const branchMachine = Machine.make({
     counter: {
       on: {
         Select: {
-          branches: "transition1",
+          branches: [{ stay: true }, { update: "counter" }, { target: "counter" }],
           resolve: ({ event, select }) =>
             event.value < 0
-              ? select.negative()
+              ? select.stay()
               : event.value === 0
-              ? select.zero()
-              : select.positive()
+              ? select.update({ counter: { decoded: true, data: new Counter({ count: 0 }) } })
+              : select.target("counter", { decoded: true, data: new Counter({ count: 0 }) })
         }
       }
     }
@@ -120,13 +118,12 @@ describe("MachineTest bounded exploration", () => {
         explored.transitionCoverage.branches.hits.map(({ branch, branchIndex }) => ({
           branchIndex,
           key: branch.type === "branch" ? branch.key : undefined,
-          title: branch.type === "branch" ? branch.title : undefined,
           type: branch.type
         })),
         [
-          { branchIndex: 0, key: "negative", title: "negative", type: "branch" },
-          { branchIndex: 1, key: "zero", title: "zero", type: "branch" },
-          { branchIndex: 2, key: "positive", title: "positive", type: "branch" }
+          { branchIndex: 0, key: "stay", type: "branch" },
+          { branchIndex: 1, key: "update:counter", type: "branch" },
+          { branchIndex: 2, key: "target:counter", type: "branch" }
         ]
       )
     }))

@@ -22,10 +22,6 @@ const States = Machine.state({
 const makeTraceMachine = (onAction: () => void) => {
   const TraceStates = Machine.state({ fields: { input: Schema.toType(TestInput) }, states: { Idle, Ready } })
   return Machine.make({
-    branches: {
-      transition1: { destination: { target: "Ready" } },
-      transition2: { destination: { target: "Ready" } }
-    },
     root: TraceStates,
     events: Machine.eventsFromSchemas(Start, Add),
     input: TestInput
@@ -40,10 +36,10 @@ const makeTraceMachine = (onAction: () => void) => {
       Idle: {
         on: {
           Start: {
-            branches: "transition1",
-            resolve: ({ select: { destination: target } }) => {
+            branches: [{ target: "Ready" }],
+            resolve: ({ select }) => {
               onAction()
-              return target({ data: new Ready({ count: 0 }), decoded: true })
+              return select.target("Ready", { data: new Ready({ count: 0 }), decoded: true })
             }
           }
         }
@@ -51,10 +47,10 @@ const makeTraceMachine = (onAction: () => void) => {
       Ready: {
         on: {
           Add: {
-            branches: "transition2",
-            resolve: ({ event, state, select: { destination: target } }) => {
+            branches: [{ target: "Ready" }],
+            resolve: ({ event, state, select }) => {
               onAction()
-              return target({ data: new Ready({ count: state.count + event.amount }), decoded: true })
+              return select.target("Ready", { data: new Ready({ count: state.count + event.amount }), decoded: true })
             }
           }
         }
@@ -295,7 +291,7 @@ describe("MachineTest", () => {
         states: {
           Idle: {
             on: {
-              Start: { none: true }
+              Start: { stay: true }
             }
           }
         }

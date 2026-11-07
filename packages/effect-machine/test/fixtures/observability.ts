@@ -17,9 +17,9 @@ export const observedMachine = (work: Effect.Effect<void, "failed">, stream: Str
       Idle: { on: { Start: { target: "Active" } } },
       Active: {
         invoke: [
-          { src: "work", id: "custom-work", onDone: { none: true }, onFailure: { target: "Complete" } },
-          { src: "updates", onElement: { none: true }, onDone: { none: true } },
-          { src: "timeout", onDone: { none: true } }
+          { src: "work", id: "custom-work", onDone: { stay: true }, onFailure: { target: "Complete" } },
+          { src: "updates", onElement: { stay: true }, onDone: { stay: true } },
+          { src: "timeout", onDone: { stay: true } }
         ],
         on: {
           Reenter: { target: "Active", reenter: true },

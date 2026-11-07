@@ -60,8 +60,8 @@ describe("dynamic child machines", () => {
                 data: ({ event, state }) => (new PlantActive({ id: state.id, produced: state.produced + event.amount }))
               },
               Report: {
-                none: true,
-                resolve: ({ parent, state }, enqueue) => {
+                stay: true,
+                commands: ({ parent, state }, enqueue) => {
                   enqueue.sendTo(parent, PlantOwnerEvents.PlantReported({ id: state.id, produced: state.produced }))
                 }
               }
@@ -130,7 +130,7 @@ describe("dynamic child machines", () => {
               id: "commission-wave",
               input: (context) => context,
               onDone: { target: "Operating", decoded: true, data: () => (new Operating({ reports: 0 })) },
-              onFailure: { none: true }
+              onFailure: { stay: true }
             }
           },
           Operating: {
@@ -146,8 +146,8 @@ describe("dynamic child machines", () => {
                 data: ({ event }) => (new Commissioning({ plants: event.plants }))
               },
               Decommission: {
-                none: true,
-                resolve: ({ event }, enqueue) => {
+                stay: true,
+                commands: ({ event }, enqueue) => {
                   enqueue.stop(Plant(event.id))
                 }
               }
@@ -299,7 +299,7 @@ describe("dynamic child machines", () => {
               src: "source1",
               id: "spawn-duplicate",
               input: (context) => context,
-              onDone: { none: true },
+              onDone: { stay: true },
               onFailure: { target: "DuplicateRejected" }
             }
           },
@@ -471,7 +471,7 @@ describe("dynamic child machines", () => {
               id: "control-units",
               input: (context) => context,
               onDone: { target: "Ready" },
-              onFailure: { none: true }
+              onFailure: { stay: true }
             }
           },
           Ready: {}

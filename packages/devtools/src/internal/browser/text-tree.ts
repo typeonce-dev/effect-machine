@@ -62,7 +62,7 @@ const branchLabel = (branch: VisualizationBranch): string | undefined => {
   if (branch.target === null && branch.updates.length > 0) {
     return branch.type === "direct"
       ? `update ${branch.updates.join(", ")}`
-      : `[${branch.title}] update ${branch.updates.join(", ")}`
+      : `[${branch.key}] update ${branch.updates.join(", ")}`
   }
   if (branch.target === null) return undefined
 
@@ -70,7 +70,7 @@ const branchLabel = (branch: VisualizationBranch): string | undefined => {
   const updates = branch.updates.length === 0 ? "" : ` / update ${branch.updates.join(", ")}`
   return branch.type === "direct"
     ? `→ ${target}${updates}`
-    : `[${branch.title}] → ${target}${updates}`
+    : `[${branch.key}] → ${target}${updates}`
 }
 
 const activityLabel = (definition: VisualizationActivity): string => {

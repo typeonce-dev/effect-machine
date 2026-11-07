@@ -34,11 +34,7 @@ const definition = Machine.make({
     unused: Unused
   },
   streams: { values: Stream.make(1, 2), emptyStream: Stream.empty },
-  timers: { timeout: "1 second" },
-  branches: {
-    complete: { ready: { target: "Ready" }, failed: { target: "Failed" } },
-    nested: { child: { target: "Nested" } }
-  }
+  timers: { timeout: "1 second" }
 })
 describe("declarative inference", () => {
   it("rejects ambiguous source inputs and non-topological branch fields", () => {
@@ -192,7 +188,7 @@ describe("declarative inference", () => {
       }
     })
     expect(definition.handle).type.not.toBeCallableWith({
-      on: { Reset: { update: "root", data: () => ({}) } },
+      on: { Reset: { update: { root: () => ({}) } } },
       root: () => {
         throw new Error("type-only constructor")
       },
@@ -210,7 +206,7 @@ describe("declarative inference", () => {
     })
     expect(definition.handle).type.not.toBeCallableWith({
       states: {
-        Idle: { on: { Reset: { update: "Ready", data: () => ({ count: 1 }) } } },
+        Idle: { on: { Reset: { update: { Ready: () => ({ count: 1 }) } } } },
         Nested: {
           initial: {
             target: "Nested.Child",
@@ -236,20 +232,20 @@ describe("declarative inference", () => {
         Idle: {
           on: {
             Load: {
-              branches: "complete",
+              branches: [{ target: "Ready" }, { target: "Failed" }],
               resolve: ({ event, select }) => {
-                expect(select.ready).type.toBeCallableWith({ data: { count: 1 } })
-                expect(select.ready).type.not.toBeCallableWith({ data: { message: "wrong branch" } })
-                expect(select.failed).type.toBeCallableWith({ data: { message: "failed" } })
+                expect(select.target).type.toBeCallableWith("Ready", { data: { count: 1 } })
+                expect(select.target).type.not.toBeCallableWith("Ready", { data: { message: "wrong branch" } })
+                expect(select.target).type.toBeCallableWith("Failed", { data: { message: "failed" } })
                 return event.count > 0
-                  ? select.ready({ data: { count: event.count } })
-                  : select.failed({ data: { message: "zero" } })
+                  ? select.target("Ready", { data: { count: event.count } })
+                  : select.target("Failed", { data: { message: "zero" } })
               }
             },
             Reset: {
-              branches: "nested",
+              branches: [{ target: "Nested" }],
               resolve: ({ select }) =>
-                select.child({ data: { name: "nested" }, states: { Child: { data: { count: 1 } } } })
+                select.target("Nested", { data: { name: "nested" }, states: { Child: { data: { count: 1 } } } })
             }
           }
         },
@@ -303,7 +299,7 @@ describe("declarative inference", () => {
                 }
               }
             },
-            { src: "empty", onDone: { none: true } },
+            { src: "empty", onDone: { stay: true } },
             { src: "never" },
             {
               src: "failed",
@@ -318,14 +314,14 @@ describe("declarative inference", () => {
             {
               src: "values",
               onElement: {
-                none: true,
-                resolve: ({ element }) => {
+                stay: true,
+                commands: ({ element }) => {
                   expect(element).type.toBe<1 | 2>()
                 }
               },
-              onDone: { none: true }
+              onDone: { stay: true }
             },
-            { src: "timeout", onDone: { none: true } }
+            { src: "timeout", onDone: { stay: true } }
           ]
         },
         Ready: {},
@@ -379,7 +375,7 @@ describe("declarative inference", () => {
     })
     expect(definition.handle).type.not.toBeCallableWith({
       states: {
-        Idle: { invoke: { src: "direct", onDone: { none: true }, onFailure: { none: true } } },
+        Idle: { invoke: { src: "direct", onDone: { stay: true }, onFailure: { stay: true } } },
         Nested: {
           initial: {
             target: "Nested.Child",
@@ -396,7 +392,7 @@ describe("declarative inference", () => {
     })
     expect(definition.handle).type.not.toBeCallableWith({
       states: {
-        Idle: { invoke: { src: "never", onDone: { none: true } } },
+        Idle: { invoke: { src: "never", onDone: { stay: true } } },
         Nested: {
           initial: {
             target: "Nested.Child",
@@ -413,7 +409,7 @@ describe("declarative inference", () => {
     })
     expect(definition.handle).type.not.toBeCallableWith({
       states: {
-        Idle: { invoke: { src: "values", onDone: { none: true } } },
+        Idle: { invoke: { src: "values", onDone: { stay: true } } },
         Nested: {
           initial: {
             target: "Nested.Child",
@@ -460,7 +456,7 @@ describe("declarative inference", () => {
     expect<Extract<Machine.Machine.Services<typeof machine>, Unused>>().type.toBe<never>()
     expect(definition.handle).type.not.toBeCallableWith({
       states: {
-        Idle: { invoke: { src: "load", onDone: { none: true } } },
+        Idle: { invoke: { src: "load", onDone: { stay: true } } },
         Nested: {
           initial: {
             target: "Nested.Child",
@@ -477,7 +473,7 @@ describe("declarative inference", () => {
     })
     expect(definition.handle).type.not.toBeCallableWith({
       states: {
-        Idle: { invoke: { src: "load", input: () => "bad", onDone: { none: true } } },
+        Idle: { invoke: { src: "load", input: () => "bad", onDone: { stay: true } } },
         Nested: {
           initial: {
             target: "Nested.Child",
@@ -494,7 +490,7 @@ describe("declarative inference", () => {
     })
     expect(definition.handle).type.not.toBeCallableWith({
       states: {
-        Idle: { invoke: { src: "direct", input: () => 1, onDone: { none: true } } },
+        Idle: { invoke: { src: "direct", input: () => 1, onDone: { stay: true } } },
         Nested: {
           initial: {
             target: "Nested.Child",

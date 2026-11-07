@@ -61,8 +61,7 @@ const Counter = Machine.make({
   root: () => ({ count: 0 }),
   on: {
     Increment: {
-      update: "root",
-      data: ({ root, event }) => ({ count: root.count + event.by })
+      update: { root: ({ root, event }) => ({ count: root.count + event.by }) }
     }
   }
 })
@@ -72,7 +71,7 @@ const program = Effect.scoped(Effect.gen(function*() {
 }))
 ```
 
-Root data is shared state. `update: "root"` replaces that value while
+Root data is shared state. `update: { root: ... }` replaces that value while
 retaining the active child configuration and its running work. Ordinary
 transitions target a descendant; the root itself is not a destination.
 
@@ -199,24 +198,18 @@ before any resolver executes:
 ```ts
 const machine = Machine.make({
   root: Root,
-  events: Events,
-  branches: {
-    search: {
-      loading: { target: "Loading", title: "Query supplied" },
-      idle: { target: "Idle", title: "Empty query" }
-    }
-  }
+  events: Events
 }).handle({
   initial: { target: "Idle" },
   states: {
     Idle: {
       on: {
         Search: {
-          branches: "search",
+          branches: [{ target: "Loading" }, { target: "Idle" }],
           resolve: ({ event, select }) =>
             event.query.length > 0
-              ? select.loading({ data: { query: event.query } })
-              : select.idle()
+              ? select.target("Loading", { data: { query: event.query } })
+              : select.target("Idle")
         }
       }
     }
@@ -224,19 +217,24 @@ const machine = Machine.make({
 })
 ```
 
-Each selector is bound to its declared destination. Its constructor rejects a
-payload belonging to another branch. A single-target group works the same way;
-there is no second path declaration in the resolver. For a compound target,
-`select.checkout({ data: parentValues, states: { Review: { data: childValues } } })`
+The compiler checks `resolve` against `branches` in both directions: selecting an
+undeclared entry and declaring an entry that is never selected are both errors, and
+each one names the entry to add or remove. A resolver must return a `select` call on
+every path, and `select.target` takes the values of the path it is given. For a
+compound target,
+`select.target("Checkout", { data: parentValues, states: { Review: { data: childValues } } })`
 constructs the explicitly selected subtree. Parallel constructors require every
 entered region; source-local construction can retain active sibling regions. Every compound has an initial edge, including inactive branches. Final outputs,
 history defaults, and choices remain part of machine readiness checking.
 
-Use `guard: context => boolean` to decline before construction or commands.
-For a resolver that can decline, explicitly add `declinable: true`; only then may
-it return `context.decline()`. `reenter: true` restarts the handler's source
-where that operation supports reentry. A retained source-value update does not
-restart its lifecycle.
+Use `guard: context => boolean` to decline before commands or construction, and
+`commands: (context, enqueue) => ...` to enqueue work on any plain transition. A
+resolver that can decline lists `{ decline: true }` and returns `select.decline()`.
+`guard` and `decline` exist only on `on` handlers and `always`. An invocation
+outcome, a completion, and a choice have no other candidate to fall through to, so
+they use `{ stay: true }` or select a destination. `reenter: true` restarts the
+handler's source where that operation supports reentry. A retained source-value
+update does not restart its lifecycle.
 
 ### Select destinations and retain owners
 
@@ -245,15 +243,26 @@ spelled the same way as snapshot paths. The root node is `"root"`, so a
 top-level state cannot use that name. Paths are checked at compile time and
 suggested by the editor:
 
-| Declaration                                | Meaning                                                                   |
-| ------------------------------------------ | ------------------------------------------------------------------------- |
-| `{ target: "Checkout.Review", data: ... }` | Enter a declared destination with its value.                              |
-| `{ target: "Checkout", data: ... }`        | Enter the declared initial configuration of a compound or parallel state. |
-| `{ history: "Checkout.recent" }`           | Restore a declared history state.                                         |
-| `{ update: "Checkout", data: ... }`        | Replace a retained active owner's value.                                  |
-| `{ update: "root", data: ... }`            | Replace root data and retain active descendants.                          |
-| `{ initialize: ... }`                      | Reconstruct root and its initial children from fresh machine input.       |
-| `{ none: true }`                           | Accept an event without changing the configuration.                       |
+| Plain transition                           | Entry in `branches`              | Call in `resolve`                                        | Meaning                                                                   |
+| ------------------------------------------ | -------------------------------- | -------------------------------------------------------- | ------------------------------------------------------------------------- |
+| `{ target: "Checkout.Review", data: ... }` | `{ target: "Checkout.Review" }`  | `select.target("Checkout.Review", { data })`             | Enter a declared destination with its value.                              |
+| `{ target: "Checkout", data: ... }`        | `{ target: "Checkout" }`         | `select.target("Checkout", { data })`                    | Enter the declared initial configuration of a compound or parallel state. |
+| `{ target, update: { Checkout: ... } }`    | `{ target, update: "Checkout" }` | `select.target(target, { update: { Checkout: value } })` | Enter a destination and replace one retained owner's value.               |
+| `{ history: "Checkout.recent" }`           | `{ history: "Checkout.recent" }` | `select.history("Checkout.recent")`                      | Restore a declared history state.                                         |
+| `{ update: { Checkout: ... } }`            | `{ update: "Checkout" }`         | `select.update({ Checkout: value })`                     | Replace a retained active owner's value.                                  |
+| `{ update: { root: ... } }`                | `{ update: "root" }`             | `select.update({ root: value })`                         | Replace root data and retain active descendants.                          |
+| `{ initialize: ... }`                      | `{ initialize: true }`           | `select.initialize({ input })`                           | Reconstruct root and its initial children from fresh machine input.       |
+| `{ stay: true }`                           | `{ stay: true }`                 | `select.stay()`                                          | Accept an event without changing the configuration.                       |
+| `{ reenter: true }`                        |                                  |                                                          | Exit and reenter the source.                                              |
+|                                            | `{ decline: true }`              | `select.decline()`                                       | Refuse the event, and let the next candidate handle it.                   |
+
+In a plain transition `update` is a record holding the new value, with exactly one
+owner. A `branches` entry has no values yet, so it names the owner as a string; the
+value is passed to `select`. `data` only ever means the target's value.
+
+A `{ stay: true }` in one parallel region accepts the event, so it blocks a handler
+for that event on a parallel ancestor, while `{ decline: true }` lets that handler
+run.
 
 Declarations written inline are checked in place. A declaration stored in a
 variable before it reaches `make` or `.handle` needs `as const` so its paths
@@ -264,41 +273,34 @@ An atomic transition can enter a destination and update one retained owner:
 ```ts
 Save: {
   target: "Checkout.Saving",
-  update: "Checkout",
-  data: ({ event, ancestors }) => ({
-    target: { request: event.request },
-    update: { ...ancestors.Checkout, revision: event.revision }
-  })
+  data: ({ event }) => ({ request: event.request }),
+  update: { Checkout: ({ event, ancestors }) => ({ ...ancestors.Checkout, revision: event.revision }) }
 }
 ```
 
 The complete replacement values are validated before either change is applied.
-Advanced construction declares both paths in a branch and uses
-`select.saved({ data: destinationValues, update: { data: ownerValues } })`.
 A retained owner must be active for that source and remain active through the
 transition. A sibling region's value cannot be updated through this operation.
 
-The destination can be a choice. The owner is updated first, so the choice
-resolver reads the new value, and `data` constructs only the owner value:
+The destination can be a choice, which has no `data` of its own. The owner is
+updated first, so the choice resolver reads the new value:
 
 ```ts
 Bump: {
   target: "Route",
-  update: "root",
-  data: ({ root }) => ({ count: root.count + 1 })
+  update: { root: ({ root }) => ({ count: root.count + 1 }) }
 }
 ```
 
 Every branch the choice can reach, including through nested choices, must stay
-below the owner. A declared branch selects it with
-`select.route({ update: { data: ownerValues } })`.
+below the owner.
 
 The runtime transition API does not replace arbitrary complete root
 configurations. The root is not a destination. `initialize` restarts it: it
 accepts fresh machine input, or `true` for a machine without input, and follows
 the root constructor and initial declarations in `.handle`. Add `reenter: true`
 to also exit and re-enter the root lifecycle. A branch declares
-`{ initialize: true }` and its resolver supplies `select.branch({ input })`.
+`{ initialize: true }` and its resolver supplies `select.initialize({ input })`.
 History defaults retain complete subtree construction for restoration.
 
 ### Protocols and ownership
@@ -392,17 +394,17 @@ const invocations = [
   {
     src: "updates",
     onElement: {
-      none: true,
-      resolve: ({ element }, enqueue) => {
+      stay: true,
+      commands: ({ element }, enqueue) => {
         enqueue.raise(Events.Changed({ value: element }))
       }
     },
-    onDone: { none: true },
-    onFailure: { none: true }
+    onDone: { stay: true },
+    onFailure: { stay: true }
   },
   { src: "timeout", onDone: { target: "Expired" } },
-  { src: "worker", id: "worker", address: WorkerAddress, onSnapshot: { none: true } },
-  { src: "validation", input: ({ state }) => ({ query: state.query }), onDone: { none: true } }
+  { src: "worker", id: "worker", address: WorkerAddress, onSnapshot: { stay: true } },
+  { src: "validation", input: ({ state }) => ({ query: state.query }), onDone: { stay: true } }
 ]
 ```
 
@@ -697,8 +699,6 @@ pnpm install --frozen-lockfile
 pnpm check
 ```
 
-Use `guard: predicate` to decline before construction, or `declinable: true`
-when a resolver can return `decline()`.
 Pull requests that change `src/` or `package.json` need
 a changeset and the performance checks described in `AGENTS.md`.
 

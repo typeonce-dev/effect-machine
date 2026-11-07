@@ -29,8 +29,8 @@ describe("MachineTest", () => {
     states: {
       idle: {
         on: {
-          PublicEvent: { none: true },
-          InternalEvent: { none: true }
+          PublicEvent: { stay: true },
+          InternalEvent: { stay: true }
         }
       }
     }
@@ -114,7 +114,7 @@ describe("MachineTest", () => {
         decoded: true,
         data: new Idle({})
       },
-      states: { idle: { invoke: { src: "source1", id: "service-backed-invoke", onDone: { none: true } } } }
+      states: { idle: { invoke: { src: "source1", id: "service-backed-invoke", onDone: { stay: true } } } }
     })
     const executed = MachineTest.run(invokedMachine, { events: [] })
     expect<Effect.Services<typeof executed>>().type.toBe<never>()

@@ -11,15 +11,14 @@ it.effect("passes fresh input only through root initialization without retaining
     const machine = Machine.make({
       root,
       input: Schema.Struct({ locale: Schema.String, request: Schema.String }),
-      events: Machine.events({ Finish: {}, Reload: { request: Schema.String } }),
-      branches: { reload: { root: { initialize: true } } }
+      events: Machine.events({ Finish: {}, Reload: { request: Schema.String } })
     }).handle({
       root: ({ input }) => ({ locale: input.locale }),
       initial: { target: "Loading", data: ({ input }) => ({ request: input.request }) },
       on: {
         Reload: {
-          branches: "reload",
-          resolve: ({ event, select }) => select.root({ input: { locale: "it", request: event.request } })
+          branches: [{ initialize: true }],
+          resolve: ({ event, select }) => select.initialize({ input: { locale: "it", request: event.request } })
         }
       },
       states: { Loading: { on: { Finish: { target: "Idle" } } } }

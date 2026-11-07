@@ -25,17 +25,16 @@ it.effect("constructs complete parallel subtrees and resolves explicit nested ch
     })
     const machine = Machine.make({
       root,
-      events: Machine.events({ Open: {} }),
-      branches: { open: { work: { target: "Work" } } }
+      events: Machine.events({ Open: {} })
     }).handle({
       initial: { target: "Idle" },
       states: {
         Idle: {
           on: {
             Open: {
-              branches: "open",
+              branches: [{ target: "Work" }],
               resolve: ({ select }) =>
-                select.work({
+                select.target("Work", {
                   states: {
                     Left: { data: { id: "new" }, states: { Route: {} } },
                     Right: { data: { count: 3 }, states: { Waiting: {} } }
@@ -93,8 +92,8 @@ it.effect("enters a compound's default child with a retained-owner replacement",
           on: {
             Open: {
               target: "Flow",
-              update: "root",
-              data: { target: { title: "new" }, update: { revision: 1 } }
+              update: { root: { revision: 1 } },
+              data: { title: "new" }
             }
           }
         },

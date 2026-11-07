@@ -37,7 +37,6 @@ describe("Machine choice pseudo-states", () => {
   })
   it("exposes only choice context and requires implementation before planning", () => {
     const incomplete = Machine.make({
-      branches: { transition1: { destination: { target: "Flow.Approved" } } },
       root: States,
       events: Machine.eventsFromSchemas()
     })
@@ -56,14 +55,13 @@ describe("Machine choice pseudo-states", () => {
           states: {
             Routing: {
               choice: {
-                branches: "transition1",
+                branches: [{ target: "Flow.Approved" }],
                 resolve: (context) => {
-                  expect(context.select.destination).type.not.toHaveProperty("reenter")
                   expect(context).type.not.toHaveProperty("state")
                   expect(context.containingState).type.toBe<Flow>()
                   expect(context.ancestors.Flow).type.toBe<Flow>()
                   expect(context.event).type.toBe<Machine.Machine.LifecycleEvent<readonly []>>()
-                  return context.select.destination({ data: new Approved({}), decoded: true })
+                  return context.select.target("Flow.Approved", { data: new Approved({}), decoded: true })
                 }
               }
             },
@@ -77,7 +75,6 @@ describe("Machine choice pseudo-states", () => {
   })
   it("rejects Effects returned by choice resolvers", () => {
     const machine = Machine.make({
-      branches: { transition1: { destination: { target: "Flow.Approved" } } },
       root: States,
       events: Machine.eventsFromSchemas()
     })
@@ -95,10 +92,10 @@ describe("Machine choice pseudo-states", () => {
           states: {
             Routing: {
               choice: {
-                branches: "transition1",
+                branches: [{ target: "Flow.Approved" }],
                 // @ts-expect-error!
-                resolve: ({ select: { destination: target } }) =>
-                  Effect.succeed(target({ data: new Approved({}), decoded: true }))
+                resolve: ({ select }) =>
+                  Effect.succeed(select.target("Flow.Approved", { data: new Approved({}), decoded: true }))
               }
             },
             Approved: {},
@@ -186,7 +183,6 @@ describe("Machine choice pseudo-states", () => {
   })
   it("validates the selected choice result", () => {
     const base = Machine.make({
-      branches: { transition1: { destination: { target: "Flow.Rejected" } } },
       root: States,
       events: Machine.eventsFromSchemas()
     })
@@ -204,10 +200,13 @@ describe("Machine choice pseudo-states", () => {
           states: {
             Routing: {
               choice: {
-                branches: "transition1",
-                resolve: ({ select: { destination: selectedTarget } }) => {
-                  expect(selectedTarget).type.not.toBeCallableWith({ data: new Approved({}), decoded: true })
-                  return selectedTarget({ data: new Rejected({}), decoded: true })
+                branches: [{ target: "Flow.Rejected" }],
+                resolve: ({ select }) => {
+                  expect(select.target).type.not.toBeCallableWith("Flow.Rejected", {
+                    data: new Approved({}),
+                    decoded: true
+                  })
+                  return select.target("Flow.Rejected", { data: new Rejected({}), decoded: true })
                 }
               }
             },
@@ -260,8 +259,7 @@ describe("Machine choice pseudo-states", () => {
           states: {
             Routing: {
               choice: {
-                branches: "transition1",
-                declinable: true,
+                branches: [{ target: "Flow.Rejected" }, { decline: true }],
                 resolve: () => undefined
               }
             }

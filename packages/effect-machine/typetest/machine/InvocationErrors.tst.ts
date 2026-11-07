@@ -20,7 +20,7 @@ const watcher = Machine.make({
 }).handle({
   initial: { target: "Watching" },
   states: {
-    Watching: { invoke: { src: "ticks", onElement: { none: true }, onDone: { none: true } } }
+    Watching: { invoke: { src: "ticks", onElement: { stay: true }, onDone: { stay: true } } }
   }
 })
 
@@ -32,7 +32,7 @@ const loader = Machine.make({
 }).handle({
   initial: { target: "Loading" },
   states: {
-    Loading: { invoke: [{ src: "load", onDone: { target: "Ready" } }, { src: "delay", onDone: { none: true } }] },
+    Loading: { invoke: [{ src: "load", onDone: { target: "Ready" } }, { src: "delay", onDone: { stay: true } }] },
     Ready: {}
   }
 })
@@ -113,17 +113,17 @@ describe("invocation diagnostics", () => {
     })).type.toRaiseError("Invocation 'forever' never completes, so onDone is unreachable")
     expect(machine.handle({
       initial: { target: "Waiting" },
-      states: { Waiting: { invoke: { src: "load", onDone: { target: "Next" }, onFailure: { none: true } } }, Next: {} }
+      states: { Waiting: { invoke: { src: "load", onDone: { target: "Next" }, onFailure: { stay: true } } }, Next: {} }
     })).type.toRaiseError("Invocation 'load' cannot fail, so onFailure is unreachable")
     expect(machine.handle({
       initial: { target: "Waiting" },
-      states: { Waiting: { invoke: { src: "load", onDone: { target: "Next" }, onElement: { none: true } } }, Next: {} }
+      states: { Waiting: { invoke: { src: "load", onDone: { target: "Next" }, onElement: { stay: true } } }, Next: {} }
     })).type.toRaiseError("Invocation 'load' emits no Stream elements, so onElement is unreachable")
     expect(machine.handle({
       initial: { target: "Waiting" },
       states: {
         Waiting: {
-          invoke: { src: "ticks", onElement: { none: true }, onDone: { none: true }, onSnapshot: { none: true } }
+          invoke: { src: "ticks", onElement: { stay: true }, onDone: { stay: true }, onSnapshot: { stay: true } }
         },
         Next: {}
       }

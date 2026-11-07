@@ -42,6 +42,15 @@ export const makeEffectMachineBenchmarkApi = (Machine) => {
       return false
     }
   })()
+  const hasStayTransitions = hasHandlerInitial && (() => {
+    try {
+      Machine.make({ root: Machine.state({ states: { Probe: {} } }), events: Machine.events({ Probe: {} }) })
+        .handle({ initial: { target: "Probe" }, on: { Probe: { stay: true } } })
+      return true
+    } catch {
+      return false
+    }
+  })()
   const rootDefinitions = new WeakMap()
   const transitionDefinition = Symbol("benchmark transition")
   const invocationDefinition = Symbol("benchmark invocation")
@@ -207,7 +216,7 @@ export const makeEffectMachineBenchmarkApi = (Machine) => {
       : hasFluentTransitions
       ? fluentTransition(definition)
       : legacy,
-    targetless: hasObjectTransitions ? { none: true } : hasValueSelectors
+    targetless: hasObjectTransitions ? (hasStayTransitions ? { stay: true } : { none: true }) : hasValueSelectors
       ? (to) => to.none
       : hasStaticTransitions || hasFluentTransitions
       ? { target: Machine.targetless }

@@ -140,10 +140,6 @@ describe("structural active state types", () => {
   })
   it("types structural handler contexts and targets without fake values", () => {
     Machine.make({
-      branches: {
-        transition1: { destination: { target: "player.transport.Ready" } },
-        transition2: { destination: { target: "player.transport.Ready" } }
-      },
       root: States,
       events: Machine.eventsFromSchemas(Select, Loaded, Play)
     }).handle({
@@ -177,9 +173,12 @@ describe("structural active state types", () => {
                 Loading: {
                   on: {
                     Loaded: {
-                      branches: "transition1",
-                      resolve: ({ event, select: { destination: target } }) =>
-                        target({ data: { duration: event.duration }, states: { Paused: {} } })
+                      branches: [{ target: "player.transport.Ready" }],
+                      resolve: ({ event, select }) =>
+                        select.target("player.transport.Ready", {
+                          data: { duration: event.duration },
+                          states: { Paused: {} }
+                        })
                     }
                   }
                 },
@@ -191,15 +190,14 @@ describe("structural active state types", () => {
                     Paused: {
                       on: {
                         Play: {
-                          branches: "transition2",
-                          resolve: ({ containingState, ancestors, state, select: { destination: target } }) => {
-                            expect(target).type.not.toBeAssignableTo<() => unknown>()
+                          branches: [{ target: "player.transport.Ready" }],
+                          resolve: ({ containingState, ancestors, state, select }) => {
                             expect(state).type.toBe<undefined>()
                             expect(containingState).type.toBe<Ready>()
                             expect(ancestors).type.toBe<{
                               readonly "player.transport.Ready": Ready
                             }>()
-                            return target({
+                            return select.target("player.transport.Ready", {
                               data: { duration: containingState.duration },
                               states: { Playing: { data: { position: 0 } } }
                             })

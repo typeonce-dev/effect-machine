@@ -1326,40 +1326,37 @@ const selectDefinitionTarget = (
 }
 
 const resolveDefinitionTarget = (
-  build: (config?: unknown) => unknown,
+  select: any,
   source: string,
   target: string,
   byPath: ReadonlyMap<string, FlatFiniteState>,
   value?: number
 ): unknown => {
   const selected = byPath.get(target)!
-  if (selected.node._tag === "History") return build()
+  if (selected.node._tag === "History") return select.history(target)
   const parts = target.split(".")
   const path = selected.root !== byPath.get(source)!.root
     ? parts[0]!
     : selectableDefinitionTarget(source, target, byPath)
-  return build(construction(path, byPath, parts, path.split(".").length - 1, source, value))
+  return select.target(path, construction(path, byPath, parts, path.split(".").length - 1, source, value))
 }
 
 const makeHandlers = (
   states: ReadonlyArray<FiniteState>,
   parent: string | undefined,
   byPath: ReadonlyMap<string, FlatFiniteState>,
-  transitions: ReadonlyMap<string, FiniteTransition>,
-  branches: Record<string, Readonly<Record<string, unknown>>>
+  transitions: ReadonlyMap<string, FiniteTransition>
 ): Record<string, unknown> => {
   const handlers: Record<string, unknown> = Object.create(null)
   for (const node of states) {
     const path = parent === undefined ? node.key : `${parent}.${node.key}`
     if (node._tag === "History") continue
     if (node._tag === "Choice") {
-      const group = `choice:${path}`
-      branches[group] = { destination: selectDefinitionTarget(path, node.selected, byPath) }
       handlers[node.key] = {
         choice: {
-          branches: group,
+          branches: [selectDefinitionTarget(path, node.selected, byPath)],
           resolve: ({ select }: { readonly select: any }) =>
-            resolveDefinitionTarget(select.destination, path, node.selected, byPath)
+            resolveDefinitionTarget(select, path, node.selected, byPath)
         }
       }
       continue
@@ -1373,19 +1370,18 @@ const makeHandlers = (
     let onDone: unknown
     for (const transition of transitions.values()) {
       if (transition.source !== path) continue
-      const group = `transition:${path}:${triggerKey(transition.trigger)}`
-      if (transition.target !== undefined) {
-        branches[group] = {
-          destination: selectDefinitionTarget(path, transition.target, byPath)
-        }
-      }
+      const reenter = "reenter" in transition && transition.reenter === true
       const config = {
-        ...(transition.target === undefined ? { none: true } : {
-          branches: group,
-          resolve: ({ select }: { readonly select: any }) =>
-            resolveDefinitionTarget(select.destination, path, transition.target!, byPath, transition.targetValue)
-        }),
-        ...("reenter" in transition && transition.reenter ? { reenter: true } : {})
+        ...(transition.target !== undefined ?
+          {
+            branches: [selectDefinitionTarget(path, transition.target, byPath)],
+            resolve: ({ select }: { readonly select: any }) =>
+              resolveDefinitionTarget(select, path, transition.target!, byPath, transition.targetValue)
+          }
+          : reenter ?
+          {}
+          : { stay: true }),
+        ...(reenter ? { reenter: true } : {})
       }
       if (transition.trigger.type === "event") on[transition.trigger.event] = config
       else if (transition.trigger.type === "always") always = config
@@ -1434,7 +1430,7 @@ const makeHandlers = (
                   .map((child) => [child.key, { decoded: true, data: stateValue(byPath.get(`${path}.${child.key}`)!) }])
               )
             }),
-          states: makeHandlers(node.states, path, byPath, transitions, branches)
+          states: makeHandlers(node.states, path, byPath, transitions)
         }
         : {})
     }
@@ -1466,14 +1462,11 @@ export const compileModel = (model: FiniteModel): Machine.Machine.Any => {
     `${transition.source}\u0000${triggerKey(transition.trigger)}`,
     transition
   ]))
-  const branches: Record<string, Readonly<Record<string, unknown>>> = Object.create(null)
-  const handlers = makeHandlers(model.roots, undefined, byPath, transitions, branches)
-  // oxlint-disable-next-line typescript/no-unnecessary-type-assertion -- TypeScript 6 rejects the erased branch record without it.
+  const handlers = makeHandlers(model.roots, undefined, byPath, transitions)
   const machine = Machine.make({
     root: defined,
-    branches,
     events: Machine.eventsFromSchemas(...eventSchemas)
-  } as any)
+  })
   return machine.handle(
     {
       initial: {

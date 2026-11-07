@@ -19,7 +19,7 @@ const counter = Machine.make({
     target: "Open"
   },
   root: ({ input }) => ({ count: input }),
-  on: { Increment: { update: "root", data: ({ root: current }) => ({ count: current.count + 1 }) } },
+  on: { Increment: { update: { root: ({ root: current }) => ({ count: current.count + 1 }) } } },
   states: {
     Open: { on: { Close: { target: "Closed" } } },
     Closed: {}

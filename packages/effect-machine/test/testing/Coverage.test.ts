@@ -15,7 +15,6 @@ class Add extends Schema.TaggedClass<Add>("Add")("Add", {
 class Finish extends Schema.TaggedClass<Finish>("Finish")("Finish", {}) {}
 const CounterStates = Machine.state({ states: { count: Count, done: Done } })
 const counterMachine = Machine.make({
-  branches: { transition1: { destination: { target: "count" } } },
   root: CounterStates,
   events: Machine.eventsFromSchemas(Add, Finish)
 }).handle({
@@ -28,11 +27,10 @@ const counterMachine = Machine.make({
     count: {
       on: {
         Add: {
-          branches: "transition1",
+          branches: [{ target: "count" }],
           reenter: true,
-          resolve: ({ event, state, select: { destination: target } }) =>
-            target({ data: new Count({ value: state.value + event.amount }), decoded: true }),
-          declinable: true
+          resolve: ({ event, state, select }) =>
+            select.target("count", { data: new Count({ value: state.value + event.amount }), decoded: true })
         },
         Finish: { target: "done", decoded: true, data: () => (new Done({})) }
       }
@@ -66,9 +64,6 @@ const opaqueMachine = Machine.make({
 })
 const StartupStates = Machine.state({ states: { count: Count } })
 const startupMachine = Machine.make({
-  branches: {
-    transition1: { zero: { target: "count", title: "Count is zero" }, unchanged: { none: true } }
-  },
   root: StartupStates,
   events: Machine.eventsFromSchemas(Add)
 }).handle({
@@ -80,11 +75,11 @@ const startupMachine = Machine.make({
   states: {
     count: {
       always: {
-        branches: "transition1",
+        branches: [{ target: "count" }, { stay: true }],
         resolve: ({ state, select }) =>
           state.value === 0
-            ? select.zero({ data: new Count({ value: 1 }), decoded: true })
-            : select.unchanged()
+            ? select.target("count", { data: new Count({ value: 1 }), decoded: true })
+            : select.stay()
       },
       on: {
         Add: {
@@ -100,7 +95,6 @@ class Select extends Schema.TaggedClass<Select>("CoverageSelect")("Select", {
   value: Schema.Int
 }) {}
 const branchMachine = Machine.make({
-  branches: { transition1: { negative: { none: true }, zero: { none: true }, positive: { none: true } } },
   root: StartupStates,
   events: Machine.eventsFromSchemas(Select)
 }).handle({
@@ -113,13 +107,13 @@ const branchMachine = Machine.make({
     count: {
       on: {
         Select: {
-          branches: "transition1",
+          branches: [{ stay: true }, { update: "count" }, { target: "count" }],
           resolve: ({ event, select }) =>
             event.value < 0
-              ? select.negative()
+              ? select.stay()
               : event.value === 0
-              ? select.zero()
-              : select.positive()
+              ? select.update({ count: { decoded: true, data: new Count({ value: 0 }) } })
+              : select.target("count", { data: new Count({ value: event.value }), decoded: true })
         }
       }
     }
@@ -144,9 +138,9 @@ const finiteEventMachine = Machine.make({
   states: {
     count: {
       on: {
-        [Tick]: { none: true },
-        Alpha: { none: true },
-        Beta: { none: true }
+        [Tick]: { stay: true },
+        Alpha: { stay: true },
+        Beta: { stay: true }
       }
     }
   }
@@ -251,8 +245,8 @@ describe("MachineTest trace coverage", () => {
       if (!partial.events.available) {
         return
       }
-      assert.strictEqual(partial.transitions.definitions.hits[0]?.acceptance, "declinable")
-      assert.strictEqual(partial.transitions.branches.hits[0]?.acceptance, "declinable")
+      assert.strictEqual(partial.transitions.definitions.hits[0]?.acceptance, "required")
+      assert.strictEqual(partial.transitions.branches.hits[0]?.acceptance, "required")
       assert.deepStrictEqual(partial.states.activation.misses.map(({ path }) => path), ["done"])
       assert.deepStrictEqual(
         partial.transitions.definitions.misses.map(({ source, trigger }) => ({ source, trigger })),
@@ -277,7 +271,7 @@ describe("MachineTest trace coverage", () => {
       assert.strictEqual(combined.scenarios.traces, 2)
       assert.strictEqual(combined.scenarios.events, 2)
     }))
-  it.effect("attributes identical targetless results to their exact named branches", () =>
+  it.effect("attributes each result to the branch it selected", () =>
     Effect.gen(function*() {
       const negative = yield* MachineTest.run(branchMachine, { events: [new Select({ value: -1 })] })
       const zero = yield* MachineTest.run(branchMachine, { events: [new Select({ value: 0 })] })
@@ -297,9 +291,9 @@ describe("MachineTest trace coverage", () => {
           type: branch.type
         })),
         [
-          { id: "transition:0:branch:negative", branchIndex: 0, branchKey: "negative", type: "branch" },
-          { id: "transition:0:branch:zero", branchIndex: 1, branchKey: "zero", type: "branch" },
-          { id: "transition:0:branch:positive", branchIndex: 2, branchKey: "positive", type: "branch" }
+          { id: "transition:0:branch:stay", branchIndex: 0, branchKey: "stay", type: "branch" },
+          { id: "transition:0:branch:update:count", branchIndex: 1, branchKey: "update:count", type: "branch" },
+          { id: "transition:0:branch:target:count", branchIndex: 2, branchKey: "target:count", type: "branch" }
         ]
       )
     }))

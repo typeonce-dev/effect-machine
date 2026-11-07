@@ -152,7 +152,7 @@ export const make = <M extends Machine.Machine.Any>(
         }
         return branch.type === "direct"
           ? { ...common, type: "direct" }
-          : { ...common, type: "branch", key: branch.key, title: branch.title }
+          : { ...common, type: "branch", key: branch.key }
       })
     }
   })

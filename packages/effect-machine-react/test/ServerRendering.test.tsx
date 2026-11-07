@@ -285,7 +285,7 @@ const QuantityMachine = Machine.make({
 }).handle({
   root: ({ input }) => ({ quantity: input }),
   initial: { target: "Counting" },
-  on: { Set: { update: "root", data: ({ event }) => ({ quantity: event.quantity }) } },
+  on: { Set: { update: { root: ({ event }) => ({ quantity: event.quantity }) } } },
   states: { Counting: {} }
 })
 const QuantityChild = Machine.child("quantity", QuantityMachine)

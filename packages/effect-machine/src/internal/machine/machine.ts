@@ -93,28 +93,16 @@ const makeWithHandlers = (
 type DefinitionBranch = {
   readonly target: (selector: unknown) => unknown
   readonly resolve?: (context: any, enqueue: unknown) => unknown
-  readonly declinable?: boolean
 }
 
 type CapturedBranch = DefinitionBranch & {
   readonly selection: Topology.TargetSelection
 }
 
-type BranchDeclaration = {
-  readonly title?: string
-  readonly target: unknown
-}
-
 type CapturedNamedBranch = {
   readonly key: string
-  readonly title: string
   readonly selection: Topology.TargetSelection
 }
-
-const plainTargetSelection = (selection: Topology.TargetSelection): Topology.TargetSelection =>
-  selection.kind === "none"
-    ? Topology.noneTargetSelection
-    : Topology.makeTargetSelection(selection.kind, selection.path, selection.scope, selection.updatePath)
 
 const transitionTargetSelection = (
   selection: Topology.TargetSelection
@@ -217,64 +205,17 @@ const runCapturedBranch = (
 ): unknown => {
   const resolverContext: Record<string, any> = {
     ...context,
-    root: source === "" ? context.state : context.ancestors[""],
-    decline: Topology.makeDeclined
+    root: source === "" ? context.state : context.ancestors[""]
   }
   delete resolverContext.target
   const resolved = branch.resolve!(resolverContext, enqueue)
-  if (Topology.isDeclined(resolved)) {
-    if (branch.declinable !== true) {
-      throw new Error(`Machine transition for state "${source}" returned decline without declaring declinable: true`)
-    }
-    return resolved
-  }
+  if (Topology.isDeclined(resolved)) return resolved
   validateResolvedSelection(resolved, branch.selection, stateNodes)
   return resolved
 }
 
 const topologyTargetPath = (selection: Topology.TargetSelection): string | undefined =>
   selection.kind === "update" ? undefined : selection.path
-
-const isArrayIndexKey = (key: string): boolean => {
-  const index = Number(key)
-  return Number.isInteger(index) && index >= 0 && index < 0xffff_ffff && String(index) === key
-}
-
-const captureNamedBranches = (
-  declarations: unknown,
-  path: string,
-  trigger: PropertyKey
-): ReadonlyArray<CapturedNamedBranch> => {
-  if (typeof declarations !== "object" || declarations === null || Array.isArray(declarations)) {
-    throw new Error(`Machine branching transition for state "${path}" on "${String(trigger)}" requires a branch record`)
-  }
-  if (Object.getOwnPropertySymbols(declarations).length > 0) {
-    throw new Error(`Machine branching transition for state "${path}" on "${String(trigger)}" cannot use symbol keys`)
-  }
-  const keys = Object.keys(declarations)
-  if (keys.length === 0) {
-    throw new Error(`Machine branching transition for state "${path}" on "${String(trigger)}" requires a branch`)
-  }
-  return Object.freeze(keys.map((key) => {
-    if (key.length === 0 || isArrayIndexKey(key)) {
-      throw new Error(
-        `Machine branching transition for state "${path}" on "${String(trigger)}" requires non-index string branch keys`
-      )
-    }
-    const declaration = (declarations as Record<string, unknown>)[key]
-    if (typeof declaration !== "object" || declaration === null || !hasProperty(declaration, "target")) {
-      throw new Error(`Machine transition branch "${key}" requires a target selection`)
-    }
-    const { target, title } = declaration as BranchDeclaration
-    if (!Topology.isTargetSelection(target)) {
-      throw new Error(`Machine transition branch "${key}" must select exactly one target`)
-    }
-    if (title !== undefined && (typeof title !== "string" || title.length === 0)) {
-      throw new Error(`Machine transition branch "${key}" title must be a non-empty string`)
-    }
-    return Object.freeze({ key, title: title ?? key, selection: plainTargetSelection(target) })
-  }))
-}
 
 const constructBranch = (
   selection: Topology.TargetSelection,
@@ -319,25 +260,126 @@ const constructBranch = (
   return Construction.target(stateNodes, selection.path!, config, source)
 }
 
-const makeBranchSelectors = (
+// The key is the entry as written. It identifies the branch in `select` calls, retained transitions, and coverage.
+const branchEntryKey = (entry: Readonly<Record<string, unknown>>, source: string, trigger: PropertyKey): string => {
+  const fields = Reflect.ownKeys(entry)
+  const invalid = () =>
+    new Error(`Machine branch entry for state "${source}" on "${String(trigger)}" must be one destination`)
+  if (typeof entry.target === "string") {
+    if (fields.some((field) => field !== "target" && field !== "update")) throw invalid()
+    if (entry.update === undefined) return `target:${entry.target}`
+    if (typeof entry.update !== "string") throw invalid()
+    return `target:${entry.target}+update:${entry.update}`
+  }
+  if (fields.length !== 1) throw invalid()
+  if (typeof entry.update === "string") return `update:${entry.update}`
+  if (typeof entry.history === "string") return `history:${entry.history}`
+  for (const field of ["initialize", "stay", "decline"]) {
+    if (entry[field] === true) return field
+  }
+  throw invalid()
+}
+
+const captureNamedBranches = (
+  entries: unknown,
+  declaration: Declaration.Declaration,
+  source: string,
+  trigger: PropertyKey,
+  stateNodes: Machine.StateNodes
+): { readonly branches: ReadonlyArray<CapturedNamedBranch>; readonly declines: boolean } => {
+  const label = `Machine branches for state "${source}" on "${String(trigger)}"`
+  if (!Array.isArray(entries) || entries.length === 0) throw new Error(`${label} require at least one entry`)
+  const keys = new Set<string>()
+  const branches: Array<CapturedNamedBranch> = []
+  let declines = false
+  for (const entry of entries) {
+    if (typeof entry !== "object" || entry === null) throw new Error(`${label} must list objects`)
+    const key = branchEntryKey(entry, source, trigger)
+    if (keys.has(key)) throw new Error(`${label} declare "${key}" more than once`)
+    keys.add(key)
+    if (key === "decline") {
+      declines = true
+      continue
+    }
+    branches.push(Object.freeze({
+      key,
+      selection: captureDefinitionBranch(
+        { target: () => Declaration.selection(declaration, entry) },
+        undefined,
+        stateNodes,
+        source,
+        trigger
+      ).selection
+    }))
+  }
+  if (branches.length === 0) throw new Error(`${label} need a destination besides decline`)
+  return { branches: Object.freeze(branches), declines }
+}
+
+const updateValue = (value: unknown): Readonly<Record<string, unknown>> =>
+  typeof value === "object" && value !== null && hasProperty(value, "decoded") && value.decoded === true &&
+    hasProperty(value, "data")
+    ? { decoded: true, data: value.data }
+    : { data: value }
+
+const makeBranchSelect = (
   branches: ReadonlyArray<CapturedNamedBranch>,
+  declines: boolean,
   owner: object,
   stateNodes: Machine.StateNodes,
   declaration: Declaration.Declaration,
   source: string
-): Readonly<Record<string, unknown>> =>
-  Object.freeze(Object.fromEntries(
-    branches.map((branch, index) => [branch.key, (config?: unknown) =>
-      Topology.makeSelectedBranch(
-        owner,
-        index,
-        branch.key,
-        branch.selection.kind === "none"
-          ? Topology.makeNoTarget()
-          : constructBranch(branch.selection, stateNodes, declaration, config, source)
-      )]
-    )
-  ))
+): Readonly<Record<string, unknown>> => {
+  const selected = (key: string, construct: (selection: Topology.TargetSelection) => unknown) => {
+    const index = branches.findIndex((branch) => branch.key === key)
+    if (index === -1) {
+      throw new Error(`Machine resolve for state "${source}" selected "${key}", which branches does not declare`)
+    }
+    return Topology.makeSelectedBranch(owner, index, key, construct(branches[index]!.selection))
+  }
+  return Object.freeze({
+    target: (path: string, raw?: unknown) => {
+      const { update, ...construction } = raw === undefined ? {} as Record<string, unknown> : Construction.record(raw)
+      if (update === undefined) {
+        return selected(
+          `target:${path}`,
+          (selection) => constructBranch(selection, stateNodes, declaration, construction, source)
+        )
+      }
+      const name = Declaration.updateOwner(update)
+      return selected(`target:${path}+update:${name}`, (selection) =>
+        constructBranch(
+          selection,
+          stateNodes,
+          declaration,
+          { ...construction, update: updateValue((update as Record<string, unknown>)[name]) },
+          source
+        ))
+    },
+    update: (updates: unknown) => {
+      const name = Declaration.updateOwner(updates)
+      return selected(`update:${name}`, (selection) =>
+        constructBranch(
+          selection,
+          stateNodes,
+          declaration,
+          updateValue((updates as Record<string, unknown>)[name]),
+          source
+        ))
+    },
+    history: (path: string) =>
+      selected(`history:${path}`, (selection) => constructBranch(selection, stateNodes, declaration, {}, source)),
+    initialize: (raw?: unknown) =>
+      selected("initialize", (selection) => constructBranch(selection, stateNodes, declaration, raw, source)),
+    stay: () => selected("stay", () => Topology.makeNoTarget()),
+    decline: () => {
+      if (!declines) {
+        throw new Error(`Machine resolve for state "${source}" selected "decline", which branches does not declare`)
+      }
+      return Topology.makeSelectedBranch(owner, -1, "decline", Topology.makeDeclined())
+    }
+  })
+}
 
 const validateSelectedBranchResult = (
   result: unknown,
@@ -366,7 +408,8 @@ const normalizeObjectTransition = (
   raw: unknown,
   declaration: Declaration.Declaration,
   path: string,
-  stateNodes: Machine.StateNodes
+  stateNodes: Machine.StateNodes,
+  acceptance: Machine.TransitionAcceptance
 ): Record<string, unknown> => {
   if (typeof raw !== "object" || raw === null) throw new Error(`Machine transition for "${path}" must be an object`)
   const config = { ...raw } as Record<string, unknown>
@@ -375,70 +418,57 @@ const normalizeObjectTransition = (
     "update",
     "initialize",
     "history",
-    "none",
+    "stay",
     "branches",
     "data",
     "decoded",
     "resolve",
     "guard",
     "reenter",
-    "declinable"
+    "commands"
   ]
   for (const key of Reflect.ownKeys(config)) {
     if (typeof key !== "string" || !allowed.includes(key)) {
       throw new Error("Machine transition contains an unknown field")
     }
   }
-  for (const key of ["resolve", "guard"]) {
+  for (const key of ["resolve", "guard", "commands"]) {
     if (config[key] !== undefined && typeof config[key] !== "function") {
       throw new Error(`Machine transition ${key} must be a function`)
     }
   }
   const guard = typeof config.guard === "function" ? config.guard : undefined
   const resolve = typeof config.resolve === "function" ? config.resolve : undefined
+  const commands = typeof config.commands === "function" ? config.commands : undefined
   if (config.decoded !== undefined && typeof config.decoded !== "boolean") {
     throw new Error("Machine decoded must be a boolean construction flag")
   }
   const hasData = Object.prototype.hasOwnProperty.call(config, "data")
   if (config.decoded === true && !hasData) throw new Error("Machine decoded construction requires data")
-  if (hasData && resolve !== undefined) throw new Error("Machine data and resolve are mutually exclusive")
-  const data = config.data
-  const construct = typeof data === "function" ? data : () => data
   const guarded = guard !== undefined
-  const declinable = guarded || config.declinable === true
-  if (typeof config.branches === "string") {
-    const group = declaration.branches.get(config.branches)
-    if (group === undefined || resolve === undefined) {
-      throw new Error("Machine branching transition requires a registered group and resolver")
-    }
+  if (
+    acceptance === "required" &&
+    (guarded || (Array.isArray(config.branches) && config.branches.some((entry) => entry?.decline === true)))
+  ) {
+    throw new Error(`Machine guard and decline apply only to on and always, on state "${path}"`)
+  }
+  if ((config.branches === undefined) !== (resolve === undefined)) {
+    throw new Error("Machine branches and resolve must be declared together")
+  }
+  if (config.branches !== undefined) {
     if (
-      ["target", "update", "initialize", "history", "none", "data", "decoded"].some((key) => config[key] !== undefined)
-    ) throw new Error("Machine branching transition cannot redeclare its destination")
-    const entries = Object.fromEntries(
-      Object.entries(group).map(([key, spec]) => [key, {
-        title: spec.title,
-        target: captureDefinitionBranch(
-          { target: () => Declaration.selection(declaration, spec) },
-          undefined,
-          stateNodes,
-          path,
-          key
-        ).selection
-      }])
-    )
+      ["target", "update", "initialize", "history", "stay", "data", "decoded", "guard", "commands"].some((key) =>
+        config[key] !== undefined
+      )
+    ) throw new Error("Machine branching transition cannot redeclare its destination, guard, or commands")
     return {
-      branches: () => entries,
+      branches: config.branches,
       reenter: config.reenter,
-      declinable,
-      resolve: (context: Record<string, any>, enqueue: unknown) => {
-        return guarded && !guard(context) ? Topology.makeDeclined() : resolve(context, enqueue)
-      }
+      resolve
     }
   }
+  if (typeof config.update === "string") throw new Error("Machine transition update must be a record with one owner")
   const selection = Declaration.selection(declaration, config)
-  if (resolve !== undefined && selection.kind !== "none") {
-    throw new Error("Machine advanced construction requires a declared branch group")
-  }
   const initialize = config.initialize
   const initializes = initialize !== undefined
   if (initializes && (hasData || config.decoded !== undefined)) {
@@ -447,37 +477,43 @@ const normalizeObjectTransition = (
   if (initializes && !declaration.input && initialize !== true) {
     throw new Error("Machine initialize requires true when the machine declares no input")
   }
+  if (selection.kind === "none" && (hasData || config.decoded !== undefined)) {
+    throw new Error("Machine targetless transition accepts no data")
+  }
   const constructInput = !declaration.input
     ? () => undefined
     : typeof initialize === "function"
     ? initialize
     : () => initialize
+  const owner = selection.updatePath ?? (selection.kind === "update" ? selection.path : undefined)
+  const updates = config.update as Record<string, unknown> | undefined
+  const rawUpdate = owner === undefined || updates === undefined ? undefined : updates[Declaration.updateOwner(updates)]
+  const constructUpdate = rawUpdate === undefined ? undefined : InitialDeclaration.ownerUpdate(rawUpdate)
+  const construct = typeof config.data === "function" ? config.data : () => config.data
   return {
     target: () => selection,
     reenter: config.reenter,
-    declinable,
+    declinable: guarded,
     resolve: (context: Record<string, any>, enqueue: unknown) => {
       if (guarded && !guard(context)) return Topology.makeDeclined()
-      if (resolve !== undefined) return resolve(context, enqueue)
+      commands?.(context, enqueue)
+      if (selection.kind === "none") return undefined
       if (initializes) {
         return constructBranch(selection, stateNodes, declaration, { input: constructInput(context) })
       }
-      const value = construct(context)
+      const state = {
+        ...(hasData ? { data: construct(context) } : {}),
+        ...(config.decoded === undefined ? {} : { decoded: config.decoded })
+      }
       return constructBranch(
         selection,
         stateNodes,
         declaration,
-        selection.updatePath === undefined
-          ? {
-            ...(hasData ? { data: value } : {}),
-            ...(config.decoded === undefined ? {} : { decoded: config.decoded })
-          }
-          : selection.kind === "choice"
-          ? { update: { data: value, decoded: config.decoded } }
-          : {
-            ...(value.target === undefined ? {} : { data: value.target, decoded: config.decoded }),
-            update: { data: value.update, decoded: config.decoded }
-          },
+        selection.kind === "update" ?
+          constructUpdate!(context) :
+          selection.updatePath === undefined
+          ? state
+          : { ...state, update: constructUpdate!(context) },
         path
       )
     }
@@ -489,48 +525,38 @@ const captureTransition = (
   stateNodes: Machine.StateNodes,
   path: string,
   declaration: Declaration.Declaration,
-  trigger: PropertyKey
+  trigger: PropertyKey,
+  acceptance: Machine.TransitionAcceptance
 ): unknown => {
-  const transition = normalizeObjectTransition(rawTransition, declaration, path, stateNodes)
+  const transition = normalizeObjectTransition(rawTransition, declaration, path, stateNodes, acceptance)
   if (typeof transition !== "object" || transition === null) {
     throw new Error(`Machine transition for state "${path}" on "${String(trigger)}" must be an object`)
   }
   const definition = transition as Record<PropertyKey, unknown>
   const reenter = definition.reenter === true
-  const declinable = definition.declinable === true
   if (hasProperty(definition, "branches")) {
-    const branching = definition as { readonly branches: unknown; readonly resolve?: unknown }
-    if (typeof branching.branches !== "function" || typeof branching.resolve !== "function") {
-      throw new Error(
-        `Machine branching transition for state "${path}" on "${String(trigger)}" requires branches and resolve`
-      )
-    }
-    const resolve = branching.resolve
-    const branches = captureNamedBranches(branching.branches(), path, trigger)
+    const resolve = (definition as Record<PropertyKey, unknown>).resolve as (
+      context: Record<string, any>,
+      enqueue: unknown
+    ) => unknown
+    const { branches, declines } = captureNamedBranches(definition.branches, declaration, path, trigger, stateNodes)
     const owner = Object.freeze({})
+    const select = makeBranchSelect(branches, declines, owner, stateNodes, declaration, path)
     const evaluate = (context: Record<string, any>, enqueue: unknown) => {
       const resolverContext: Record<string, any> = {
         ...context,
         root: path === "" ? context.state : context.ancestors[""],
-        decline: Topology.makeDeclined
+        select
       }
       delete resolverContext.target
-      resolverContext.select = makeBranchSelectors(branches, owner, stateNodes, declaration, path)
       const selected = resolve(resolverContext, enqueue)
-      if (Topology.isDeclined(selected)) {
-        if (!declinable) {
-          throw new Error(
-            `Machine branching transition for state "${path}" on "${
-              String(trigger)
-            }" returned decline without declaring declinable: true`
-          )
-        }
-        return { result: selected, branchIndex: -1, branchKey: undefined }
-      }
       if (!Topology.isSelectedBranch(selected) || selected.owner !== owner) {
         throw new Error(
-          `Machine branching transition for state "${path}" on "${String(trigger)}" must select one declared branch`
+          `Machine branching transition for state "${path}" on "${String(trigger)}" must return a select call`
         )
+      }
+      if (selected.branchIndex === -1) {
+        return { result: selected.result, branchIndex: -1, branchKey: undefined }
       }
       const branch = branches[selected.branchIndex]
       if (branch === undefined || selected.branchKey !== branch.key) {
@@ -545,7 +571,7 @@ const captureTransition = (
     }
     return {
       reenter,
-      declinable,
+      declinable: declines,
       targets: [
         ...new Set(
           branches.flatMap((branch) =>
@@ -557,7 +583,6 @@ const captureTransition = (
         Object.freeze({
           type: "branch" as const,
           key: branch.key,
-          title: branch.title,
           target: topologyTargetPath(branch.selection),
           selection: transitionTargetSelection(branch.selection),
           updates: selectionUpdates(branch.selection)
@@ -567,6 +592,7 @@ const captureTransition = (
       transition: (context: Record<string, any>, enqueue: unknown) => evaluate(context, enqueue).result
     }
   }
+  const declinable = definition.declinable === true
   const branch = captureDefinitionBranch(transition, undefined, stateNodes, path, trigger)
   const evaluate = (context: Record<string, any>, enqueue: unknown) => ({
     result: runCapturedBranch(branch, context, enqueue, stateNodes, path),
@@ -604,7 +630,8 @@ const captureEventHandlers = (
       stateNodes,
       path,
       declaration,
-      event
+      event,
+      "declinable"
     )
   }
   return captured
@@ -626,7 +653,7 @@ const captureInvokeDefinition = (
     )
     for (const key of ["onElement", "onDone", "onFailure", "onSnapshot"] as const) {
       if (captured[key] !== undefined) {
-        captured[key] = captureTransition(captured[key], stateNodes, path, declaration, key)
+        captured[key] = captureTransition(captured[key], stateNodes, path, declaration, key, "required")
       }
     }
     return InvocationDefinition.capture(captured, path)
@@ -668,13 +695,13 @@ const flattenHandlers = (
       stateConfig.on = capturedOn
     }
     if (stateConfig.always !== undefined) {
-      stateConfig.always = captureTransition(stateConfig.always, stateNodes, path, declaration, "always")
+      stateConfig.always = captureTransition(stateConfig.always, stateNodes, path, declaration, "always", "declinable")
     }
     if (stateConfig.onDone !== undefined) {
-      stateConfig.onDone = captureTransition(stateConfig.onDone, stateNodes, path, declaration, "done")
+      stateConfig.onDone = captureTransition(stateConfig.onDone, stateNodes, path, declaration, "done", "required")
     }
     if (stateConfig.choice !== undefined) {
-      stateConfig.choice = captureTransition(stateConfig.choice, stateNodes, path, declaration, "choice")
+      stateConfig.choice = captureTransition(stateConfig.choice, stateNodes, path, declaration, "choice", "required")
     }
     if (stateConfig.invoke !== undefined) {
       stateConfig.invoke = captureInvokeDefinition(stateConfig.invoke, stateNodes, path, declaration)

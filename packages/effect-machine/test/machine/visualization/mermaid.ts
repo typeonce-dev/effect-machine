@@ -56,7 +56,7 @@ const branchLabel = (
   definition: TransitionDefinition,
   branch: TransitionDefinition["branches"][number]
 ): string => {
-  const suffix = branch.type === "branch" ? ` [${branch.title}]` : ""
+  const suffix = branch.type === "branch" ? ` [${branch.key}]` : ""
   return escapeText(`${triggerLabel(definition)}${suffix}`)
 }
 

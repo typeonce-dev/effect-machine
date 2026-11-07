@@ -59,12 +59,6 @@ const makeCounter = (state: {
   maxInFlight: number
 }) => {
   return Machine.make({
-    branches: {
-      transition1: { destination: { target: "Count" } },
-      transition2: { destination: { target: "Count" } },
-      transition4: { destination: { target: "Count" } },
-      transition5: { destination: { target: "Count" } }
-    },
     id: "Counter",
     root: CounterStates,
     events: Machine.eventsFromSchemas(Increment, Fail, Finish, RaiseFromAction, SpawnFromAction),
@@ -82,22 +76,22 @@ const makeCounter = (state: {
         },
         on: {
           Increment: {
-            branches: "transition1",
-            resolve: ({ event, state: current, select: { destination: target } }, enqueue) => {
+            branches: [{ target: "Count" }],
+            resolve: ({ event, state: current, select }, enqueue) => {
               state.actions += 1
               state.inFlight += 1
               state.maxInFlight = Math.max(state.maxInFlight, state.inFlight)
               state.inFlight -= 1
               const value = current.value + event.by
               enqueue.emit(new Changed({ value }))
-              return target({ data: new Count({ value }), decoded: true })
+              return select.target("Count", { data: new Count({ value }), decoded: true })
             }
           },
           Fail: {
-            branches: "transition2",
-            resolve: ({ state: current, select: { destination: target } }, enqueue) => {
+            branches: [{ target: "Count" }],
+            resolve: ({ state: current, select }, enqueue) => {
               enqueue.emit(new Changed({ value: 999 }))
-              return target({ data: current, decoded: true })
+              return select.target("Count", { data: current, decoded: true })
             }
           },
           Finish: {
@@ -106,17 +100,17 @@ const makeCounter = (state: {
             data: ({ state: current }) => (new Done({ value: current.value }))
           },
           RaiseFromAction: {
-            branches: "transition4",
-            resolve: ({ state: current, select: { destination: target } }, enqueue) => {
+            branches: [{ target: "Count" }],
+            resolve: ({ state: current, select }, enqueue) => {
               enqueue.raise(new Increment({ by: 1, block: false }))
-              return target({ data: current, decoded: true })
+              return select.target("Count", { data: current, decoded: true })
             }
           },
           SpawnFromAction: {
-            branches: "transition5",
-            resolve: ({ state: current, select: { destination: target } }, enqueue) => {
+            branches: [{ target: "Count" }],
+            resolve: ({ state: current, select }, enqueue) => {
               enqueue.stop(UnsupportedChild)
-              return target({ data: current, decoded: true })
+              return select.target("Count", { data: current, decoded: true })
             }
           }
         }
@@ -638,7 +632,7 @@ describe("ClusterMachine", () => {
         },
         states: {
           Count: {
-            invoke: { src: "source1", id: "child", onDone: { none: true } }
+            invoke: { src: "source1", id: "child", onDone: { stay: true } }
           }
         }
       })

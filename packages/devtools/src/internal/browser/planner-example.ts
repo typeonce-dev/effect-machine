@@ -110,12 +110,6 @@ const States = Machine.state({
   }
 })
 export const plannerMachine = Machine.make({
-  branches: {
-    transition1: {
-      urgent: { target: "Working", title: "Finish immediately" },
-      normal: { target: "Working", title: "Wait in working" }
-    }
-  },
   effects: { source1: Effect.suspend(() => Effect.never) },
   id: "planner-example",
   root: States,
@@ -163,17 +157,18 @@ export const plannerMachine = Machine.make({
     Idle: {
       on: {
         Begin: {
-          branches: "transition1",
+          branches: [{ target: "Working" }, { target: "Finished" }],
           resolve: ({ event, self, select, state }, enqueue) => {
+            if (!event.approved) {
+              return select.target("Finished", { data: new Finished({ job: event.job }), decoded: true })
+            }
             enqueue.emit(new Planned({ job: event.job }))
             enqueue.sendTo(self, Events.Cancel({ reason: "planner command example" }))
             if (event.priority === "urgent") {
               enqueue.raise(InternalEvents.AutoFinish())
             }
             const working = new Working({ owner: state.owner, job: event.job })
-            return event.priority === "urgent"
-              ? select.urgent({ data: working, decoded: true })
-              : select.normal({ data: working, decoded: true })
+            return select.target("Working", { data: working, decoded: true })
           }
         }
       }

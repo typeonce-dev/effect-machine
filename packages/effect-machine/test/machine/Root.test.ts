@@ -9,7 +9,7 @@ const counter = Machine.make({
 }).handle({
   root: () => ({ count: 0 }),
   on: {
-    Increment: { update: "root", data: ({ root: current, event }) => ({ count: current.count + event.by }) }
+    Increment: { update: { root: ({ root: current, event }) => ({ count: current.count + event.by }) } }
   }
 })
 describe("root", () => {
@@ -36,7 +36,7 @@ const editor = Machine.make({
   },
   root: () => ({ count: 0 }),
   on: {
-    Increment: { update: "root", data: ({ root: current, event }) => ({ count: current.count + event.by }) }
+    Increment: { update: { root: ({ root: current, event }) => ({ count: current.count + event.by }) } }
   },
   states: {
     Editing: { on: { Save: { target: "Saving" } } },
@@ -109,7 +109,6 @@ it("declines guarded child transitions and tries the root handler", async () => 
   let constructed = 0
   const events = Machine.events({ Go: { allowed: Schema.Boolean } })
   const machine = Machine.make({
-    branches: { transition1: { destination: { target: "Busy" } } },
     root,
     events
   }).handle({
@@ -117,16 +116,15 @@ it("declines guarded child transitions and tries the root handler", async () => 
       target: "Idle"
     },
     root: () => ({ count: 0 }),
-    on: { Go: { update: "root", data: ({ root: current }) => ({ count: current.count + 1 }) } },
+    on: { Go: { update: { root: ({ root: current }) => ({ count: current.count + 1 }) } } },
     states: {
       Idle: {
         on: {
           Go: {
-            branches: "transition1",
+            target: "Busy",
             guard: ({ event }) => event.allowed,
-            resolve: ({ select: { destination: target } }) => {
+            commands: () => {
               constructed++
-              return target({})
             }
           }
         }
@@ -248,7 +246,6 @@ it("retains current root fields when restoring descendant history", async () => 
   })
   const events = Machine.events({ Next: {}, Leave: {}, Return: {}, Increment: {} })
   const machine = Machine.make({
-    branches: { transition1: { destination: { history: "Editing.recent" } } },
     root,
     events
   }).handle({
@@ -256,7 +253,7 @@ it("retains current root fields when restoring descendant history", async () => 
       target: "Editing"
     },
     root: () => ({ count: 0 }),
-    on: { Increment: { update: "root", data: ({ root: current }) => ({ count: current.count + 1 }) } },
+    on: { Increment: { update: { root: ({ root: current }) => ({ count: current.count + 1 }) } } },
     states: {
       Editing: {
         initial: {
@@ -273,7 +270,14 @@ it("retains current root fields when restoring descendant history", async () => 
           B: {}
         }
       },
-      Away: { on: { Return: { branches: "transition1", resolve: ({ select: { destination: target } }) => target() } } }
+      Away: {
+        on: {
+          Return: {
+            branches: [{ history: "Editing.recent" }],
+            resolve: ({ select }) => select.history("Editing.recent")
+          }
+        }
+      }
     }
   })
   let snapshot = (await Effect.runPromise(Machine.planInitial(machine))).state

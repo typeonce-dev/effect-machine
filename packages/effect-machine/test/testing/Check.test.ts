@@ -18,6 +18,8 @@ const Toggle = Machine.make({
   }
 })
 
+const neverTaken = (): boolean => false
+
 describe("MachineTest.analyze", () => {
   it("reports a state with no path and a public event with no handler", () => {
     const machine = Machine.make({
@@ -63,13 +65,17 @@ describe("MachineTest.analyze", () => {
         }
       }),
       events: Machine.events({ Go: {}, Next: {} }),
-      effects: { work: Effect.void },
-      branches: { pick: { left: { target: "Left" }, regions: { target: "Regions" } } }
+      effects: { work: Effect.void }
     }).handle({
       initial: { target: "Start" },
       states: {
         Start: { on: { Go: { target: "Pick" } } },
-        Pick: { choice: { branches: "pick", resolve: ({ select }) => select.left() } },
+        Pick: {
+          choice: {
+            branches: [{ target: "Left" }, { target: "Regions" }],
+            resolve: ({ select }) => neverTaken() ? select.target("Regions") : select.target("Left")
+          }
+        },
         Left: { on: { Next: { target: "Waiting" } } },
         Regions: {
           states: {
@@ -87,13 +93,17 @@ describe("MachineTest.analyze", () => {
   it("treats a branch target's descendants as reachable, because a resolver can construct them", () => {
     const machine = Machine.make({
       root: Machine.state({ states: { Idle: {}, Open: { states: { First: {}, Second: {} } } } }),
-      events: Machine.events({ Go: {} }),
-      branches: { go: { open: { target: "Open" } } }
+      events: Machine.events({ Go: {} })
     }).handle({
       initial: { target: "Idle" },
       states: {
         Idle: {
-          on: { Go: { branches: "go", resolve: ({ select }) => select.open({ states: { Second: {} } }) } }
+          on: {
+            Go: {
+              branches: [{ target: "Open" }],
+              resolve: ({ select }) => select.target("Open", { states: { Second: {} } })
+            }
+          }
         },
         Open: { initial: { target: "Open.First" } }
       }
@@ -106,18 +116,17 @@ describe("MachineTest.analyze", () => {
     let calls = 0
     const machine = Machine.make({
       root: Machine.state({ states: { A: {}, B: {} } }),
-      events: Machine.events({ Go: {} }),
-      branches: { go: { b: { target: "B" } } }
+      events: Machine.events({ Go: {} })
     }).handle({
       initial: { target: "A" },
       states: {
         A: {
           on: {
             Go: {
-              branches: "go",
+              branches: [{ target: "B" }],
               resolve: ({ select }) => {
                 calls += 1
-                return select.b()
+                return select.target("B")
               }
             }
           }
@@ -263,11 +272,19 @@ describe("MachineTest.check", () => {
     Effect.gen(function*() {
       const machine = Machine.make({
         root: Machine.state({ states: { Idle: {}, Done: {}, Never: {} } }),
-        events: Machine.events({ Go: {} }),
-        branches: { go: { done: { target: "Done" }, never: { target: "Never" } } }
+        events: Machine.events({ Go: {} })
       }).handle({
         initial: { target: "Idle" },
-        states: { Idle: { on: { Go: { branches: "go", resolve: ({ select }) => select.done() } } } }
+        states: {
+          Idle: {
+            on: {
+              Go: {
+                branches: [{ target: "Done" }, { target: "Never" }],
+                resolve: ({ select }) => neverTaken() ? select.target("Never") : select.target("Done")
+              }
+            }
+          }
+        }
       })
 
       const report = yield* MachineTest.check(machine)
@@ -282,7 +299,7 @@ describe("MachineTest.check", () => {
       const Events = Machine.events({ Add: {} })
       const machine = Machine.make({ root: Root, events: Events }).handle({
         root: () => ({ count: 0 }),
-        on: { Add: { update: "root", data: ({ root }) => ({ count: root.count + 1 }) } }
+        on: { Add: { update: { root: ({ root }) => ({ count: root.count + 1 }) } } }
       })
 
       const report = yield* MachineTest.check(machine, {
@@ -306,7 +323,7 @@ describe("MachineTest.check", () => {
         events: Machine.events({ Add: {} })
       }).handle({
         root: () => ({ count: 0 }),
-        on: { Add: { update: "root", data: ({ root }) => ({ count: root.count + 1 }) } }
+        on: { Add: { update: { root: ({ root }) => ({ count: root.count + 1 }) } } }
       })
 
       const report = yield* MachineTest.check(machine, { limits: { maxDepth: 3 } })

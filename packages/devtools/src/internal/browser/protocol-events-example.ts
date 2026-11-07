@@ -58,10 +58,6 @@ const ChildStates = Machine.state({
   }
 })
 export const requiredParentChildMachine = Machine.make({
-  branches: {
-    transition1: { destination: { target: "Working" } },
-    transition3: { destination: { target: "Working" } }
-  },
   effects: {
     source1: ({ parent, state }: {
       readonly parent: Machine.MachineTarget<Machine.Machine.EventInput<ChildProgress | ChildFinished | ChildProblem>>
@@ -84,11 +80,11 @@ export const requiredParentChildMachine = Machine.make({
     Idle: {
       on: {
         BeginChildWork: {
-          branches: "transition1",
-          resolve: ({ event, select: { destination: target } }, enqueue) => {
+          branches: [{ target: "Working" }],
+          resolve: ({ event, select }, enqueue) => {
             enqueue.raise(ChildInternalEvents.Heartbeat({ percent: 25 }))
             enqueue.emit(ChildEmissions.ChildTrace({ message: `started ${event.job}` }))
-            return target({ data: new ChildWorking({ job: event.job, progress: 0 }), decoded: true })
+            return select.target("Working", { data: new ChildWorking({ job: event.job, progress: 0 }), decoded: true })
           }
         }
       }
@@ -98,7 +94,7 @@ export const requiredParentChildMachine = Machine.make({
         src: "source1",
         id: "report-progress-to-parent",
         input: (context) => context,
-        onDone: { none: true },
+        onDone: { stay: true },
         onFailure: {
           target: "Cancelled",
           decoded: true,
@@ -107,10 +103,13 @@ export const requiredParentChildMachine = Machine.make({
       },
       on: {
         Heartbeat: {
-          branches: "transition3",
-          resolve: ({ event, state, select: { destination: target } }, enqueue) => {
+          branches: [{ target: "Working" }],
+          resolve: ({ event, state, select }, enqueue) => {
             enqueue.raise(ChildInternalEvents.CommitChildWork())
-            return target({ data: new ChildWorking({ job: state.job, progress: event.percent }), decoded: true })
+            return select.target("Working", {
+              data: new ChildWorking({ job: state.job, progress: event.percent }),
+              decoded: true
+            })
           }
         },
         CommitChildWork: {
@@ -161,10 +160,6 @@ const ParentStates = Machine.state({
   }
 })
 export const parentProtocolMachine = Machine.make({
-  branches: {
-    transition1: { destination: { target: "Supervising" } },
-    transition3: { destination: { target: "Complete" } }
-  },
   children: { source1: ProtocolChild },
   id: "parent-child-protocol",
   root: ParentStates,
@@ -235,7 +230,6 @@ class PublishOutside extends Schema.TaggedClass<PublishOutside>("OptionalParentP
 }
 const OptionalParentStates = Machine.state({ states: { Detached, Published } })
 export const optionalParentMachine = Machine.make({
-  branches: { transition1: { destination: { target: "Published" } } },
   id: "optional-parent-protocol",
   root: OptionalParentStates,
   events: Machine.eventsFromSchemas(PublishOutside),
@@ -250,12 +244,15 @@ export const optionalParentMachine = Machine.make({
     Detached: {
       on: {
         PublishOutside: {
-          branches: "transition1",
-          resolve: ({ event, parent, select: { destination: target } }, enqueue) => {
+          branches: [{ target: "Published" }],
+          resolve: ({ event, parent, select }, enqueue) => {
             if (parent !== undefined) {
               enqueue.sendTo(parent, ParentEvents.ChildFinished({ result: event.result }))
             }
-            return target({ data: new Published({ deliveredToParent: parent !== undefined }), decoded: true })
+            return select.target("Published", {
+              data: new Published({ deliveredToParent: parent !== undefined }),
+              decoded: true
+            })
           }
         }
       }
