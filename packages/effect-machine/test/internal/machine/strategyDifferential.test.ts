@@ -4,6 +4,7 @@ import * as Arbitrary from "effect/Arbitrary"
 import { Machine } from "../../../src/index.js"
 import * as Configuration from "../../../src/internal/machine/configuration.js"
 import * as ExecutionPlan from "../../../src/internal/machine/executionPlan.js"
+import * as InvocationEvent from "../../../src/internal/machine/invocationEvent.js"
 import { MachineTest } from "../../../src/testing/index.js"
 import type { DifferentialStep } from "../../machine/support/runtimeDifferential.js"
 import { verifyManagedExecution } from "../../machine/support/runtimeDifferential.js"
@@ -1775,4 +1776,175 @@ describe("machine planner and runtime strategies", () => {
       }
       assert.ok(compared >= 12, `expected at least 12 indexed generated models, compared ${compared}`)
     }), 30000)
+  it.effect("matches generic and indexed planning for current and retired invocation generations", () =>
+    Effect.gen(function*() {
+      const Result = { fields: { result: Schema.Number } }
+      const Events = Machine.events({ Restart: {} })
+      const flat = Machine.make({
+        root: Machine.state({ states: { Working: {}, Done: Result } }),
+        events: Events,
+        // Planning never runs the source.
+        effects: { work: Effect.succeed(1) }
+      }).handle({
+        initial: { target: "Working" },
+        states: {
+          Working: {
+            invoke: { src: "work", id: "work", onDone: { target: "Done", data: () => ({ result: 1 }) } },
+            on: { Restart: { reenter: true } }
+          },
+          Done: {}
+        }
+      })
+      const nested = Machine.make({
+        root: Machine.state({ states: { Outer: { states: { Working: {} } }, Done: Result } }),
+        events: Events,
+        // Planning never runs the source.
+        effects: { work: Effect.succeed(1) }
+      }).handle({
+        initial: { target: "Outer" },
+        states: {
+          Outer: {
+            initial: { target: "Outer.Working" },
+            states: {
+              Working: {
+                invoke: { src: "work", id: "work", onDone: { target: "Done", data: () => ({ result: 1 }) } },
+                on: { Restart: { reenter: true } }
+              }
+            }
+          },
+          Done: {}
+        }
+      })
+      for (
+        const { expected, machine, path } of [
+          { machine: flat as any, path: "Working", expected: "indexed-flat" },
+          { machine: nested as any, path: "Outer.Working", expected: "indexed-hierarchical" }
+        ] as const
+      ) {
+        const initial = yield* Machine.planInitial(machine)
+        const active = Configuration.normalizeConfigurationSync(machine, initial.state)
+        const generic = ExecutionPlan.selectExecutionPlanForTesting(machine, "generic")
+        const selected = ExecutionPlan.selectExecutionPlanForTesting(machine, "auto")
+        assert.strictEqual(selected.strategy, expected)
+        for (const current of [true, false]) {
+          const event = InvocationEvent.done(path, "work", { current }, 1)
+          const results = []
+          for (const strategy of [generic, selected]) {
+            const planned = strategy.plan.plan(strategy.plan.fromConfiguration(active), event, true)
+            results.push({
+              next: yield* Machine.encodeSnapshot(machine, strategy.plan.snapshot(planned.next)),
+              microsteps: planned.microsteps.map((step) => ({
+                exitPaths: step.exitPaths,
+                entryPaths: step.entryPaths,
+                changed: step.changed
+              })),
+              done: planned.done
+            })
+          }
+          assert.deepStrictEqual(results[1], results[0], `${expected} ${current ? "current" : "retired"} generation`)
+          assert.strictEqual(results[0]!.microsteps.length, current ? 1 : 0)
+          if (!current) {
+            assert.deepStrictEqual(results[0]!.next, yield* Machine.encodeSnapshot(machine, initial.state))
+          }
+        }
+      }
+    }) as Effect.Effect<void, unknown, any>)
+  it.effect("matches generic and compiled managed runtimes when a stale invocation result is queued", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const results: Array<unknown> = []
+      for (const strategy of ["generic", "compiled"] as const) {
+        const holdEntered = yield* Deferred.make<void>()
+        const releaseHold = yield* Deferred.make<void>()
+        const attempts = [yield* Deferred.make<number>(), yield* Deferred.make<number>()]
+        const started = [yield* Deferred.make<void>(), yield* Deferred.make<void>()]
+        let count = 0
+        const gate: Machine.MachineTarget<void> = {
+          id: "gate",
+          sessionId: "gate-session",
+          send: () =>
+            Deferred.succeed(holdEntered, undefined).pipe(Effect.andThen(Deferred.await(releaseHold)), Effect.asVoid)
+        }
+        const machine = Machine.make({
+          id: "strategy-stale-owner",
+          root: Machine.state({
+            states: { Working: {}, Done: { type: "final", fields: { result: Schema.Number }, output: Schema.Number } }
+          }),
+          events: Machine.events({ Hold: {}, Restart: {} }),
+          effects: {
+            work: Effect.suspend(() => {
+              const n = count++
+              return Deferred.succeed(started[n]!, undefined).pipe(Effect.andThen(Deferred.await(attempts[n]!)))
+            })
+          }
+        }).handle({
+          initial: { target: "Working" },
+          on: { Hold: { stay: true, commands: (_, enqueue) => enqueue.sendTo(gate, undefined) } },
+          states: {
+            Working: {
+              invoke: {
+                src: "work",
+                id: "work",
+                onDone: { target: "Done", data: ({ output }) => ({ result: output }) }
+              },
+              on: { Restart: { target: "Working", reenter: true } }
+            },
+            Done: { output: ({ state }) => state.result }
+          }
+        })
+        const prepared = yield* prepareWithRuntimeStrategy(machine, strategy)
+        const queued = yield* Deferred.make<void>()
+        const observed = yield* prepared.inspection.pipe(
+          Stream.tap((record) =>
+            record._tag === "EventSent" && InvocationEvent.isInvocationEvent(record.event)
+              ? Deferred.succeed(queued, undefined)
+              : Effect.void
+          ),
+          Stream.filter((record) => record._tag === "EventProcessed"),
+          Stream.runCollect,
+          Effect.forkScoped({ startImmediately: true })
+        )
+        const ref = yield* prepared.start
+        yield* Deferred.await(started[0]!)
+        yield* ref.send({ _tag: "Hold" })
+        yield* Deferred.await(holdEntered)
+        yield* ref.send({ _tag: "Restart" })
+        yield* Deferred.succeed(attempts[0]!, 1)
+        yield* Deferred.await(queued)
+        yield* Deferred.succeed(releaseHold, undefined)
+        yield* Deferred.await(started[1]!)
+        yield* Deferred.succeed(attempts[1]!, 2)
+        const output = yield* ref.join
+        const processed = yield* Effect.forEach(
+          Array.from(yield* Fiber.join(observed)),
+          (record) =>
+            record._tag === "EventProcessed"
+              ? Effect.map(
+                (record.after.status === "active" || record.after.status === "done"
+                  ? Machine.encodeSnapshot(machine, record.after.state as never)
+                  : Effect.succeed(record.after.status)) as Effect.Effect<unknown, unknown>,
+                (after) => ({
+                  event: InvocationEvent.isInvocationEvent(record.event)
+                    ? { path: record.event.path, type: record.event.type }
+                    : record.event,
+                  handled: record.handled,
+                  after
+                })
+              )
+              : Effect.die("unexpected record")
+        )
+        results.push({ output, processed })
+      }
+      assert.deepStrictEqual(results[1], results[0])
+      const { output, processed } = results[0] as {
+        output: number
+        processed: ReadonlyArray<{ readonly event: unknown; readonly handled: boolean }>
+      }
+      assert.strictEqual(output, 2)
+      assert.deepStrictEqual(processed.map(({ event, handled }) => [event, handled]), [
+        [{ _tag: "Hold" }, true],
+        [{ _tag: "Restart" }, true],
+        [{ path: "Working", type: "done" }, false],
+        [{ path: "Working", type: "done" }, true]
+      ])
+    }) as Effect.Effect<void, unknown, any>))
 })
