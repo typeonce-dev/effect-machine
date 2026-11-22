@@ -418,7 +418,7 @@ type SelectorProjectionKind =
   | "selectSnapshotChild"
   | "matchesChild"
 
-interface SelectorProjection<Kind extends SelectorProjectionKind, Path extends string> {
+type SelectorProjection<Kind extends SelectorProjectionKind, Path extends string> = {
   readonly [SelectorProjectionTypeId]: {
     readonly kind: Kind
     readonly path: Path
@@ -432,7 +432,7 @@ type EnsureCanEvent<AcceptedEvent, Input> = [Input] extends [AcceptedEvent] ? un
   }
 }
 
-interface CanProjection<Input> {
+type CanProjection<Input> = {
   <
     State extends Machine.Machine.AtomicSnapshot<string, unknown>,
     AcceptedEvent,

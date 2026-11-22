@@ -15,7 +15,7 @@ import * as InvocationDefinition from "./invocationDefinition.js"
 import * as InvocationEvent from "./invocationEvent.js"
 import * as Planner from "./planner.js"
 import * as Runtime from "./runtimeProtocol.js"
-import { ChildMachineLogicTypeId } from "./symbols.js"
+import { type ChildMachineLogicSlot, ChildMachineLogicTypeId } from "./symbols.js"
 
 /** @internal */
 export interface AnyConfig {
@@ -133,7 +133,7 @@ const resolveOne = (
       address: descriptor.id,
       descriptor,
       src: () =>
-        descriptor[ChildMachineLogicTypeId](
+        (descriptor as unknown as ChildMachineLogicSlot)[ChildMachineLogicTypeId](
           "input" in raw ? resolveValue(raw.input, context) : undefined
         ) as Runtime.ProcessLogic<any, any, any, any, any, any>,
       onDone: raw.onDone,
@@ -327,7 +327,7 @@ const startStaticChild = (
     descriptor.id,
     descriptor.id,
     descriptor,
-    descriptor[ChildMachineLogicTypeId],
+    (descriptor as unknown as ChildMachineLogicSlot)[ChildMachineLogicTypeId],
     raw.onDone,
     raw.onFailure,
     raw.onSnapshot,

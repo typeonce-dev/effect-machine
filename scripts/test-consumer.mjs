@@ -1,7 +1,9 @@
 import { spawnSync } from "node:child_process"
 import { cp, mkdir, mkdtemp, readdir, readFile, rm, symlink } from "node:fs/promises"
+import { createRequire } from "node:module"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
+import { findUnnameablePublicNames } from "./public-declarations.mjs"
 
 const repositoryRoot = resolve(import.meta.dirname, "..")
 const root = join(repositoryRoot, "packages", "effect-machine")
@@ -46,15 +48,24 @@ try {
     "dir"
   )
 
-  // tsconfig.declarations.json emits declarations for exported values whose
-  // types come from the package, so they must be nameable through public
-  // entrypoints.
+  // Every name a public declaration refers to must be writable by a consumer,
+  // or TypeScript cannot emit a declaration that expands it.
+  const typescript = createRequire(join(repositoryRoot, "package.json"))("typescript")
+  const unnameable = await findUnnameablePublicNames(typescript, packageDirectory)
+  if (unnameable.length > 0) {
+    throw new Error(`public declarations refer to names no consumer can write:\n${unnameable.join("\n")}`)
+  }
+
+  // tsconfig.declarations.json emits declarations for every fixture, so the
+  // types of their exported values must be nameable through public entrypoints.
   const projects = ["tsconfig.json", "tsconfig.declarations.json"]
-  const declarations = join(consumer, "declarations", "declarations.d.ts")
+  const fixtures = (await readdir(consumer)).filter((file) => file.endsWith(".ts"))
   const assertPublicDeclarations = async () => {
-    const emitted = await readFile(declarations, "utf8")
-    if (emitted.includes("/internal/")) {
-      throw new Error(`consumer declarations reference package internals:\n${emitted}`)
+    for (const fixture of fixtures) {
+      const emitted = await readFile(join(consumer, "declarations", fixture.replace(/\.ts$/, ".d.ts")), "utf8")
+      if (emitted.includes("/internal/")) {
+        throw new Error(`consumer declarations for ${fixture} reference package internals:\n${emitted}`)
+      }
     }
     await rm(join(consumer, "declarations"), { recursive: true, force: true })
   }

@@ -24,6 +24,7 @@ import {
   type InitialTarget as InitialTargetInstruction,
   isSnapshot,
   isTarget,
+  type TargetSnapshotSlot,
   TargetSnapshotTypeId
 } from "./topology.js"
 
@@ -920,7 +921,7 @@ export const normalizeTargetConfigurationEffect = <const States extends Machine.
   target: Machine.Snapshot<States> | Machine.Target<States, Machine.StateIdentifier<States>>
 ): Effect.Effect<ActiveConfiguration, MachineSchemaDecodeError> => {
   if (isTarget(target)) {
-    const snapshot = target[TargetSnapshotTypeId]
+    const snapshot = (target as TargetSnapshotSlot)[TargetSnapshotTypeId]
     if (snapshot !== undefined) {
       if (String(snapshot.path) !== String(target.path)) {
         throw new Error(`Machine expected target snapshot path to be "${target.path}"`)
@@ -1102,7 +1103,7 @@ export const normalizeTargetConfigurationSync = (
   target: unknown
 ): ActiveConfiguration => {
   if (isTarget(target)) {
-    const snapshot = target[TargetSnapshotTypeId]
+    const snapshot = (target as TargetSnapshotSlot)[TargetSnapshotTypeId]
     if (snapshot !== undefined) {
       if (String(snapshot.path) !== String(target.path)) {
         throw new Error(`Machine expected target snapshot path to be "${target.path}"`)
