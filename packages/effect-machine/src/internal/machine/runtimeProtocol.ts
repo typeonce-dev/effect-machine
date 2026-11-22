@@ -519,6 +519,25 @@ interface ProcessSpawn<OwnerEvent = unknown> {
   >
 }
 
+/**
+ * Service required by operations that act on the machine executing them,
+ * such as `sendTo`, `stopChild`, and `spawn`.
+ *
+ * **When to use**
+ *
+ * Name this requirement when annotating a reusable helper built from those
+ * operations, or when exporting a value whose inferred type includes it.
+ *
+ * **Details**
+ *
+ * A running machine provides this service to the effects it executes, so it
+ * never appears in the requirements of the machine itself. Only the type is
+ * public: the service cannot be constructed or provided outside a running
+ * machine.
+ *
+ * @category services
+ * @since 0.47.0
+ */
 export class MachineRuntime extends Context.Service<MachineRuntime, ProcessScope<any>>()(
   "effect/Machine/MachineRuntime"
 ) {}

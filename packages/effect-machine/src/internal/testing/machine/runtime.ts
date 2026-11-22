@@ -623,7 +623,7 @@ export interface CausalRuntimeTranscript<
  * begun but before a complete checked record exists.
  *
  * @category models
- * @since 0.4.0
+ * @since 0.47.0
  */
 export interface CausalRuntimeCommandAttempt<
   M extends AnyMachine,

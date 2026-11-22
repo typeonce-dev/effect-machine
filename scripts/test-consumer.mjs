@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process"
-import { cp, mkdir, mkdtemp, readdir, rm, symlink } from "node:fs/promises"
+import { cp, mkdir, mkdtemp, readdir, readFile, rm, symlink } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
 
@@ -46,26 +46,45 @@ try {
     "dir"
   )
 
-  run(
-    process.execPath,
-    [join(repositoryRoot, "node_modules", "typescript", "bin", "tsc"), "-p", join(consumer, "tsconfig.json")],
-    { cwd: consumer }
-  )
-  // The consumer must also compile with the native TypeScript 7 compiler pinned
-  // by tooling/typescript-7. TSGO_BIN selects another native compiler binary.
-  if (process.env.TSGO_BIN !== undefined) {
-    run(process.env.TSGO_BIN, ["-p", join(consumer, "tsconfig.json")], { cwd: consumer })
-  } else {
+  // tsconfig.declarations.json emits declarations for exported values whose
+  // types come from the package, so they must be nameable through public
+  // entrypoints.
+  const projects = ["tsconfig.json", "tsconfig.declarations.json"]
+  const declarations = join(consumer, "declarations", "declarations.d.ts")
+  const assertPublicDeclarations = async () => {
+    const emitted = await readFile(declarations, "utf8")
+    if (emitted.includes("/internal/")) {
+      throw new Error(`consumer declarations reference package internals:\n${emitted}`)
+    }
+    await rm(join(consumer, "declarations"), { recursive: true, force: true })
+  }
+
+  for (const project of projects) {
     run(
       process.execPath,
-      [
-        join(repositoryRoot, "tooling", "typescript-7", "node_modules", "typescript", "bin", "tsc"),
-        "-p",
-        join(consumer, "tsconfig.json")
-      ],
+      [join(repositoryRoot, "node_modules", "typescript", "bin", "tsc"), "-p", join(consumer, project)],
       { cwd: consumer }
     )
   }
+  await assertPublicDeclarations()
+  // The consumer must also compile with the native TypeScript 7 compiler pinned
+  // by tooling/typescript-7. TSGO_BIN selects another native compiler binary.
+  for (const project of projects) {
+    if (process.env.TSGO_BIN !== undefined) {
+      run(process.env.TSGO_BIN, ["-p", join(consumer, project)], { cwd: consumer })
+    } else {
+      run(
+        process.execPath,
+        [
+          join(repositoryRoot, "tooling", "typescript-7", "node_modules", "typescript", "bin", "tsc"),
+          "-p",
+          join(consumer, project)
+        ],
+        { cwd: consumer }
+      )
+    }
+  }
+  await assertPublicDeclarations()
   run(process.execPath, [join(consumer, "runtime.mjs")], { cwd: consumer })
 
   console.log(
