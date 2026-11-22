@@ -6274,41 +6274,10 @@ export declare namespace Machine {
         : never)
   }[Extract<keyof Config & keyof Nodes, string>]
 
-  type HandleTreeResult<
-    AllStates extends StateSchemas,
-    Events extends ReadonlyArray<TaggedSchema>,
-    Emits extends ReadonlyArray<TaggedSchema>,
-    Input extends Schema.Top,
-    UnhandledStates extends StateIdentifier<AllStates>,
-    E,
-    R,
-    InitialE,
-    InitialR,
-    FinalStates extends StateIdentifier<AllStates>,
-    Output,
-    OutputStates extends StateIdentifier<AllStates>,
-    InputEvents extends ReadonlyArray<TaggedSchema>,
-    ParentEvents extends ReadonlyArray<TaggedSchema>,
-    Config
-  > = Machine<
-    AllStates,
-    Events,
-    Input,
-    Exclude<UnhandledStates, HandlerTreeEvidence<AllStates, Config>["stateId"]>,
-    E | HandlerTreeEvidence<AllStates, Config>["error"],
-    ExcludeCompatibleRuntime<
-      R | HandlerTreeEvidence<AllStates, Config>["services"],
-      EventOf<Events>,
-      EmittedEventOf<Emits>
-    >,
-    InitialE,
-    InitialR,
-    FinalStates,
-    Output,
-    Emits,
-    OutputStates | Extract<HandlerTreeEvidence<AllStates, Config>["outputState"], StateIdentifier<AllStates>>,
-    InputEvents,
-    ParentEvents
+  // Evaluated once per handled config and read through each machine channel.
+  type HandleEvidence<S extends StateSchemas, C, R> = HandlerTreeEvidence<
+    S,
+    { readonly "": NormalizeObjectConfig<C, R> }
   >
 
   type ObjectCompoundPath<S extends StateSchemas> = {
@@ -7607,6 +7576,8 @@ export declare namespace Machine {
     Pa extends ReadonlyArray<TaggedSchema>,
     R
   > {
+    // Returns Machine itself: an alias would keep the handler config as a type
+    // argument, so exported declarations would print every handler's context.
     <const C>(
       config:
         & C
@@ -7631,22 +7602,25 @@ export declare namespace Machine {
             StateIdentifier<S>
           >
         >
-    ): HandleTreeResult<
+    ): Machine<
       S,
       Ev,
-      Em,
       I,
-      StateIdentifier<S>,
-      never,
-      never,
+      Exclude<StateIdentifier<S>, HandleEvidence<S, C, R>["stateId"]>,
+      HandleEvidence<S, C, R>["error"],
+      ExcludeCompatibleRuntime<
+        HandleEvidence<S, C, R>["services"],
+        EventOf<Ev>,
+        EmittedEventOf<Em>
+      >,
       IE,
       IR,
       Final,
       Out,
-      never,
+      Em,
+      Extract<HandleEvidence<S, C, R>["outputState"], StateIdentifier<S>>,
       In,
-      Pa,
-      { readonly "": NormalizeObjectConfig<C, R> }
+      Pa
     >
   }
 
