@@ -136,7 +136,7 @@
         {
           "owner": "make",
           "title": "Machine definition configuration",
-          "description": "Protocols, root topology, registered sources, and named branches accepted by Machine.make.",
+          "description": "Protocols, root topology, startup input, and registered sources accepted by Machine.make.",
           "roots": [
             {
               "declaration": "make",

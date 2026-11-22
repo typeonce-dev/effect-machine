@@ -11,8 +11,9 @@ patterns.
 Run the recommended rules from
 `@typeonce/oxlint-plugin-effect-machine` before
 the manual review. They catch provable duplicate invocation identities,
-asynchronous work, browser access, nondeterminism, redundant resolvers, and
-conditional `none` fallbacks in direct same-module machine definitions.
+asynchronous work, browser access, nondeterminism, conditional `stay`
+fallbacks, and one-use intermediate definitions in direct same-module machine
+definitions.
 Continue with this review for cross-module ownership and architectural
 questions that syntax alone cannot answer.
 
@@ -37,10 +38,11 @@ Use `{ target: "Running", data: ({ event }) => ({ count: event.count }) }`
 when the destination needs data. The checker rejects missing required fields.
 Use `decoded` for values already decoded by their schema.
 
-Reserve named branch groups and `resolve` for conditional outcomes, commands,
-or nested construction. The group lives in `make`; its resolver selects only
-constructors derived from those declarations. Avoid an extra branch group for
-an ordinary transition. Use `reenter: true` when the source must restart.
+Reserve `branches` and `resolve` for conditional outcomes or nested
+construction. List them on the transition itself; the resolver can select only
+the entries listed next to it. Use `commands` to enqueue work on an ordinary
+transition instead of adding a resolver. Use `reenter: true` when the source
+must restart.
 A `{ stay: true }` branch accepts its event, so `Machine.can` and
 `AtomMachine.can` return `true` when a resolver selects it. Review check: for
 every event that enables or disables a control, refuse it with `guard` or with

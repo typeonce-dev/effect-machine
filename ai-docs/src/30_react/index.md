@@ -20,7 +20,7 @@ src/
     └── auth-machine.ts           # States, events, and behavior
 ```
 
-`machine.ts` owns the workflow. A Context module only creates and distributes
+`auth-machine.ts` owns the workflow. A Context module only creates and distributes
 the machine atom. State-slot components decide which state paths they render.
 
 Bind service-backed machines once at the application runtime:
