@@ -4990,9 +4990,16 @@ export declare namespace Machine {
   /**
    * Fallback implementation for one direct history pseudo-state.
    *
+   * **Details**
+   *
+   * `default` runs only when the history state is entered before its owner has
+   * recorded a configuration, and returns the complete configuration to enter.
+   *
    * @inline
+   * @category models
+   * @since 0.23.0
    */
-  interface HistoryDefaultEntry<
+  export interface HistoryDefaultEntry<
     States extends StateSchemas,
     Events extends ReadonlyArray<TaggedSchema>,
     Emits extends ReadonlyArray<TaggedSchema>,
@@ -7015,6 +7022,9 @@ export declare namespace Machine {
       | ChoiceStateConfig<States, Events, Emits, ChoiceIdentifier<States>>
     >
   >
+  // An explicit export makes this ambient namespace export only the members marked `export`; the rest stay private.
+  // oxlint-disable-next-line typescript/no-useless-empty-export -- the rule assumes module scope.
+  export {}
 }
 
 type StateSource = State<any> | Machine.Any
