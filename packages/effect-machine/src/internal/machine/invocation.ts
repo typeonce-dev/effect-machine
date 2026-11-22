@@ -47,7 +47,8 @@ const oneShot = (
 const streamLogic = (
   stream: Stream.Stream<any, any, any>,
   path: string,
-  id: string
+  id: string,
+  generation: InvocationEvent.Generation
 ): Runtime.ProcessLogic<void, unknown, unknown, unknown, void> => ({
   initial: () => Effect.void,
   run: ({ parent }) => {
@@ -58,7 +59,7 @@ const streamLogic = (
     return Stream.runForEach(
       stream,
       (element) =>
-        send(InvocationEvent.element(path, id, element)).pipe(
+        send(InvocationEvent.element(path, id, generation, element)).pipe(
           Effect.asVoid,
           Effect.catchCause(() => Effect.interrupt)
         )
@@ -81,7 +82,8 @@ const makeChildOwner = (scope: Runtime.ProcessScope<any>): ChildOwner<any> => ({
 const resolveOne = (
   raw: InvocationDefinition.InvocationDefinition,
   context: Omit<Machine.InvokeContext<any, any, any, any>, "root">,
-  path: string
+  path: string,
+  generation: InvocationEvent.Generation
 ): AnyConfig => {
   if ("effect" in raw) {
     return {
@@ -108,7 +110,7 @@ const resolveOne = (
     return {
       id,
       sourceName: raw.sourceName,
-      src: () => streamLogic(raw.stream(context), path, id),
+      src: () => streamLogic(raw.stream(context), path, id, generation),
       onDone: raw.onDone,
       onFailure: raw.onFailure,
       activityKind: "Stream"
@@ -175,6 +177,7 @@ const startResolved = (
   scope: Runtime.ProcessScope<any>,
   ownedChildren: Runtime.OwnedChildRuntime,
   path: string,
+  generation: InvocationEvent.Generation,
   invokeId: string,
   childId: string,
   descriptor: ChildMachine.Any | undefined,
@@ -240,7 +243,7 @@ const startResolved = (
               }
               return sendLifecycle(
                 scope,
-                InvocationEvent.done(path, invokeId, outcome.output),
+                InvocationEvent.done(path, invokeId, generation, outcome.output),
                 activityKind === undefined ? undefined : activitySessionId
               )
             }
@@ -251,7 +254,7 @@ const startResolved = (
             ) {
               return sendLifecycle(
                 scope,
-                InvocationEvent.failure(path, invokeId, outcome.error),
+                InvocationEvent.failure(path, invokeId, generation, outcome.error),
                 activityKind === undefined ? undefined : activitySessionId
               )
             }
@@ -261,7 +264,7 @@ const startResolved = (
       ...(onSnapshot === undefined ? undefined : {
         onSnapshot: (isCurrent: () => boolean, snapshot: any) =>
           isCurrent()
-            ? sendLifecycle(scope, InvocationEvent.snapshot(path, invokeId, snapshot))
+            ? sendLifecycle(scope, InvocationEvent.snapshot(path, invokeId, generation, snapshot))
             : Effect.void
       })
     })
@@ -280,6 +283,7 @@ const start = (
   scope: Runtime.ProcessScope<any>,
   ownedChildren: Runtime.OwnedChildRuntime,
   path: string,
+  generation: InvocationEvent.Generation,
   config: AnyConfig
 ): Effect.Effect<void, any, any> => {
   const invokeId = String(config.id)
@@ -289,6 +293,7 @@ const start = (
     scope,
     ownedChildren,
     path,
+    generation,
     invokeId,
     config.address === undefined ? makeChildId(path, invokeId) : String(config.address),
     config.descriptor,
@@ -305,6 +310,7 @@ const startStaticChild = (
   scope: Runtime.ProcessScope<any>,
   ownedChildren: Runtime.OwnedChildRuntime,
   path: string,
+  generation: InvocationEvent.Generation,
   raw: Extract<InvocationDefinition.InvocationDefinition, { readonly child: ChildMachine.Any }>
 ): Effect.Effect<void, any, any> => {
   // A zero-input child has no entry-context dependency. Reuse the descriptor's
@@ -317,6 +323,7 @@ const startStaticChild = (
     scope,
     ownedChildren,
     path,
+    generation,
     descriptor.id,
     descriptor.id,
     descriptor,
@@ -346,6 +353,11 @@ export const startAll = (
   const effects = Planner.sortEntryPaths(machine, paths)
     .filter((path) => configuration.active.has(path))
     .flatMap((path) => {
+      const definitions = InvocationDefinition.definitions(Configuration.getStateConfigByPath(machine, path)?.invoke)
+      if (definitions.length === 0) return []
+      // Every invocation started by this entry shares one generation, which
+      // its outcomes carry until the state exits.
+      const generation = ownedChildren.beginGeneration(path)
       const context = {
         ...(Configuration.getMachineReferences(configuration) ?? { self: scope.self, parent: scope.parent }),
         children,
@@ -354,12 +366,10 @@ export const startAll = (
         ancestors: Configuration.getParentValues(machine, configuration, path),
         event
       }
-      return InvocationDefinition.definitions(Configuration.getStateConfigByPath(machine, path)?.invoke).map((
-        definition
-      ) =>
+      return definitions.map((definition) =>
         "child" in definition && !("input" in definition)
-          ? startStaticChild(scope, ownedChildren, path, definition)
-          : start(scope, ownedChildren, path, resolveOne(definition, context, path))
+          ? startStaticChild(scope, ownedChildren, path, generation, definition)
+          : start(scope, ownedChildren, path, generation, resolveOne(definition, context, path, generation))
       )
     })
   return effects.length === 0 ? undefined : runSequentialDiscard(effects)

@@ -797,6 +797,18 @@ export const resumeWithRuntimeStrategyForTesting = (
     machine.id === undefined ? undefined : { id: machine.id }
   )
 
+/** @internal Test-only runtime strategy selection for a prepared resumed machine. */
+export const prepareResumedWithRuntimeStrategyForTesting = (
+  machine: Machine.Any,
+  snapshot: Machine.Snapshot<any>,
+  strategy: internalRuntime.ProcessRuntimeStrategy
+): Effect.Effect<internalRuntimeProtocol.PreparedProcess<any, any, any, any, any, any, any>, any, any> =>
+  internalRuntime.prepareProcessWithStrategyForTesting(
+    toResumedProcessLogic(machine, snapshot),
+    strategy,
+    machine.id === undefined ? undefined : { id: machine.id }
+  )
+
 // The public `Machine` module owns the typed start, prepare, and resume
 // signatures. These implementations are the erased boundary they specialize.
 export const start = (

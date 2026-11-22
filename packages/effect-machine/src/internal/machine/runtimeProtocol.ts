@@ -34,6 +34,7 @@ import {
 } from "./childRegistry.js"
 import { ChildAlreadyExistsError, StoppedError } from "./errors.js"
 import * as InspectionRuntime from "./inspectionRuntime.js"
+import type * as InvocationEvent from "./invocationEvent.js"
 import { ChildMachineLogicTypeId } from "./symbols.js"
 
 /** @internal */
@@ -801,6 +802,12 @@ export interface OwnedChildRuntime {
     makeLogic: () => ProcessLogic<any, any, any, any, any, any>,
     options: OwnedChildSpawnOptions
   ) => Effect.Effect<void, any, any>
+  /**
+   * Begins the generation of an entered invoking state and retires the one it
+   * replaces. The generation stays current after its children finish and is
+   * retired only when the state exits, by `stopPaths` or `stopAll`.
+   */
+  readonly beginGeneration: (path: string) => InvocationEvent.Generation
   readonly stopAll: () => Effect.Effect<void>
   readonly stopPaths: (paths: ReadonlyArray<string>) => Effect.Effect<void> | undefined
 }
@@ -826,6 +833,13 @@ export interface ChildRuntime {
 
 class OwnedChildRuntimeImpl implements OwnedChildRuntime {
   private scopedServices: Context.Context<any> | undefined
+  // The current generation of each active invoking state path. Most
+  // configurations have one such path, held inline; further paths use the map.
+  // Entries are removed when their state exits, so neither outgrows the active
+  // configuration.
+  private generationPath: string | undefined
+  private generation: InvocationEvent.Generation | undefined
+  private generations: Map<string, InvocationEvent.Generation> | undefined
 
   constructor(
     private readonly registry: ChildRegistry,
@@ -943,8 +957,46 @@ class OwnedChildRuntimeImpl implements OwnedChildRuntime {
     })
   }
 
+  beginGeneration(path: string): InvocationEvent.Generation {
+    this.retireGeneration(path)
+    const generation: InvocationEvent.Generation = { current: true }
+    if (this.generationPath === undefined) {
+      this.generationPath = path
+      this.generation = generation
+    } else {
+      ;(this.generations ??= new Map()).set(path, generation)
+    }
+    return generation
+  }
+
+  private retireGeneration(path: string): void {
+    const inline = this.generation
+    if (inline !== undefined && this.generationPath === path) {
+      inline.current = false
+      this.generationPath = undefined
+      this.generation = undefined
+      return
+    }
+    const generations = this.generations
+    const generation = generations?.get(path)
+    if (generations !== undefined && generation !== undefined) {
+      generation.current = false
+      generations.delete(path)
+    }
+  }
+
   stopAll(): Effect.Effect<void> {
     return Effect.suspend(() => {
+      if (this.generation !== undefined) {
+        this.generation.current = false
+        this.generationPath = undefined
+        this.generation = undefined
+      }
+      const generations = this.generations
+      if (generations !== undefined && generations.size > 0) {
+        for (const generation of generations.values()) generation.current = false
+        generations.clear()
+      }
       const effects: Array<Effect.Effect<void>> = []
       for (const entry of this.registry.children.values()) {
         if (entry.ownerActive) effects.push(this.stopEntry(entry))
@@ -959,6 +1011,9 @@ class OwnedChildRuntimeImpl implements OwnedChildRuntime {
 
   stopPaths(paths: ReadonlyArray<string>): Effect.Effect<void> | undefined {
     if (paths.length === 0) return undefined
+    if (this.generation !== undefined || (this.generations !== undefined && this.generations.size > 0)) {
+      for (const path of paths) this.retireGeneration(path)
+    }
     const pathSet = new Set(paths)
     const effects: Array<Effect.Effect<void>> = []
     for (const entry of this.registry.children.values()) {
@@ -1039,6 +1094,8 @@ export const childlessRuntime: ChildRuntime = {
   stop: () => Effect.void,
   owned: {
     spawn: () => Effect.die(new Error("Childless machine logic cannot spawn an owned process")),
+    // Unreachable for childless logic; `spawn` reports the defect as a failure.
+    beginGeneration: () => ({ current: true }),
     stopAll: () => Effect.void,
     stopPaths: () => undefined
   }

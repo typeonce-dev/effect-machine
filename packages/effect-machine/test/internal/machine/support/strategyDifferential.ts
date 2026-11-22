@@ -130,3 +130,15 @@ export const resumeWithRuntimeStrategy = (
   strategy: "generic" | "compiled"
 ): Effect.Effect<Machine.MachineRef<any, any, any, any>, unknown> =>
   Process.resumeWithRuntimeStrategyForTesting(machine, snapshot, strategy) as any
+
+export const prepareResumedWithRuntimeStrategy = (
+  machine: Machine.Machine.Any,
+  snapshot: Machine.Machine.Snapshot<any>,
+  strategy: "generic" | "compiled"
+): Effect.Effect<
+  {
+    readonly inspection: import("effect/Stream").Stream<Machine.Inspection.Event>
+    readonly start: Effect.Effect<Machine.MachineRef<any, any, any, any>, unknown>
+  },
+  unknown
+> => Process.prepareResumedWithRuntimeStrategyForTesting(machine, snapshot, strategy) as any

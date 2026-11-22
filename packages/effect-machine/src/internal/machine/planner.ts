@@ -1057,7 +1057,10 @@ const selectInvocationTransition = <
   configuration: ActiveConfiguration,
   event: InvocationEvent.InvocationEvent
 ): ReadonlyArray<SelectedTransition<States, E, R, any>> => {
-  if (!configuration.active.has(event.path)) return []
+  // An outcome belongs to the activation of its owner that started it. One
+  // queued before that owner exited is discarded, even after the same path and
+  // id are entered again.
+  if (!InvocationEvent.isCurrent(event) || !configuration.active.has(event.path)) return []
   const config = toImpl(machine).handlers[event.path]
   const invoke = InvocationDefinition.definitions(config?.invoke).find((definition) => {
     const id = "child" in definition ? definition.child?.id : definition.id
