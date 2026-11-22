@@ -1547,8 +1547,8 @@ export const assertUnreachable: <M extends AnyMachine, Key extends ExplorationKe
  * Checks a real planner trace against the independent finite statechart model
  * interpreter.
  *
- * The oracle does not import the machine compiler, planner, snapshot helpers,
- * or target builders. It compares semantic projections of the public trace
+ * The oracle does not import the machine compiler, planner, or snapshot
+ * helpers. It compares semantic projections of the public trace
  * and accumulates every disagreement in one structured error.
  *
  * @category verification
@@ -2175,9 +2175,10 @@ export type AnalysisFinding =
  *
  * **Details**
  *
- * The analysis is conservative. A branch or history target can construct any of
- * its descendants, so that whole subtree counts as reachable, and a state is
- * only reported when no declaration could enter it.
+ * The analysis is conservative. A target can enter any descendant of the
+ * state it names, and a history target any descendant of its owner, so that
+ * whole subtree counts as reachable, and a state is only reported when no
+ * declaration could enter it.
  *
  * **Example** (Finding a state with no incoming transition)
  *

@@ -127,13 +127,17 @@ describe("Machine", () => {
       }
     }
   })
-  type ChildBuilder<Method> = Method extends {
-    readonly decoded: (value: any, build: (builder: infer Builder) => any) => any
-  } ? Builder :
-    never
   type IsCallable<A> = A extends (...args: ReadonlyArray<any>) => any ? true : false
-  const UpInitial = null as unknown as Machine.Machine.FullTargetBuilder<typeof UpStates.node.states>["up"]
-  const DownInitial = null as unknown as Machine.Machine.FullTargetBuilder<typeof UpStates.node.states>["down"]
+  const UpSnapshot = null as unknown as Machine.Machine.SnapshotByIdentifierWithPath<
+    typeof UpStates.node.states,
+    "up",
+    "up"
+  >
+  const DownSnapshot = null as unknown as Machine.Machine.SnapshotByIdentifierWithPath<
+    typeof UpStates.node.states,
+    "down",
+    "down"
+  >
   type SignInContext = Machine.Machine.HandlerContext<
     {
       readonly "": typeof UpStates.node
@@ -359,11 +363,7 @@ describe("Machine", () => {
     >().type.toBe<Auth | undefined>()
   })
   it("states selects state values and snapshots with type-safe paths", () => {
-    const childSnapshot = UpInitial.decoded(new Up({ id: "up-1" }), (up) =>
-      up
-        .auth.decoded(new Auth({ userId: "guest" }), (auth) => auth.signedOut.decoded(new SignedOut({})))
-        .sync.decoded(new Sync({ enabled: true }), (sync) => sync.idle.decoded(new SyncIdle({}))))
-    const snapshot = { path: "" as const, value: undefined, state: childSnapshot }
+    const snapshot = { path: "" as const, value: undefined, state: UpSnapshot }
     expect(UpStates.get(snapshot, "up")).type.toBe<Option.Option<Up>>()
     expect(UpStates.get(snapshot, "up.auth.signedOut")).type.toBe<Option.Option<SignedOut>>()
     expect(UpStates.getWithParents(snapshot, "up.auth.signedOut")).type.toBe<
@@ -526,7 +526,7 @@ describe("Machine", () => {
     const encoded = Machine.encodeSnapshot(machine, {
       path: "" as const,
       value: undefined,
-      state: DownInitial.decoded(new Down({}))
+      state: DownSnapshot
     })
     expect<Effect.Success<typeof encoded>>().type.toBe<Machine.Machine.EncodedSnapshot>()
     expect<Effect.Error<typeof encoded>>().type.toBe<Machine.MachineSchemaEncodeError>()
@@ -2046,27 +2046,27 @@ describe("Machine", () => {
     expect(Machine.plan).type.toBeCallableWith(machine, {
       path: "" as const,
       value: undefined,
-      state: DownInitial.decoded(new Down({}))
+      state: DownSnapshot
     }, new SignIn({ userId: "user-1" }))
     expect(Machine.plan).type.not.toBeCallableWith(machine, {
       path: "" as const,
       value: undefined,
-      state: DownInitial.decoded(new Down({}))
+      state: DownSnapshot
     }, new SignInCompleted({ userId: "user-1" }))
     expect(Machine.can).type.toBeCallableWith(machine, {
       path: "" as const,
       value: undefined,
-      state: DownInitial.decoded(new Down({}))
+      state: DownSnapshot
     }, new SignInCompleted({ userId: "user-1" }))
     expect(Machine.can(machine)).type.toBeCallableWith({
       path: "" as const,
       value: undefined,
-      state: DownInitial.decoded(new Down({}))
+      state: DownSnapshot
     }, new SignInCompleted({ userId: "user-1" }))
     expect(Machine.can(machine)).type.not.toBeCallableWith({
       path: "" as const,
       value: undefined,
-      state: DownInitial.decoded(new Down({}))
+      state: DownSnapshot
     }, { _tag: "Undeclared" })
     const publicEvents = Machine.eventsFromSchemas(SignIn)
     const overlappingInternalEvents = Machine.internalEventsFromSchemas(SignIn)
@@ -2715,7 +2715,7 @@ describe("Machine", () => {
     })
     expect(Machine.plan).type.toBeCallableWith(
       machine,
-      { path: "" as const, value: undefined, state: DownInitial.decoded(new Down({})) },
+      { path: "" as const, value: undefined, state: DownSnapshot },
       new SignIn({
         userId: "user-1"
       })
@@ -2723,7 +2723,7 @@ describe("Machine", () => {
     const planned = Machine.plan(machine, {
       path: "" as const,
       value: undefined,
-      state: DownInitial.decoded(new Down({}))
+      state: DownSnapshot
     }, new SignIn({ userId: "user-1" }))
     expect<Effect.Error<typeof planned>>().type.toBe<
       Machine.InfiniteTransitionError | Machine.MachineSchemaDecodeError
@@ -2731,16 +2731,16 @@ describe("Machine", () => {
     expect(Machine.enabled).type.toBeCallableWith(machine, {
       path: "" as const,
       value: undefined,
-      state: DownInitial.decoded(new Down({}))
+      state: DownSnapshot
     })
     expect(Machine.isFinal).type.toBeCallableWith(machine, {
       path: "" as const,
       value: undefined,
-      state: DownInitial.decoded(new Down({}))
+      state: DownSnapshot
     })
     const can = Machine.can(
       machine,
-      { path: "" as const, value: undefined, state: DownInitial.decoded(new Down({})) },
+      { path: "" as const, value: undefined, state: DownSnapshot },
       new SignIn({ userId: "user-1" })
     )
     const canMachine = Machine.can(machine)
@@ -2749,7 +2749,7 @@ describe("Machine", () => {
     expect(canMachine).type.toBeCallableWith({
       path: "" as const,
       value: undefined,
-      state: DownInitial.decoded(new Down({}))
+      state: DownSnapshot
     }, new SignIn({ userId: "user-1" }))
     expect(Machine.plan).type.not.toBeCallableWith(machine, new Down({}), new SignIn({ userId: "user-1" }))
     expect(Machine.can).type.not.toBeCallableWith(machine, new Down({}), new SignIn({ userId: "user-1" }))
@@ -3506,10 +3506,7 @@ describe("Machine", () => {
     const planned = Machine.plan(machine, {
       path: "" as const,
       value: undefined,
-      state: UpInitial.decoded(new Up({ id: "up-1" }), (up) =>
-        up
-          .auth.decoded(new Auth({ userId: "user-1" }), (auth) => auth.signedOut.decoded(new SignedOut({})))
-          .sync.decoded(new Sync({ enabled: true }), (sync) => sync.idle.decoded(new SyncIdle({}))))
+      state: UpSnapshot
     }, new SignIn({ userId: "user-1" }))
     expect<Effect.Services<typeof planned>>().type.toBe<never>()
   })
@@ -4256,665 +4253,6 @@ describe("Machine", () => {
         }
       }
     })
-  })
-  it("initial builder constructs typed initial snapshots", () => {
-    const snapshot = UpInitial.decoded(new Up({ id: "up-1" }), (up) =>
-      up
-        .auth.decoded(new Auth({ userId: "guest" }), (auth) => auth.signedOut.decoded(new SignedOut({})))
-        .sync.decoded(new Sync({ enabled: true }), (sync) => sync.idle.decoded(new SyncIdle({}))))
-    expect(snapshot).type.toBeAssignableTo<
-      Machine.Machine.SnapshotByIdentifier<{
-        readonly "": typeof UpStates.node
-      }, "up">
-    >()
-    expect(snapshot.path).type.toBe<"up">()
-    expect(snapshot.value).type.toBe<Up>()
-    expect(snapshot.states.auth.value).type.toBe<Auth>()
-    expect(snapshot.states.auth.state.path).type.toBe<"up.auth.signedOut" | "up.auth.signedIn">()
-    expect(snapshot.states.sync.value).type.toBe<Sync>()
-    expect(snapshot.states.sync.state.path).type.toBe<"up.sync.idle" | "up.sync.syncing">()
-  })
-  it("initial builder rejects incomplete parallel callbacks", () => {
-    expect(UpInitial.decoded).type.not.toBeCallableWith(
-      new Up({ id: "up-1" }),
-      (up: ChildBuilder<typeof UpInitial>) =>
-        up.auth.decoded(new Auth({ userId: "guest" }), (auth) => auth.signedOut.decoded(new SignedOut({})))
-    )
-  })
-  it("initial builder exposes only the declared compound initial child", () => {
-    const up = null as unknown as ChildBuilder<typeof UpInitial>
-    const auth = null as unknown as ChildBuilder<typeof up.auth>
-    expect(auth.signedOut.decoded).type.toBeCallableWith(new SignedOut({}))
-    expect(auth).type.toHaveProperty("signedIn")
-  })
-  it("initial builder checks values at parent and leaf nodes", () => {
-    const up = null as unknown as ChildBuilder<typeof UpInitial>
-    const sync = null as unknown as ChildBuilder<typeof up.sync>
-    expect(DownInitial.decoded).type.not.toBeCallableWith(new Up({ id: "up-1" }))
-    expect(UpInitial.decoded).type.not.toBeCallableWith(
-      new Auth({ userId: "guest" }),
-      (up: ChildBuilder<typeof UpInitial>) =>
-        up
-          .auth.decoded(new Auth({ userId: "guest" }), (auth) => auth.signedOut.decoded(new SignedOut({})))
-          .sync.decoded(new Sync({ enabled: true }), (sync) => sync.idle.decoded(new SyncIdle({})))
-    )
-    expect(up.auth.decoded).type.not.toBeCallableWith(
-      new Up({ id: "up-1" }),
-      (auth: ChildBuilder<typeof up.auth>) => auth.signedOut.decoded(new SignedOut({}))
-    )
-    expect(sync.idle.decoded).type.not.toBeCallableWith(new Syncing({ requestId: "sync-1" }))
-  })
-  it("initial builder removes parallel region methods after they are called", () => {
-    const up = null as unknown as ChildBuilder<typeof UpInitial>
-    const afterAuth = up.auth.decoded(
-      new Auth({ userId: "guest" }),
-      (auth) => auth.signedOut.decoded(new SignedOut({}))
-    )
-    const complete = afterAuth.sync.decoded(new Sync({ enabled: true }), (sync) => sync.idle.decoded(new SyncIdle({})))
-    expect(afterAuth).type.not.toHaveProperty("auth")
-    expect(afterAuth).type.toHaveProperty("sync")
-    expect(complete).type.not.toHaveProperty("sync")
-    expect(complete).type.not.toHaveProperty("done")
-  })
-  it("internal target constructors: target.full constructs typed full snapshots", () => {
-    const context = null as unknown as {
-      readonly target: Machine.Machine.TargetBuilder<{
-        readonly "": typeof UpStates.node
-      }, "down">
-    }
-    const full = null as unknown as Machine.Machine.FullTargetBuilder<typeof UpStates.node.states>
-    const snapshot = full.up.decoded(new Up({ id: "up-1" }), (up) =>
-      up
-        .auth.decoded(
-          new Auth({ userId: "guest" }),
-          (auth) => auth.signedIn.decoded(new SignedIn({ userId: "user-1" }))
-        )
-        .sync.decoded(
-          new Sync({ enabled: true }),
-          (sync) => sync.syncing.decoded(new Syncing({ requestId: "sync-1" }))
-        ))
-    expect(snapshot).type.toBeAssignableTo<
-      Machine.Machine.SnapshotByIdentifier<{
-        readonly "": typeof UpStates.node
-      }, "up">
-    >()
-    expect(snapshot.path).type.toBe<"up">()
-    expect(snapshot.states.auth.state.path).type.toBe<"up.auth.signedOut" | "up.auth.signedIn">()
-    expect(snapshot.states.sync.state.path).type.toBe<"up.sync.idle" | "up.sync.syncing">()
-  })
-  it("state builders construct from exact schema make input", () => {
-    const initial = UpInitial.from({ id: "up-1" }, (up) =>
-      up
-        .auth.from({ userId: "guest" }, (auth) => auth.signedOut.from({}))
-        .sync.from({ enabled: true }, (sync) => sync.idle.from({})))
-    const context = null as unknown as {
-      readonly target: Machine.Machine.TargetBuilder<{
-        readonly "": typeof UpStates.node
-      }, "up.auth.signedOut">
-    }
-    const local = context.target.local.signedIn.from({ userId: "user-1" })
-    const full = context.target.branch[""].down.from({})
-    const localWith = context.target.local.with.from(
-      { userId: "user-1" },
-      (auth) => auth.signedIn.from({ userId: "user-1" })
-    )
-    const branch = context.target.branch[""].up.from(
-      { id: "up-2" },
-      (up) => up.auth.from({ userId: "user-1" }, (auth) => auth.signedIn.from({ userId: "user-1" }))
-    )
-    expect(initial).type.toBeAssignableTo<
-      Machine.Machine.StateConstruction<
-        Machine.Machine.SnapshotByIdentifier<{
-          readonly "": typeof UpStates.node
-        }, "up">
-      >
-    >()
-    expect(local).type.toBeAssignableTo<
-      Machine.Machine.StateConstruction<
-        Machine.Machine.Target<{
-          readonly "": typeof UpStates.node
-        }, "up.auth.signedIn">
-      >
-    >()
-    expect(local).type.not.toHaveProperty("path")
-    expect(local).type.not.toHaveProperty("value")
-    expect(localWith).type.not.toHaveProperty("path")
-    expect(branch).type.not.toHaveProperty("path")
-    expect(full).type.toBeAssignableTo<
-      Machine.Machine.StateConstruction<
-        Machine.Machine.SnapshotByIdentifier<{
-          readonly "": typeof UpStates.node
-        }, "down">
-      >
-    >()
-    expect(full).type.not.toHaveProperty("value")
-    expect(UpInitial.from).type.not.toBeCallableWith({ id: 1 }, (up: ChildBuilder<typeof UpInitial>) =>
-      up
-        .auth.from({ userId: "guest" }, (auth) => auth.signedOut.from({}))
-        .sync.from({ enabled: true }, (sync) => sync.idle.from({})))
-    expect(context.target.local.signedIn.from).type.not.toBeCallableWith({})
-    expect(context.target.local.signedIn.from).type.not.toBeCallableWith({ userId: 1 })
-    expect(context.target.local.with.from).type.not.toBeCallableWith(
-      { id: "wrong-parent" },
-      (auth: ChildBuilder<typeof context.target.local.with>) => auth.signedOut.from({})
-    )
-  })
-  it("state builders omit empty constructor inputs across every target surface", () => {
-    const State = Schema.TaggedUnion({
-      Flow: {},
-      Idle: {},
-      Running: {},
-      Nested: {},
-      NestedIdle: {},
-      Done: {},
-      Required: { value: Schema.String },
-      Parallel: {},
-      Left: {},
-      LeftIdle: {},
-      Right: {},
-      RightIdle: {}
-    })
-    class DefaultOnly extends Schema.TaggedClass<DefaultOnly>("DefaultOnly")("DefaultOnly", {
-      label: Schema.String.pipe(Schema.optionalKey, Schema.withConstructorDefault(Effect.succeed("default")))
-    }) {
-    }
-    const States = Machine.state({
-      states: {
-        Flow: {
-          schema: State.cases.Flow,
-
-          states: {
-            Idle: State.cases.Idle,
-            Running: State.cases.Running,
-            Nested: {
-              schema: State.cases.Nested,
-
-              states: {
-                NestedIdle: State.cases.NestedIdle
-              }
-            },
-            Done: {
-              schema: State.cases.Done,
-              type: "final"
-            }
-          }
-        },
-        Required: State.cases.Required,
-        DefaultOnly
-      }
-    })
-    const ParallelStates = Machine.state({
-      states: {
-        Parallel: {
-          schema: State.cases.Parallel,
-          type: "parallel",
-          states: {
-            left: {
-              schema: State.cases.Left,
-
-              states: {
-                LeftIdle: State.cases.LeftIdle
-              }
-            },
-            right: {
-              schema: State.cases.Right,
-
-              states: {
-                RightIdle: State.cases.RightIdle
-              }
-            }
-          }
-        }
-      }
-    })
-    type Context = {
-      readonly target: Machine.Machine.TargetBuilder<{
-        readonly "": typeof States.node
-      }, "Flow.Idle">
-    }
-    type ParallelContext = {
-      readonly target: Machine.Machine.TargetBuilder<{
-        readonly "": typeof ParallelStates.node
-      }, "Parallel.left.LeftIdle">
-    }
-    const context = null as unknown as Context
-    const parallelContext = null as unknown as ParallelContext
-    const FlowInitial = null as unknown as Machine.Machine.FullTargetBuilder<typeof States.node.states>["Flow"]
-    const RequiredInitial = null as unknown as Machine.Machine.FullTargetBuilder<typeof States.node.states>["Required"]
-    const DefaultOnlyInitial = null as unknown as Machine.Machine.FullTargetBuilder<
-      typeof States.node.states
-    >["DefaultOnly"]
-    const ParallelInitial = null as unknown as Machine.Machine.FullTargetBuilder<
-      typeof ParallelStates.node.states
-    >["Parallel"]
-    const initial = FlowInitial.from((flow) => flow.Idle.from())
-    const defaulted = DefaultOnlyInitial.from()
-    const local = context.target.local.Running.from()
-    const localWith = context.target.local.with.from((flow) => flow.Running.from())
-    const branch = context.target.branch[""].Flow.Nested.from((nested) => nested.NestedIdle.from())
-    const fullBuilder = null as unknown as Machine.Machine.FullTargetBuilder<typeof States.node.states>
-    const full = fullBuilder.Flow.from((flow) => flow.Nested.from((nested) => nested.NestedIdle.from()))
-    const final = context.target.local.Done.from()
-    const parallel = ParallelInitial.from((root) =>
-      root
-        .left.from((left) => left.LeftIdle.from())
-        .right.from((right) => right.RightIdle.from())
-    )
-    const parallelBuilder = null as unknown as Machine.Machine.FullTargetBuilder<typeof ParallelStates.node.states>
-    const fullParallel = parallelBuilder.Parallel.from((root) =>
-      root
-        .left.from((left) => left.LeftIdle.from())
-        .right.from((right) => right.RightIdle.from())
-    )
-    expect(initial).type.toBeAssignableTo<
-      Machine.Machine.StateConstruction<
-        Machine.Machine.SnapshotByIdentifier<{
-          readonly "": typeof States.node
-        }, "Flow">
-      >
-    >()
-    expect(defaulted).type.toBeAssignableTo<
-      Machine.Machine.StateConstruction<
-        Machine.Machine.SnapshotByIdentifier<{
-          readonly "": typeof States.node
-        }, "DefaultOnly">
-      >
-    >()
-    expect(local).type.toBeAssignableTo<
-      Machine.Machine.StateConstruction<
-        Machine.Machine.Target<{
-          readonly "": typeof States.node
-        }, "Flow.Running">
-      >
-    >()
-    expect(localWith).type.toBeAssignableTo<
-      Machine.Machine.StateConstruction<
-        Machine.Machine.Target<{
-          readonly "": typeof States.node
-        }, "Flow.Running">
-      >
-    >()
-    expect(branch).type.toBeAssignableTo<
-      Machine.Machine.StateConstruction<
-        Machine.Machine.Target<{
-          readonly "": typeof States.node
-        }, "Flow.Nested.NestedIdle">
-      >
-    >()
-    expect(full).type.toBeAssignableTo<
-      Machine.Machine.StateConstruction<
-        Machine.Machine.SnapshotByIdentifier<{
-          readonly "": typeof States.node
-        }, "Flow">
-      >
-    >()
-    expect(final).type.toBeAssignableTo<
-      Machine.Machine.StateConstruction<
-        Machine.Machine.Target<{
-          readonly "": typeof States.node
-        }, "Flow.Done">
-      >
-    >()
-    expect(parallel).type.toBeAssignableTo<
-      Machine.Machine.StateConstruction<
-        Machine.Machine.SnapshotByIdentifier<{
-          readonly "": typeof ParallelStates.node
-        }, "Parallel">
-      >
-    >()
-    expect(fullParallel).type.toBeAssignableTo<
-      Machine.Machine.StateConstruction<
-        Machine.Machine.SnapshotByIdentifier<{
-          readonly "": typeof ParallelStates.node
-        }, "Parallel">
-      >
-    >()
-    expect(RequiredInitial.from).type.not.toBeCallableWith()
-    expect(context.target.branch[""].Required.from).type.not.toBeCallableWith()
-    expect(FlowInitial.from).type.not.toBeCallableWith()
-    expect(ParallelInitial.from).type.not.toBeCallableWith()
-    const requiredContext = null as unknown as {
-      readonly target: Machine.Machine.TargetBuilder<{
-        readonly "": typeof UpStates.node
-      }, "up.auth.signedOut">
-    }
-    expect(UpInitial.from).type.not.toBeCallableWith((up: ChildBuilder<typeof UpInitial>) =>
-      up
-        .auth.from({ userId: "guest" }, (auth) => auth.signedOut.from())
-        .sync.from({ enabled: true }, (sync) => sync.idle.from())
-    )
-    const requiredFull = null as unknown as Machine.Machine.FullTargetBuilder<typeof UpStates.node.states>
-    expect(requiredFull.up.from).type.not.toBeCallableWith((up: ChildBuilder<typeof requiredFull.up>) =>
-      up
-        .auth.from({ userId: "guest" }, (auth) => auth.signedOut.from())
-        .sync.from({ enabled: true }, (sync) => sync.idle.from())
-    )
-    expect(requiredContext.target.local.with.from).type.not.toBeCallableWith((
-      auth: ChildBuilder<typeof requiredContext.target.local.with>
-    ) => auth.signedOut.from())
-    expect(requiredContext.target.branch[""].up.from).type.not.toBeCallableWith((
-      up: ChildBuilder<typeof requiredContext.target.branch[""]["up"]>
-    ) => up.auth.signedOut.from())
-  })
-  it("from preserves parallel-region exhaustiveness", () => {
-    const context = null as unknown as {
-      readonly target: Machine.Machine.TargetBuilder<{
-        readonly "": typeof NestedParallelStates.node
-      }, "root.idle">
-    }
-    const activeContext = null as unknown as {
-      readonly target: Machine.Machine.TargetBuilder<{
-        readonly "": typeof NestedParallelStates.node
-      }, "root.work.auth.signedOut">
-    }
-    const work = null as unknown as ChildBuilder<typeof context.target.local.work>
-    const afterAuth = work.auth.from({ userId: "guest" }, (auth) => auth.signedOut.from({}))
-    const target = context.target.local.work.from((work) =>
-      work
-        .auth.from({ userId: "guest" }, (auth) => auth.signedOut.from({}))
-        .sync.from({ enabled: true }, (sync) => sync.idle.from({}))
-    )
-    const branch = context.target.branch[""].root.work.from((work) =>
-      work
-        .auth.from({ userId: "guest" }, (auth) => auth.signedOut.from())
-        .sync.from({ enabled: true }, (sync) => sync.idle.from())
-    )
-    const partial = activeContext.target.branch[""].root.work.sync.from(
-      { enabled: true },
-      (sync) => sync.syncing.from({ requestId: "sync-1" })
-    )
-    expect(afterAuth).type.not.toHaveProperty("auth")
-    expect(afterAuth).type.toHaveProperty("sync")
-    expect(target).type.toBeAssignableTo<
-      Machine.Machine.StateConstruction<
-        Machine.Machine.Target<{
-          readonly "": typeof NestedParallelStates.node
-        }, "root.work">
-      >
-    >()
-    expect(target).type.not.toHaveProperty("path")
-    expect(branch).type.toBeAssignableTo<
-      Machine.Machine.StateConstruction<
-        Machine.Machine.Target<{
-          readonly "": typeof NestedParallelStates.node
-        }, "root.work">
-      >
-    >()
-    expect(partial).type.toBeAssignableTo<
-      Machine.Machine.StateConstruction<
-        Machine.Machine.Target<{
-          readonly "": typeof NestedParallelStates.node
-        }, "root.work.sync.syncing">
-      >
-    >()
-    expect(context.target.local.work.from).type.not.toBeCallableWith(
-      {},
-      (work: ChildBuilder<typeof context.target.local.work>) =>
-        work.auth.from({ userId: "guest" }, (auth) => auth.signedOut.from({}))
-    )
-  })
-  it("from supports TaggedUnion constructor inputs without a tag", () => {
-    const State = Schema.TaggedUnion({
-      Idle: {},
-      Active: { requestId: Schema.String }
-    })
-    const States = Machine.state({
-      states: {
-        Idle: State.cases.Idle,
-        Active: State.cases.Active
-      }
-    })
-    const IdleInitial = null as unknown as Machine.Machine.FullTargetBuilder<typeof States.node.states>["Idle"]
-    const ActiveInitial = null as unknown as Machine.Machine.FullTargetBuilder<typeof States.node.states>["Active"]
-    const initial = IdleInitial.from({})
-    expect(initial).type.toBeAssignableTo<
-      Machine.Machine.StateConstruction<Machine.Machine.AtomicSnapshot<"Idle", typeof State.cases.Idle.Type>>
-    >()
-    expect(initial).type.not.toHaveProperty("value")
-    expect(ActiveInitial.from).type.toBeCallableWith({ requestId: "request-1" })
-    expect(ActiveInitial.from).type.not.toBeCallableWith({})
-    expect(ActiveInitial.from).type.not.toBeCallableWith({ requestId: 1 })
-  })
-  it("internal target constructors: target.full requires every parallel region", () => {
-    const context = null as unknown as {
-      readonly target: Machine.Machine.TargetBuilder<{
-        readonly "": typeof UpStates.node
-      }, "down">
-    }
-    expect(context.target.branch[""].up.decoded).type.not.toBeCallableWith(
-      new Up({ id: "up-1" }),
-      (up: ChildBuilder<typeof context.target.branch[""]["up"]>) =>
-        up.auth.decoded(
-          new Auth({ userId: "guest" }),
-          (auth) => auth.signedIn.decoded(new SignedIn({ userId: "user-1" }))
-        )
-    )
-  })
-  it("internal target constructors: target.full exposes every compound child", () => {
-    const context = null as unknown as {
-      readonly target: Machine.Machine.TargetBuilder<{
-        readonly "": typeof UpStates.node
-      }, "down">
-    }
-    const up = null as unknown as ChildBuilder<typeof context.target.branch[""]["up"]>
-    const auth = null as unknown as ChildBuilder<typeof up.auth>
-    expect(auth.signedOut.decoded).type.toBeCallableWith(new SignedOut({}))
-    expect(auth.signedIn.decoded).type.toBeCallableWith(new SignedIn({ userId: "user-1" }))
-  })
-  it("internal target constructors: target.local requires every region when entering an inactive nested parallel state", () => {
-    const context = null as unknown as {
-      readonly target: Machine.Machine.TargetBuilder<{
-        readonly "": typeof NestedParallelStates.node
-      }, "root.idle">
-    }
-    const target = context.target.local.work.decoded(new Payment({}), (work) =>
-      work
-        .auth.decoded(
-          new Auth({ userId: "guest" }),
-          (auth) => auth.signedIn.decoded(new SignedIn({ userId: "user-1" }))
-        )
-        .sync.decoded(
-          new Sync({ enabled: true }),
-          (sync) => sync.syncing.decoded(new Syncing({ requestId: "sync-1" }))
-        ))
-    expect(target).type.toBeAssignableTo<
-      Machine.Machine.Target<{
-        readonly "": typeof NestedParallelStates.node
-      }, "root.work">
-    >()
-    expect(target.path).type.toBe<"root.work">()
-    expect(context.target.local.work.decoded).type.not.toBeCallableWith(
-      new Payment({}),
-      (work: ChildBuilder<typeof context.target.local.work>) =>
-        work.auth.decoded(new Auth({ userId: "guest" }), (auth) => auth.signedOut.decoded(new SignedOut({})))
-    )
-  })
-  it("internal target constructors: target.branch requires every region when entering an inactive nested parallel state", () => {
-    const context = null as unknown as {
-      readonly target: Machine.Machine.TargetBuilder<{
-        readonly "": typeof NestedParallelStates.node
-      }, "root.idle">
-    }
-    const target = context.target.branch[""].root.work.decoded(new Payment({}), (work) =>
-      work
-        .auth.decoded(new Auth({ userId: "guest" }), (auth) => auth.signedOut.decoded(new SignedOut({})))
-        .sync.decoded(new Sync({ enabled: true }), (sync) => sync.idle.decoded(new SyncIdle({}))))
-    expect(target.path).type.toBe<"root.work">()
-    expect(context.target.branch[""].root.work).type.not.toHaveProperty("auth")
-    expect(context.target.branch[""].root.work.decoded).type.not.toBeCallableWith(
-      new Payment({}),
-      (work: ChildBuilder<typeof context.target.branch[""]["root"]["work"]>) =>
-        work.auth.decoded(new Auth({ userId: "guest" }), (auth) => auth.signedOut.decoded(new SignedOut({})))
-    )
-  })
-  it("nested parallel target builders remove regions and validate payloads", () => {
-    const context = null as unknown as {
-      readonly target: Machine.Machine.TargetBuilder<{
-        readonly "": typeof NestedParallelStates.node
-      }, "root.idle">
-    }
-    const work = null as unknown as ChildBuilder<typeof context.target.local.work>
-    const afterAuth = work.auth.decoded(
-      new Auth({ userId: "guest" }),
-      (auth) => auth.signedOut.decoded(new SignedOut({}))
-    )
-    expect(afterAuth).type.not.toHaveProperty("auth")
-    expect(afterAuth).type.toHaveProperty("sync")
-    expect(work.auth.decoded).type.not.toBeCallableWith(
-      new Sync({ enabled: true }),
-      (auth: ChildBuilder<typeof work.auth>) => auth.signedOut.decoded(new SignedOut({}))
-    )
-  })
-  it("internal target constructors: target.branch keeps partial navigation for an already-active parallel state", () => {
-    const context = null as unknown as {
-      readonly target: Machine.Machine.TargetBuilder<{
-        readonly "": typeof NestedParallelStates.node
-      }, "root.work.auth.signedOut">
-    }
-    const target = context.target.branch[""].root.work.sync.decoded(
-      new Sync({ enabled: true }),
-      (sync) => sync.syncing.decoded(new Syncing({ requestId: "sync-1" }))
-    )
-    expect(context.target.branch[""].root.work).type.toHaveProperty("auth")
-    expect(context.target.branch[""].root.work).type.toHaveProperty("sync")
-    expect(target.path).type.toBe<"root.work.sync.syncing">()
-  })
-  it("internal target constructors: target.local constructs typed local leaf targets", () => {
-    const context = null as unknown as {
-      readonly target: Machine.Machine.TargetBuilder<{
-        readonly "": typeof UpStates.node
-      }, "up.auth.signedOut">
-    }
-    const target = context.target.local.signedIn.decoded(new SignedIn({ userId: "user-1" }))
-    expect(target).type.toBeAssignableTo<
-      Machine.Machine.Target<{
-        readonly "": typeof UpStates.node
-      }, "up.auth.signedIn">
-    >()
-    expect(target.path).type.toBe<"up.auth.signedIn">()
-    expect(target.value).type.toBe<SignedIn>()
-  })
-  it("internal target constructors: target.local exposes the source compound children when the source is compound", () => {
-    const context = null as unknown as {
-      readonly target: Machine.Machine.TargetBuilder<{
-        readonly "": typeof UpStates.node
-      }, "up.auth">
-    }
-    expect(context.target.local.signedOut.decoded).type.toBeCallableWith(new SignedOut({}))
-    expect(context.target.local.signedIn.decoded).type.toBeCallableWith(new SignedIn({ userId: "user-1" }))
-  })
-  it("internal target constructors: target.local.with checks the local compound value", () => {
-    const context = null as unknown as {
-      readonly target: Machine.Machine.TargetBuilder<{
-        readonly "": typeof UpStates.node
-      }, "up.auth.signedOut">
-    }
-    const target = context.target.local.with.decoded(
-      new Auth({ userId: "user-1" }),
-      (auth) => auth.signedIn.decoded(new SignedIn({ userId: "user-1" }))
-    )
-    expect(target.path).type.toBe<"up.auth.signedIn">()
-    expect(context.target.local.with.decoded).type.not.toBeCallableWith(
-      new Up({ id: "up-1" }),
-      (auth: ChildBuilder<typeof context.target.local.with>) =>
-        auth.signedIn.decoded(new SignedIn({ userId: "user-1" }))
-    )
-  })
-  it("internal target constructors: target.local rejects unrelated children and wrong values", () => {
-    const context = null as unknown as {
-      readonly target: Machine.Machine.TargetBuilder<{
-        readonly "": typeof UpStates.node
-      }, "up.auth.signedOut">
-    }
-    expect(context.target.local).type.not.toHaveProperty("sync")
-    expect(context.target.local).type.not.toHaveProperty("down")
-    expect(context.target.local).type.not.toHaveProperty("idle")
-    expect(context.target.local.signedIn.decoded).type.not.toBeCallableWith(new SignedOut({}))
-  })
-  it("internal target constructors: target.local exposes the root compound children", () => {
-    const context = null as unknown as {
-      readonly target: Machine.Machine.TargetBuilder<{
-        readonly "": typeof UpStates.node
-      }, "down">
-    }
-    expect(context.target.local).type.toHaveProperty("up")
-    expect(context.target.local).type.toHaveProperty("down")
-    expect(context.target.local).type.not.toHaveProperty("with")
-  })
-  it("internal target constructors: target.branch starts at the shared machine root", () => {
-    const context = null as unknown as {
-      readonly target: Machine.Machine.TargetBuilder<{
-        readonly "": typeof UpStates.node
-      }, "up.auth.signedOut">
-    }
-    const downContext = null as unknown as {
-      readonly target: Machine.Machine.TargetBuilder<{
-        readonly "": typeof UpStates.node
-      }, "down">
-    }
-    expect(context.target.branch[""]).type.toHaveProperty("up")
-    expect(context.target.branch[""]).type.toHaveProperty("down")
-    expect(downContext.target.branch[""]).type.toHaveProperty("down")
-    expect(downContext.target.branch[""]).type.toHaveProperty("up")
-  })
-  it("internal target constructors: target.branch constructs typed partial branch targets", () => {
-    const context = null as unknown as {
-      readonly target: Machine.Machine.TargetBuilder<{
-        readonly "": typeof UpStates.node
-      }, "up.auth.signedOut">
-    }
-    const target = context.target.branch[""].up.sync.decoded(
-      new Sync({ enabled: true }),
-      (sync) => sync.syncing.decoded(new Syncing({ requestId: "sync-1" }))
-    )
-    expect(target).type.toBeAssignableTo<
-      Machine.Machine.Target<{
-        readonly "": typeof UpStates.node
-      }, "up.sync.syncing">
-    >()
-    expect(target.path).type.toBe<"up.sync.syncing">()
-    expect(target.value).type.toBe<Syncing>()
-  })
-  it("internal target constructors: target.branch can replace ancestors before selecting a leaf", () => {
-    const context = null as unknown as {
-      readonly target: Machine.Machine.TargetBuilder<{
-        readonly "": typeof UpStates.node
-      }, "up.auth.signedOut">
-    }
-    const target = context.target.branch[""].up.decoded(
-      new Up({ id: "up-2" }),
-      (up) =>
-        up.auth.decoded(
-          new Auth({ userId: "user-1" }),
-          (auth) => auth.signedIn.decoded(new SignedIn({ userId: "user-1" }))
-        )
-    )
-    expect(target.path).type.toBe<"up.auth.signedIn">()
-    expect(target.value).type.toBe<SignedIn>()
-  })
-  it("internal target constructors: target.branch rejects non-leaf targets and wrong values", () => {
-    const context = null as unknown as {
-      readonly target: Machine.Machine.TargetBuilder<{
-        readonly "": typeof UpStates.node
-      }, "up.auth.signedOut">
-    }
-    expect(context.target.branch[""].up.decoded).type.not.toBeCallableWith(new Up({ id: "up-1" }))
-    expect(context.target.branch[""].up.sync.decoded).type.not.toBeCallableWith(new Sync({ enabled: true }))
-    expect(context.target.branch[""].up.sync.decoded).type.not.toBeCallableWith(
-      new Auth({ userId: "user-1" }),
-      (sync: ChildBuilder<typeof context.target.branch[""]["up"]["sync"]>) =>
-        sync.syncing.decoded(new Syncing({ requestId: "sync-1" }))
-    )
-    expect(context.target.branch[""].up.auth.signedIn.decoded).type.not.toBeCallableWith(new SignedOut({}))
-  })
-  it("internal target constructor containers are not callable", () => {
-    const context = null as unknown as {
-      readonly target: Machine.Machine.TargetBuilder<{
-        readonly "": typeof UpStates.node
-      }, "down">
-    }
-    expect<IsCallable<typeof context.target>>().type.toBe<false>()
-    expect(context.target.none()).type.toBe<Machine.Machine.NoTarget>()
   })
   it("requires explicit targetless transitions", () => {
     expect(Machine).type.not.toHaveProperty("targetless")
