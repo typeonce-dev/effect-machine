@@ -56,6 +56,7 @@ import {
   isSnapshot,
   isStateUpdate,
   isTarget,
+  type TargetSnapshotSlot,
   TargetSnapshotTypeId
 } from "./topology.js"
 
@@ -560,7 +561,8 @@ const normalizeIndexedTargetStateSync = (
   const targetIndex = isTarget(target) ? descriptor.indexByPath.get(String(target.path)) : undefined
   if (
     targetIndex === activeLeafIndex && current.active[activeLeafIndex] === 1 && isTarget(target) &&
-    target[TargetSnapshotTypeId] === undefined && target.values === undefined && current.completedOrder.length === 0 &&
+    (target as TargetSnapshotSlot)[TargetSnapshotTypeId] === undefined && target.values === undefined &&
+    current.completedOrder.length === 0 &&
     descriptor.valued[activeLeafIndex]
   ) {
     const values = current.values.slice()
@@ -893,7 +895,7 @@ const planIndexedFlatState = (
       if (target !== undefined) {
         const targetIndex = descriptor.indexByPath.get(String(target.path))
         const isSimpleTarget = isTarget(target)
-          ? target[TargetSnapshotTypeId] === undefined && target.values === undefined
+          ? (target as TargetSnapshotSlot)[TargetSnapshotTypeId] === undefined && target.values === undefined
           : !("state" in target) && !("states" in target) && !("completed" in target) && !("history" in target)
         if (
           targetIndex === sourceIndex && isSimpleTarget && current.completedOrder.length === 0 &&

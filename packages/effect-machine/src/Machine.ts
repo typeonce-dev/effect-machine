@@ -49,16 +49,34 @@ export type TypeId = "~effect/Machine"
  */
 export const TypeId: TypeId = "~effect/Machine"
 
-declare const MachineOutputStatesTypeId: unique symbol
-declare const MachineTypeId: unique symbol
-declare const EventConstructionTypeId: unique symbol
-declare const EmittedEventConstructionTypeId: unique symbol
-declare const EventProtocolTypeId: unique symbol
-declare const ParentModeTypeId: unique symbol
+// Type-level keys of public interfaces. Each is a string literal, as in
+// Effect's own modules, so a consumer's emitted declaration prints the key
+// itself instead of naming a private constant. None of them exists at runtime:
+// a value that needs a runtime marker keeps a private symbol, and the public
+// interface carries the string key as a brand only.
+declare const MachineOutputStatesTypeId: "~effect/Machine/OutputStates"
+declare const MachineTypeId: "~effect/Machine/TypeCarrier"
+declare const EventConstructionTypeId: "~effect/Machine/EventConstruction"
+declare const EmittedEventConstructionTypeId: "~effect/Machine/EmittedEventConstruction"
+declare const EventProtocolTypeId: "~effect/Machine/EventProtocol"
+declare const ParentModeTypeId: "~effect/Machine/ParentMode"
+declare const ChildMachineLogicTypeId: "~effect/Machine/ChildMachineLogic"
+declare const InvokeTypeId: "~effect/Machine/Invoke"
+declare const SnapshotBuilderStateTypeId: "~effect/Machine/SnapshotBuilderState"
+declare const SnapshotBuilderConstructionTypeId: "~effect/Machine/SnapshotBuilderConstruction"
+declare const StateConstructionTypeId: "~effect/Machine/StateConstruction"
+declare const TargetSnapshotTypeId: "~effect/Machine/TargetSnapshot"
+declare const HistoryTargetTypeId: "~effect/Machine/HistoryTarget"
+declare const InitialTargetTypeId: "~effect/Machine/InitialTarget"
+declare const ChoiceTargetTypeId: "~effect/Machine/ChoiceTarget"
+declare const NoTargetTypeId: "~effect/Machine/NoTarget"
+declare const DeclinedTypeId: "~effect/Machine/Declined"
+declare const TargetSelectionTypeId: "~effect/Machine/TargetSelection"
+declare const StateUpdateTypeId: "~effect/Machine/StateUpdate"
+declare const CombinedTargetTypeId: "~effect/Machine/CombinedTarget"
+declare const SelectedBranchTypeId: "~effect/Machine/SelectedBranch"
 
 const ParentTypeId = "~effect/Machine/Parent"
-
-const ChildMachineLogicTypeId: typeof internal.ChildMachineLogicTypeId = internal.ChildMachineLogicTypeId
 
 /**
  * Type identifier used for the synthetic event passed to startup lifecycle
@@ -705,8 +723,6 @@ type IncompatibleRuntime<Requirements, Events, Emits> = Requirements extends Run
   : Requirements
   : never
 
-const InvokeTypeId: typeof internal.InvokeTypeId = internal.InvokeTypeId
-
 type StateDefinitionError<
   Message extends string,
   Path extends PropertyKey = never,
@@ -965,7 +981,27 @@ type StateFieldsValidation<Node> = Node extends { readonly [StateTypeId]: typeof
     } :
     unknown)
 
-interface StateInput {
+/**
+ * Declaration of one state node accepted by {@link state}: its schema or
+ * fields, its kind, and its nested child states.
+ *
+ * **When to use**
+ *
+ * Name this type when a declaration you emit includes the signature of
+ * `Machine.state`. Build state trees with `Machine.state` itself, which checks
+ * the declaration further.
+ *
+ * **Details**
+ *
+ * Each entry of `states` is a tagged schema, a nested declaration, or a
+ * descriptor returned by `Machine.state`. `Machine.state` validates the whole
+ * tree further, so satisfying this type alone does not make a declaration
+ * valid.
+ *
+ * @category models
+ * @since 0.47.0
+ */
+export interface StateDeclaration {
   readonly schema?: Machine.TaggedSchema
   readonly fields?: Schema.Struct.Fields
   readonly type?: "active" | "parallel" | "final" | "history" | "choice"
@@ -973,7 +1009,7 @@ interface StateInput {
   readonly states?: Readonly<
     Record<
       string,
-      Machine.TaggedSchema | StateInput | {
+      Machine.TaggedSchema | StateDeclaration | {
         readonly [StateTypeId]: typeof StateTypeId
         readonly node: Machine.StateNodeConfig
       }
@@ -984,8 +1020,8 @@ interface StateInput {
   readonly annotations?: Machine.SchemaLessStateAnnotations
 }
 
-interface StateConstructor {
-  <const Node extends StateInput>(
+type StateConstructor = {
+  <const Node extends StateDeclaration>(
     node: Node & StateFieldsValidation<NoInfer<Node>>,
     ..._validation: ValidateDefinedState<NormalizeState<NoInfer<Node>>>
   ): State<NormalizedState<Node>>
@@ -1034,9 +1070,6 @@ type ValidateEventProtocolBuilder<
   Duplicate extends PropertyKey = DuplicateEventTag<Schemas>
 > = [Duplicate] extends [never] ? unknown
   : EventProtocolError<"Event protocol tags must be unique", Duplicate>
-
-const SnapshotBuilderStateTypeId: typeof internal.SnapshotBuilderStateTypeId = internal.SnapshotBuilderStateTypeId
-const SnapshotBuilderConstructionTypeId: unique symbol = Symbol("effect/Machine/SnapshotBuilderConstruction")
 
 type SnapshotBuilderComplete<Regions, Constructed extends boolean = false> = {
   readonly [SnapshotBuilderStateTypeId]: Regions
@@ -1124,18 +1157,18 @@ type NodeMethodWithInitial<
       readonly initial: InitialTargetFactory<Node, Path>
     }
 
-interface InitialTargetMethod<
+type InitialTargetMethod<
   Node,
   Path extends string
-> {
+> = {
   /** Enters this state through its declared initial configuration. */
   readonly initial: InitialTargetFactory<Node, Path>
 }
 
-interface InitialTargetFactory<
+type InitialTargetFactory<
   Node,
   Path extends string
-> {
+> = {
   readonly from: FromCallable<
     WithNodeInput<Node, readonly []>,
     Machine.StateConstruction<Machine.InitialTarget<Path>>
@@ -2346,8 +2379,8 @@ export interface ChildMachine<Id extends string, M extends Machine.Any> {
   /** Complete machine definition carried by this descriptor. */
   readonly machine: M
 
-  /** @internal */
-  readonly [ChildMachineLogicTypeId]: (input?: unknown) => Logic<any, any, any, any, any, any>
+  /** @internal Brand of descriptors built by `child` and `childFamily`. */
+  readonly [ChildMachineLogicTypeId]: typeof ChildMachineLogicTypeId
 }
 
 /**
@@ -4439,7 +4472,7 @@ export declare namespace Machine {
    * @since 0.4.0
    */
   export interface StateConstruction<out Result> {
-    readonly [Topology.StateConstructionTypeId]: Result
+    readonly [StateConstructionTypeId]: Result
   }
 
   /**
@@ -4453,7 +4486,7 @@ export declare namespace Machine {
     StateId extends StateIdentifier<States>
   > {
     readonly [Topology.TargetTypeId]: typeof Topology.TargetTypeId
-    readonly [Topology.TargetSnapshotTypeId]?: SnapshotByIdentifier<States, StateId>
+    readonly [TargetSnapshotTypeId]?: SnapshotByIdentifier<States, StateId>
     readonly path: StateId
     readonly value: StateByIdentifier<States, StateId>
     readonly values?: Partial<
@@ -4474,7 +4507,7 @@ export declare namespace Machine {
     States extends StateSchemas,
     StateId extends ValuedStateIdentifier<States>
   > {
-    readonly [Topology.StateUpdateTypeId]: {
+    readonly [StateUpdateTypeId]: {
       readonly states: Types.Covariant<States>
       readonly owner: Types.Covariant<StateId>
     }
@@ -4492,7 +4525,7 @@ export declare namespace Machine {
     States extends StateSchemas,
     Owner extends ValuedStateIdentifier<States>
   > {
-    readonly [Topology.CombinedTargetTypeId]: {
+    readonly [CombinedTargetTypeId]: {
       readonly result: Types.Covariant<Result>
       readonly states: Types.Covariant<States>
       readonly owner: Types.Covariant<Owner>
@@ -4509,7 +4542,7 @@ export declare namespace Machine {
    * @since 0.10.0
    */
   export interface NoTarget {
-    readonly [Topology.NoTargetTypeId]: typeof Topology.NoTargetTypeId
+    readonly [NoTargetTypeId]: typeof NoTargetTypeId
   }
 
   /**
@@ -4524,7 +4557,7 @@ export declare namespace Machine {
    * @since 0.17.0
    */
   export interface Declined {
-    readonly [Topology.DeclinedTypeId]: typeof Topology.DeclinedTypeId
+    readonly [DeclinedTypeId]: typeof DeclinedTypeId
   }
 
   /** Static acceptance contract of one transition definition. */
@@ -4544,7 +4577,7 @@ export declare namespace Machine {
     States extends StateSchemas,
     HistoryId extends HistoryIdentifier<States>
   > {
-    readonly [Topology.HistoryTargetTypeId]: typeof Topology.HistoryTargetTypeId
+    readonly [HistoryTargetTypeId]: typeof HistoryTargetTypeId
     readonly path: HistoryId
     readonly parent: Extract<ParentPath<HistoryId>, StateIdentifier<States>>
   }
@@ -4558,8 +4591,8 @@ export declare namespace Machine {
    */
   export interface InitialTarget<StateId extends string> {
     readonly [Topology.TargetTypeId]: typeof Topology.TargetTypeId
-    readonly [Topology.TargetSnapshotTypeId]?: never
-    readonly [Topology.InitialTargetTypeId]: typeof Topology.InitialTargetTypeId
+    readonly [TargetSnapshotTypeId]?: never
+    readonly [InitialTargetTypeId]: typeof InitialTargetTypeId
     readonly _tag: "InitialTarget"
     readonly path: StateId
     readonly value: never
@@ -4568,7 +4601,7 @@ export declare namespace Machine {
 
   /** Branded transient target instruction used while constructing initial states. */
   export interface ChoiceTargetInstruction<ChoiceId extends string = string> {
-    readonly [Topology.ChoiceTargetTypeId]: typeof Topology.ChoiceTargetTypeId
+    readonly [ChoiceTargetTypeId]: typeof ChoiceTargetTypeId
     readonly path: ChoiceId
     readonly parent: ParentPath<ChoiceId>
     readonly values?: Readonly<Record<string, unknown>>
@@ -4735,7 +4768,7 @@ export declare namespace Machine {
     out Kind extends Topology.TargetSelectionKind = Topology.TargetSelectionKind,
     out Scope extends Topology.TargetSelectionScope | undefined = Topology.TargetSelectionScope | undefined
   > {
-    readonly [Topology.TargetSelectionTypeId]: typeof Topology.TargetSelectionTypeId
+    readonly [TargetSelectionTypeId]: typeof TargetSelectionTypeId
     readonly kind: Kind
     readonly scope: Scope
     readonly path: Path
@@ -5472,7 +5505,7 @@ export declare namespace Machine {
 
   /** Opaque evidence that `resolve` selected one declared branch. */
   export interface SelectedBranch<out Key extends string, out Result> {
-    readonly [Topology.SelectedBranchTypeId]: {
+    readonly [SelectedBranchTypeId]: {
       readonly key: Types.Covariant<Key>
       readonly result: Types.Covariant<Result>
     }
@@ -5930,7 +5963,7 @@ export declare namespace Machine {
     : Result extends SelectedBranch<any, infer Selected> ? TransitionResultInitialTargetPath<Selected>
     : Result extends StateConstruction<infer Constructed> ? TransitionResultInitialTargetPath<Constructed>
     : Result extends {
-      readonly [Topology.InitialTargetTypeId]: typeof Topology.InitialTargetTypeId
+      readonly [InitialTargetTypeId]: typeof InitialTargetTypeId
       readonly _tag: "InitialTarget"
     } ? Result extends { readonly path: infer Path extends string } ? Path : never
     : never
@@ -8006,7 +8039,7 @@ type MakeResult<
 >
 
 /** @inline */
-interface Make {
+type Make = {
   /** @param config Complete schema-first machine definition. */
   <
     const Root extends Machine.StateNodeConfig,

@@ -1395,7 +1395,7 @@ export interface Exploration<M extends AnyMachine, Key extends ExplorationKey = 
   readonly completeness: ExplorationCompleteness<M, Key>
 }
 
-interface ExploreOptionsBase<M extends AnyMachine, Key extends ExplorationKey> {
+type ExploreOptionsBase<M extends AnyMachine, Key extends ExplorationKey> = {
   readonly events: (context: ExplorationStateContext<M>) => ReadonlyArray<Machine.Machine.InputEvent<M>>
   readonly stateKey: (context: ExplorationStateContext<M>) => Key
   readonly limits?: ExplorationLimits

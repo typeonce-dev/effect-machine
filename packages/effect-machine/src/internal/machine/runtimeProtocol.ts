@@ -35,7 +35,7 @@ import {
 import { ChildAlreadyExistsError, StoppedError } from "./errors.js"
 import * as InspectionRuntime from "./inspectionRuntime.js"
 import type * as InvocationEvent from "./invocationEvent.js"
-import { ChildMachineLogicTypeId } from "./symbols.js"
+import { type ChildMachineLogicSlot, ChildMachineLogicTypeId } from "./symbols.js"
 
 /** @internal */
 export const activeSnapshotObserver: unique symbol = Symbol.for("effect/Machine/activeSnapshotObserver")
@@ -1298,7 +1298,7 @@ export const makeChildRuntimeSync = (
   ): Effect.Effect<MachineRef<any, any, any, any>, any, any> {
     const descriptor = typeof logicOrChild === "object" && logicOrChild !== null &&
         ChildMachineLogicTypeId in logicOrChild
-      ? logicOrChild
+      ? logicOrChild as unknown as ChildMachine.Any & ChildMachineLogicSlot
       : undefined
     const logic = descriptor === undefined
       ? logicOrChild as ProcessLogic<any, any, any, any, any, any>

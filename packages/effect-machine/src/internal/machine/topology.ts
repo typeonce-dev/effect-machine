@@ -14,9 +14,16 @@ export const TargetTypeId = "~effect/Machine/Target"
 
 export const TargetSnapshotTypeId: unique symbol = Symbol("effect/Machine/TargetSnapshot")
 
-export const StateInputTypeId: unique symbol = Symbol("effect/Machine/StateInput")
+/**
+ * Runtime slot for the decoded snapshot a target may carry. It stays under a
+ * private symbol so it is absent from `Object.keys`, JSON, and inspection
+ * payloads; the public `Machine.Target` declares it as a type-level brand only.
+ */
+export interface TargetSnapshotSlot<out Snapshot = Machine.AtomicSnapshot<string, unknown>> {
+  readonly [TargetSnapshotTypeId]?: Snapshot | undefined
+}
 
-export const StateConstructionTypeId: unique symbol = Symbol("effect/Machine/StateConstruction")
+export const StateInputTypeId: unique symbol = Symbol("effect/Machine/StateInput")
 
 export const HistoryTargetTypeId: unique symbol = Symbol("effect/Machine/HistoryTarget")
 
@@ -70,16 +77,6 @@ export interface ChoiceTarget {
   readonly path: string
   readonly parent: string
   readonly values?: Readonly<Record<string, unknown>>
-}
-
-/** Internal marker returned by an explicitly targetless transition. */
-export interface NoTarget {
-  readonly [NoTargetTypeId]: typeof NoTargetTypeId
-}
-
-/** Internal marker returned when a declinable transition is not enabled. */
-export interface Declined {
-  readonly [DeclinedTypeId]: typeof DeclinedTypeId
 }
 
 export type TargetSelectionKind = "state" | "initial" | "history" | "choice" | "update" | "none"
@@ -170,9 +167,11 @@ export const makeSelectedBranch = (
 
 export const isSelectedBranch = (u: unknown): u is SelectedBranch => hasProperty(u, SelectedBranchTypeId)
 
+// Public markers carry their key as a type-level brand; the runtime marker is
+// the private symbol, so the frozen singletons cross that erased boundary here.
 const noTarget = Object.freeze({
   [NoTargetTypeId]: NoTargetTypeId
-}) as NoTarget
+}) as unknown as Machine.NoTarget
 
 export const makeNoTarget = (): Machine.NoTarget => noTarget
 
@@ -180,7 +179,7 @@ export const isNoTarget = (u: unknown): u is Machine.NoTarget => hasProperty(u, 
 
 const declined = Object.freeze({
   [DeclinedTypeId]: DeclinedTypeId
-}) as Declined
+}) as unknown as Machine.Declined
 
 export const makeDeclined = (): Machine.Declined => declined
 

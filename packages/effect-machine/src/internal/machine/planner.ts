@@ -63,6 +63,7 @@ import {
   makeResolvedTarget,
   makeStateInput,
   makeTarget,
+  type TargetSnapshotSlot,
   TargetSnapshotTypeId
 } from "./topology.js"
 import type {
@@ -1250,7 +1251,7 @@ const withChoiceValues = (target: unknown, values: Readonly<Record<string, unkno
   }
   if (isInitialTarget(target)) return { ...target, values: { ...values, ...target.values } }
   if (!isTarget(target) || Object.keys(values).length === 0) return target
-  const snapshot = target[TargetSnapshotTypeId]
+  const snapshot = (target as TargetSnapshotSlot<Machine.SnapshotByIdentifier<any, any>>)[TargetSnapshotTypeId]
   return makeTarget(target.path, target.value, {
     ...(snapshot === undefined ? {} : { snapshot }),
     values: { ...values, ...target.values }

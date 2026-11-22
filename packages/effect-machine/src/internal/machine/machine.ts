@@ -36,7 +36,7 @@ import * as Protocol from "./protocol.js"
 import * as internalRuntime from "./runtimeProtocol.js"
 import * as Serialization from "./serialization.js"
 import * as StateDefinition from "./stateDefinition.js"
-import { ChildMachineLogicTypeId } from "./symbols.js"
+import { type ChildMachineLogicSlot, ChildMachineLogicTypeId } from "./symbols.js"
 import * as Topology from "./topology.js"
 
 export {
@@ -48,13 +48,12 @@ export {
   StartupError,
   StoppedError
 } from "./errors.js"
-export { ChildMachineLogicTypeId, InitialEventTypeId, SnapshotBuilderStateTypeId } from "./symbols.js"
+export { InitialEventTypeId } from "./symbols.js"
 
 /** Internal seam for the public target-reference factory and its opaque brand. */
 
 const TypeId = "~effect/Machine"
 const ParentTypeId = "~effect/Machine/Parent"
-export const InvokeTypeId: unique symbol = Symbol.for("effect/Machine/Invoke")
 const ChildMachineTypeId = "~effect/Machine/ChildMachine"
 type MachineRuntimeRequirement = internalRuntime.MachineRuntime
 
@@ -1119,12 +1118,15 @@ const makeChild = <const Id extends string, M extends Machine.Any>(
   id: Id,
   machine: M,
   makeLogic: (input?: unknown) => Logic<any, any, any, any, any, any>
-): ChildMachine<Id, M> => ({
-  [ChildMachineTypeId]: ChildMachineTypeId,
-  id,
-  machine,
-  [ChildMachineLogicTypeId]: makeLogic
-})
+): ChildMachine<Id, M> =>
+  ({
+    [ChildMachineTypeId]: ChildMachineTypeId,
+    id,
+    machine,
+    [ChildMachineLogicTypeId]: makeLogic
+  } satisfies
+    & Pick<ChildMachine<Id, M>, typeof ChildMachineTypeId | "id" | "machine">
+    & ChildMachineLogicSlot) as unknown as ChildMachine<Id, M>
 
 export const childFamily = <M extends Machine.Any>(machine: M): ChildMachine.Family<M> => {
   const makeLogic = (input?: unknown): Logic<any, any, any, any, any, any> =>

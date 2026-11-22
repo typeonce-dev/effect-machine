@@ -137,26 +137,17 @@ export type FiniteTransitionTrigger =
   | { readonly type: "done" }
 
 /**
- * One deterministic transition in a finite generated model.
- *
- * @category models
- * @since 0.4.0
- */
-interface FiniteTransitionBase {
-  readonly source: string
-  /** Omission represents a targetless transition. */
-  readonly target?: string
-  /** Optional schema-valid value supplied for the declared target state. */
-  readonly targetValue?: number
-}
-
-/**
  * A public event transition may explicitly request source reentry.
  *
  * @category models
  * @since 0.4.0
  */
-export type FiniteEventTransition = FiniteTransitionBase & {
+export type FiniteEventTransition = {
+  readonly source: string
+  /** Omission represents a targetless transition. */
+  readonly target?: string
+  /** Optional schema-valid value supplied for the declared target state. */
+  readonly targetValue?: number
   readonly trigger: Extract<FiniteTransitionTrigger, { readonly type: "event" }>
   readonly reenter: boolean
 }
@@ -168,7 +159,12 @@ export type FiniteEventTransition = FiniteTransitionBase & {
  * @category models
  * @since 0.4.0
  */
-export type FiniteAutomaticTransition = FiniteTransitionBase & {
+export type FiniteAutomaticTransition = {
+  readonly source: string
+  /** Omission represents a targetless transition. */
+  readonly target?: string
+  /** Optional schema-valid value supplied for the declared target state. */
+  readonly targetValue?: number
   readonly trigger: Exclude<FiniteTransitionTrigger, { readonly type: "event" }>
 }
 
