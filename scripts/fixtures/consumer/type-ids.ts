@@ -43,7 +43,6 @@ export const choiceTargetKeys = expand(sample<Machine.Machine.ChoiceTargetInstru
 export const stateUpdateKeys = expand(sample<Machine.Machine.StateUpdate<any, any>>())
 export const combinedTargetKeys = expand(sample<Machine.Machine.CombinedTarget<1, any, any>>())
 export const constructionKeys = expand(sample<Machine.Machine.StateConstruction<1>>())
-export const targetSelectionKeys = expand(sample<Machine.Machine.TargetSelection<1, "Idle", "state", "local">>())
 
 // Functions whose types carry type-level brands can be exported as they are.
 export const select = AtomMachine.select

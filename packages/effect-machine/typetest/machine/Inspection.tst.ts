@@ -217,7 +217,7 @@ describe("Machine inspection", () => {
     const initialDefinition = Machine.initialDefinition(machine)
     expect(initialDefinition.target).type.toBe<"">()
     expect(initialDefinition.selection.path).type.toBe<"">()
-    expect(initialDefinition.selection.kind).type.toBe<"state" | "initial">()
+    expect(initialDefinition.selection.kind).type.toBe<"initial">()
     expect(initialDefinition.selection.scope).type.toBe<"initial">()
     const definition = Machine.transitionDefinitions(machine)[0]!
     expect(definition.source).type.toBe<"" | "main" | "main.idle" | "main.recent">()

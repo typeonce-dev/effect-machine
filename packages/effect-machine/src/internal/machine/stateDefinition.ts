@@ -138,22 +138,6 @@ const assertPlainRecord: (
   }
 }
 
-const validateTargetSelectorChildKey = (
-  boundary: StateDefinitionBoundary,
-  path: string,
-  states: unknown,
-  key: "initial" | "with",
-  message: string
-): void => {
-  if (typeof states !== "object" || states === null || Array.isArray(states) || !hasOwn(states, key)) return
-  const child = (states as Readonly<Record<string, unknown>>)[key]
-  if (
-    typeof child === "object" && child !== null && !Schema.isSchema(child) &&
-    (child as Readonly<Record<string, unknown>>).type === "history"
-  ) return
-  fail(boundary, `${path}.${key}`, message)
-}
-
 const assertAllowedProperties = (
   boundary: StateDefinitionBoundary,
   path: string,
@@ -266,22 +250,6 @@ const validateStateTree = (
       fail(boundary, `${path}.output`, "state output must be an Effect Schema")
     }
     if (kind === "compound") {
-      validateTargetSelectorChildKey(
-        boundary,
-        path,
-        node.states,
-        "initial",
-        "active and choice child states cannot use the reserved target selector key \"initial\""
-      )
-      if (valued) {
-        validateTargetSelectorChildKey(
-          boundary,
-          path,
-          node.states,
-          "with",
-          "schema-backed compound child states cannot use the reserved local target selector key \"with\""
-        )
-      }
       validateStateTree(boundary, node.states, path, true)
       continue
     }
@@ -289,13 +257,6 @@ const validateStateTree = (
       if (!hasOwn(node, "states")) {
         fail(boundary, `${path}.states`, "parallel states must declare child regions")
       }
-      validateTargetSelectorChildKey(
-        boundary,
-        path,
-        node.states,
-        "initial",
-        "active and choice child states cannot use the reserved target selector key \"initial\""
-      )
       validateStateTree(boundary, node.states, path, true)
     }
   }

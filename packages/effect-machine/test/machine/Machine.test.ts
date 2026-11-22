@@ -3227,7 +3227,7 @@ describe("Machine", () => {
         "fulfillment.shipping.quoted"
       ])
     }))
-  it.effect("uses target.local to enter an inactive nested parallel state", () =>
+  it.effect("enters an inactive nested parallel state with its descendant values", () =>
     Effect.gen(function*() {
       const workflow = new Payment({ id: "workflow-1" })
       const states = Machine.state({
@@ -3493,7 +3493,7 @@ describe("Machine", () => {
         }
       })
     }))
-  it.effect("uses target.local to preserve parent and sibling parallel region values", () =>
+  it.effect("preserves parent and sibling parallel region values when targeting a nested state", () =>
     Effect.gen(function*() {
       const states = Machine.state({
         states: {
@@ -3591,7 +3591,7 @@ describe("Machine", () => {
         }
       })
     }))
-  it.effect("uses target.local.with to replace the local compound value", () =>
+  it.effect("replaces a region compound value when targeting that compound", () =>
     Effect.gen(function*() {
       const states = Machine.state({
         states: {

@@ -138,31 +138,16 @@ export const RuntimeSynchronization = {
 } as const
 
 /**
- * The pure/reference-model result for one runtime command.
+ * The pure/reference-model result for one enqueued runtime command.
  *
  * @category models
  * @since 0.4.0
  */
-export interface RuntimeModelStep<Model, Expected, State, Error, Output> {
+export interface EnqueuedRuntimeModelStep<Model, Expected, State, Error, Output> {
   readonly model: Model
   readonly expected: Expected
   readonly synchronize: RuntimeSynchronization<State, Error, Output>
 }
-
-/**
- * Explicit name for the model step used by the enqueue-oriented command
- * runner. The `RuntimeModelStep` name remains as a compatibility alias.
- *
- * @category models
- * @since 0.4.0
- */
-export type EnqueuedRuntimeModelStep<Model, Expected, State, Error, Output> = RuntimeModelStep<
-  Model,
-  Expected,
-  State,
-  Error,
-  Output
->
 
 /**
  * Additional asynchronous observation requested after a causal command has
@@ -355,7 +340,7 @@ export interface CausalVerificationTranscript<M extends AnyMachine, Error, Outpu
  * @category models
  * @since 0.4.0
  */
-export interface RuntimeCommandActual<State, Error, Output, Observed> {
+export interface EnqueuedRuntimeCommandActual<State, Error, Output, Observed> {
   readonly result: RuntimeCommandResult
   readonly snapshot: Machine.RuntimeSnapshot<State, Error, Output> | undefined
   readonly published: ReadonlyArray<Machine.RuntimeSnapshot<State, Error, Output>>
@@ -368,7 +353,7 @@ export interface RuntimeCommandActual<State, Error, Output, Observed> {
  * @category models
  * @since 0.4.0
  */
-export interface RuntimeInspectionContext<State, Event, Error, Output> {
+export interface EnqueuedRuntimeInspectionContext<State, Event, Error, Output> {
   readonly index: number
   readonly command: RuntimeCommand<Event>
   readonly result: RuntimeCommandResult
@@ -383,12 +368,12 @@ export interface RuntimeInspectionContext<State, Event, Error, Output> {
  * @category models
  * @since 0.4.0
  */
-export interface RuntimeAssertionContext<Model, Expected, State, Event, Error, Output, Observed>
-  extends RuntimeInspectionContext<State, Event, Error, Output>
+export interface EnqueuedRuntimeAssertionContext<Model, Expected, State, Event, Error, Output, Observed>
+  extends EnqueuedRuntimeInspectionContext<State, Event, Error, Output>
 {
   readonly model: Model
   readonly expected: Expected
-  readonly actual: RuntimeCommandActual<State, Error, Output, Observed>
+  readonly actual: EnqueuedRuntimeCommandActual<State, Error, Output, Observed>
 }
 
 /**
@@ -397,7 +382,7 @@ export interface RuntimeAssertionContext<Model, Expected, State, Event, Error, O
  * @category models
  * @since 0.4.0
  */
-export interface RuntimeModelOptions<
+export interface EnqueuedRuntimeModelOptions<
   Model,
   Expected,
   State,
@@ -423,15 +408,15 @@ export interface RuntimeModelOptions<
     command: RuntimeCommand<Event>,
     index: number
   ) => Effect.Effect<
-    RuntimeModelStep<Model, Expected, State, Error, Output>,
+    EnqueuedRuntimeModelStep<Model, Expected, State, Error, Output>,
     ModelError,
     ModelServices
   >
   readonly inspect?: (
-    context: RuntimeInspectionContext<State, Event, Error, Output>
+    context: EnqueuedRuntimeInspectionContext<State, Event, Error, Output>
   ) => Effect.Effect<Observed, InspectionError, InspectionServices>
   readonly assert: (
-    context: RuntimeAssertionContext<Model, Expected, State, Event, Error, Output, Observed>
+    context: EnqueuedRuntimeAssertionContext<Model, Expected, State, Event, Error, Output, Observed>
   ) => Effect.Effect<void, AssertionError, AssertionServices>
 }
 
@@ -441,12 +426,12 @@ export interface RuntimeModelOptions<
  * @category models
  * @since 0.4.0
  */
-export interface RuntimeCommandRecord<Model, Expected, State, Event, Error, Output, Observed> {
+export interface EnqueuedRuntimeCommandRecord<Model, Expected, State, Event, Error, Output, Observed> {
   readonly index: number
   readonly command: RuntimeCommand<Event>
   readonly model: Model
   readonly expected: Expected
-  readonly actual: RuntimeCommandActual<State, Error, Output, Observed>
+  readonly actual: EnqueuedRuntimeCommandActual<State, Error, Output, Observed>
 }
 
 /**
@@ -455,10 +440,10 @@ export interface RuntimeCommandRecord<Model, Expected, State, Event, Error, Outp
  * @category models
  * @since 0.4.0
  */
-export interface RuntimeTranscript<Model, Expected, State, Event, Error, Output, Observed> {
+export interface EnqueuedRuntimeTranscript<Model, Expected, State, Event, Error, Output, Observed> {
   readonly commands: ReadonlyArray<RuntimeCommand<Event>>
   readonly initial: Machine.RuntimeSnapshot<State, Error, Output>
-  readonly records: ReadonlyArray<RuntimeCommandRecord<Model, Expected, State, Event, Error, Output, Observed>>
+  readonly records: ReadonlyArray<EnqueuedRuntimeCommandRecord<Model, Expected, State, Event, Error, Output, Observed>>
   readonly finalModel: Model
   /** The last explicitly synchronized snapshot, never a racy trailing sample. */
   readonly final: Machine.RuntimeSnapshot<State, Error, Output>
@@ -468,109 +453,6 @@ export interface RuntimeTranscript<Model, Expected, State, Event, Error, Output,
    */
   readonly synchronized: boolean
 }
-
-/**
- * Enqueue-oriented name for actual runtime command evidence.
- *
- * @category models
- * @since 0.4.0
- */
-export type EnqueuedRuntimeCommandActual<State, Error, Output, Observed> = RuntimeCommandActual<
-  State,
-  Error,
-  Output,
-  Observed
->
-
-/**
- * Enqueue-oriented name for runtime inspection context.
- *
- * @category models
- * @since 0.4.0
- */
-export type EnqueuedRuntimeInspectionContext<State, Event, Error, Output> = RuntimeInspectionContext<
-  State,
-  Event,
-  Error,
-  Output
->
-
-/**
- * Enqueue-oriented name for runtime assertion context.
- *
- * @category models
- * @since 0.4.0
- */
-export type EnqueuedRuntimeAssertionContext<Model, Expected, State, Event, Error, Output, Observed> =
-  RuntimeAssertionContext<Model, Expected, State, Event, Error, Output, Observed>
-
-/**
- * Enqueue-oriented options for a runtime reference model.
- *
- * @category models
- * @since 0.4.0
- */
-export type EnqueuedRuntimeModelOptions<
-  Model,
-  Expected,
-  State,
-  Event,
-  Error,
-  Output,
-  Observed = never,
-  ModelError = never,
-  ModelServices = never,
-  InspectionError = never,
-  InspectionServices = never,
-  AssertionError = never,
-  AssertionServices = never
-> = RuntimeModelOptions<
-  Model,
-  Expected,
-  State,
-  Event,
-  Error,
-  Output,
-  Observed,
-  ModelError,
-  ModelServices,
-  InspectionError,
-  InspectionServices,
-  AssertionError,
-  AssertionServices
->
-
-/**
- * Enqueue-oriented name for a checked runtime command record.
- *
- * @category models
- * @since 0.4.0
- */
-export type EnqueuedRuntimeCommandRecord<Model, Expected, State, Event, Error, Output, Observed> = RuntimeCommandRecord<
-  Model,
-  Expected,
-  State,
-  Event,
-  Error,
-  Output,
-  Observed
->
-
-/**
- * Enqueue-oriented name for a complete runtime transcript.
- *
- * @category models
- * @since 0.4.0
- */
-export type EnqueuedRuntimeTranscript<Model, Expected, State, Event, Error, Output, Observed> = RuntimeTranscript<
-  Model,
-  Expected,
-  State,
-  Event,
-  Error,
-  Output,
-  Observed
->
 
 /**
  * One successfully checked causal command.
@@ -680,8 +562,8 @@ export class RuntimeCommandFailure<
   readonly index: number
   readonly command: RuntimeCommand<Event>
   readonly cause: Cause.Cause<Failure>
-  readonly prefix: ReadonlyArray<RuntimeCommandRecord<Model, Expected, State, Event, Error, Output, Observed>>
-  readonly attempted: RuntimeCommandRecord<Model, Expected, State, Event, Error, Output, Observed> | undefined
+  readonly prefix: ReadonlyArray<EnqueuedRuntimeCommandRecord<Model, Expected, State, Event, Error, Output, Observed>>
+  readonly attempted: EnqueuedRuntimeCommandRecord<Model, Expected, State, Event, Error, Output, Observed> | undefined
 }> {}
 
 /**
@@ -717,8 +599,8 @@ const makeFailure = <Failure, Model, Expected, State, Event, Error, Output, Obse
   readonly index: number
   readonly command: RuntimeCommand<Event>
   readonly cause: Cause.Cause<Failure>
-  readonly prefix: ReadonlyArray<RuntimeCommandRecord<Model, Expected, State, Event, Error, Output, Observed>>
-  readonly attempted?: RuntimeCommandRecord<Model, Expected, State, Event, Error, Output, Observed>
+  readonly prefix: ReadonlyArray<EnqueuedRuntimeCommandRecord<Model, Expected, State, Event, Error, Output, Observed>>
+  readonly attempted?: EnqueuedRuntimeCommandRecord<Model, Expected, State, Event, Error, Output, Observed>
 }): RuntimeCommandFailure<Failure, Model, Expected, State, Event, Error, Output, Observed> =>
   new RuntimeCommandFailure({
     ...options,
@@ -941,7 +823,7 @@ export const runEnqueuedCommands = <
 >(
   ref: Machine.MachineRef<State, Event, Error, Output>,
   commands: Iterable<RuntimeCommand<Event>>,
-  options: RuntimeModelOptions<
+  options: EnqueuedRuntimeModelOptions<
     Model,
     Expected,
     State,
@@ -957,7 +839,7 @@ export const runEnqueuedCommands = <
     AssertionServices
   >
 ): Effect.Effect<
-  RuntimeTranscript<Model, Expected, State, Event, Error, Output, Observed>,
+  EnqueuedRuntimeTranscript<Model, Expected, State, Event, Error, Output, Observed>,
   RuntimeCommandFailure<
     ModelError | InspectionError | AssertionError | RuntimeObservationError,
     Model,
@@ -1000,7 +882,7 @@ export const runEnqueuedCommands = <
       yield* Deferred.await(ready)
       const initialEntry = yield* Queue.take(changes)
       const initial = initialEntry._tag === "Snapshot" ? initialEntry.snapshot : yield* ref.snapshot
-      const records: Array<RuntimeCommandRecord<Model, Expected, State, Event, Error, Output, Observed>> = []
+      const records: Array<EnqueuedRuntimeCommandRecord<Model, Expected, State, Event, Error, Output, Observed>> = []
       let model = options.initialModel
       let lastSynchronized = initial
       let outstandingWorkUnknown = false
@@ -1010,7 +892,7 @@ export const runEnqueuedCommands = <
         readonly index: number
         readonly command: RuntimeCommand<Event>
         readonly effect: () => Effect.Effect<A, Failure, R>
-        readonly attempted?: RuntimeCommandRecord<Model, Expected, State, Event, Error, Output, Observed>
+        readonly attempted?: EnqueuedRuntimeCommandRecord<Model, Expected, State, Event, Error, Output, Observed>
       }): Effect.Effect<
         A,
         RuntimeCommandFailure<Failure, Model, Expected, State, Event, Error, Output, Observed>,
@@ -1045,7 +927,7 @@ export const runEnqueuedCommands = <
           command,
           effect: () => executeCommand(ref, command)
         })
-        const attemptedBeforeObservation: RuntimeCommandRecord<
+        const attemptedBeforeObservation: EnqueuedRuntimeCommandRecord<
           Model,
           Expected,
           State,
@@ -1097,7 +979,7 @@ export const runEnqueuedCommands = <
             if (!outstandingWorkUnknown && synchronized.snapshot !== undefined) lastSynchronized = synchronized.snapshot
             break
         }
-        const inspectionContext: RuntimeInspectionContext<State, Event, Error, Output> = {
+        const inspectionContext: EnqueuedRuntimeInspectionContext<State, Event, Error, Output> = {
           index,
           command,
           result,
@@ -1105,7 +987,7 @@ export const runEnqueuedCommands = <
           snapshot: synchronized.snapshot,
           published: synchronized.published
         }
-        const attemptedBeforeInspection: RuntimeCommandRecord<
+        const attemptedBeforeInspection: EnqueuedRuntimeCommandRecord<
           Model,
           Expected,
           State,
@@ -1131,13 +1013,13 @@ export const runEnqueuedCommands = <
             effect: () => options.inspect!(inspectionContext),
             attempted: attemptedBeforeInspection
           })
-        const actual: RuntimeCommandActual<State, Error, Output, Observed> = {
+        const actual: EnqueuedRuntimeCommandActual<State, Error, Output, Observed> = {
           result,
           snapshot: synchronized.snapshot,
           published: synchronized.published,
           inspected
         }
-        const record: RuntimeCommandRecord<Model, Expected, State, Event, Error, Output, Observed> = {
+        const record: EnqueuedRuntimeCommandRecord<Model, Expected, State, Event, Error, Output, Observed> = {
           index,
           command,
           model,
@@ -1170,17 +1052,6 @@ export const runEnqueuedCommands = <
       }
     })
   )
-
-/**
- * Compatibility alias for enqueue-oriented runtime command execution.
- *
- * @deprecated Use `runEnqueuedCommands`. This compatibility name does not
- * expose whether sends are merely enqueued or causally processed.
- *
- * @category constructors
- * @since 0.4.0
- */
-export const runRuntimeCommands: typeof runEnqueuedCommands = runEnqueuedCommands
 
 /**
  * Runs typed commands against a probe and checks them against an Effect-native
@@ -1589,7 +1460,7 @@ export const runtimeCommands = <M extends AnyMachine>(
  */
 export const formatEnqueuedTranscript = (
   value:
-    | RuntimeTranscript<any, any, any, any, any, any, any>
+    | EnqueuedRuntimeTranscript<any, any, any, any, any, any, any>
     | RuntimeCommandFailure<any, any, any, any, any, any, any, any>
 ): string => {
   const failure = value instanceof RuntimeCommandFailure
@@ -1641,16 +1512,6 @@ export const formatEnqueuedTranscript = (
   }
   return lines.join("\n")
 }
-
-/**
- * Compatibility alias for enqueue-oriented transcript formatting.
- *
- * @deprecated Use `formatEnqueuedTranscript`.
- *
- * @category formatting
- * @since 0.4.0
- */
-export const formatRuntimeTranscript: typeof formatEnqueuedTranscript = formatEnqueuedTranscript
 
 /**
  * Formats a causal runtime transcript or failure as replayable line-oriented
