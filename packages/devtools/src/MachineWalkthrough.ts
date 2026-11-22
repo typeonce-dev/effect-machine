@@ -53,8 +53,8 @@ export interface Choice {
   readonly transitionId: string
   readonly branchId: string
   readonly branchIndex: number
+  /** The selected `branches` entry as written, such as `target:Paid`, or `null` for a direct transition. */
   readonly branchKey: string | null
-  readonly title: string | null
   readonly source: string
   readonly trigger: MachineDocument.Trigger
   readonly target: string | null

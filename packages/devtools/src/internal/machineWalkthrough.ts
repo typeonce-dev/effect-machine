@@ -226,7 +226,6 @@ export const choices = (self: MachineWalkthrough.Session): ReadonlyArray<Machine
       branchId: branch.id,
       branchIndex,
       branchKey: branch.type === "branch" ? branch.key : null,
-      title: branch.type === "branch" ? branch.key : null,
       source: transition.source,
       trigger: transition.trigger,
       target: branch.target,

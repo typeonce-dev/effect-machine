@@ -62,8 +62,6 @@ declare const EventProtocolTypeId: "~effect/Machine/EventProtocol"
 declare const ParentModeTypeId: "~effect/Machine/ParentMode"
 declare const ChildMachineLogicTypeId: "~effect/Machine/ChildMachineLogic"
 declare const InvokeTypeId: "~effect/Machine/Invoke"
-declare const SnapshotBuilderStateTypeId: "~effect/Machine/SnapshotBuilderState"
-declare const SnapshotBuilderConstructionTypeId: "~effect/Machine/SnapshotBuilderConstruction"
 declare const StateConstructionTypeId: "~effect/Machine/StateConstruction"
 declare const TargetSnapshotTypeId: "~effect/Machine/TargetSnapshot"
 declare const HistoryTargetTypeId: "~effect/Machine/HistoryTarget"
@@ -1071,213 +1069,11 @@ type ValidateEventProtocolBuilder<
 > = [Duplicate] extends [never] ? unknown
   : EventProtocolError<"Event protocol tags must be unique", Duplicate>
 
-type SnapshotBuilderComplete<Regions, Constructed extends boolean = false> = {
-  readonly [SnapshotBuilderStateTypeId]: Regions
-  readonly [SnapshotBuilderConstructionTypeId]: Constructed
-}
-
-type FromCallable<Arguments extends ReadonlyArray<unknown>, Result> = Arguments extends
-  readonly [infer Input, ...infer Rest extends ReadonlyArray<unknown>] ? {} extends Input ? {
-      (...args: Rest): Result
-      (...args: Arguments): Result
-    }
-  : (...args: Arguments) => Result
-  : (...args: Arguments) => Result
-
-type FromMethod<in out Arguments extends ReadonlyArray<unknown>, out Result> = {
-  /**
-   * Constructs the selected state from its schema make input while the
-   * machine plans the resulting configuration. The input may be omitted when
-   * the schema accepts an empty constructor object.
-   *
-   * @since 0.4.0
-   */
-  readonly from: FromCallable<Arguments, Machine.StateConstruction<Result>>
-}
-
-type DecodedMethod<Arguments extends ReadonlyArray<unknown>, Result> = {
-  /**
-   * Constructs the selected state from an already-decoded schema value. The
-   * machine validates the value against the schema's type side while planning.
-   *
-   * @since 0.22.0
-   */
-  readonly decoded: (...args: Arguments) => Result
-}
-
-type ConstructionResult<Result> = Result | Machine.StateConstruction<Result>
-
-type UnwrapConstruction<Result> = Result extends Machine.StateConstruction<infer Value> ? Value : Result
-
 type NodeValue<Node> = [Machine.NodeSchema<Node>] extends [never] ? undefined
   : Machine.NodeSchema<Node>["Type"]
 
 type NodeMakeInput<Node> = [Machine.NodeSchema<Node>] extends [never] ? never
   : Machine.NodeSchema<Node>["~type.make.in"]
-
-type WithNodeValue<Node, Rest extends ReadonlyArray<unknown>> = Machine.NodeSchema<Node> extends never ? Rest
-  : readonly [value: NodeValue<Node>, ...Rest]
-
-type WithNodeInput<Node, Rest extends ReadonlyArray<unknown>> = Machine.NodeSchema<Node> extends never ? Rest
-  : readonly [input: NodeMakeInput<Node>, ...Rest]
-
-type NodeBuilderMethod<
-  Node,
-  Arguments extends ReadonlyArray<unknown>,
-  Result,
-  FromArguments extends ReadonlyArray<unknown>,
-  FromResult
-> = Machine.NodeSchema<Node> extends never ? {
-    readonly from: FromCallable<FromArguments, FromResult>
-  }
-  : DecodedMethod<Arguments, Result> & { readonly from: FromCallable<FromArguments, FromResult> }
-
-type NodeMethod<
-  Node,
-  Arguments extends ReadonlyArray<unknown>,
-  Result,
-  FromArguments extends ReadonlyArray<unknown>
-> = Machine.NodeSchema<Node> extends never ? FromMethod<FromArguments, Result>
-  : DecodedMethod<Arguments, Result> & FromMethod<FromArguments, Result>
-
-type NodeMethodWithInitial<
-  Node,
-  Arguments extends ReadonlyArray<unknown>,
-  Result,
-  FromArguments extends ReadonlyArray<unknown>,
-  Path extends string
-> = Machine.NodeSchema<Node> extends never ? {
-    readonly from: FromCallable<FromArguments, Machine.StateConstruction<Result>>
-    readonly initial: InitialTargetFactory<Node, Path>
-  }
-  :
-    & DecodedMethod<Arguments, Result>
-    & {
-      readonly from: FromCallable<FromArguments, Machine.StateConstruction<Result>>
-      readonly initial: InitialTargetFactory<Node, Path>
-    }
-
-type InitialTargetMethod<
-  Node,
-  Path extends string
-> = {
-  /** Enters this state through its declared initial configuration. */
-  readonly initial: InitialTargetFactory<Node, Path>
-}
-
-type InitialTargetFactory<
-  Node,
-  Path extends string
-> = {
-  readonly from: FromCallable<
-    WithNodeInput<Node, readonly []>,
-    Machine.StateConstruction<Machine.InitialTarget<Path>>
-  >
-  readonly decoded: (...args: WithNodeValue<Node, readonly []>) => Machine.InitialTarget<Path>
-}
-
-type NodeConstructionSelectorFromCallable<Node, Builder, Result> = Machine.NodeSchema<Node> extends never ? {
-    <Selected extends ConstructionResult<Result>>(
-      state: (builder: Builder) => Selected
-    ): Machine.StateConstruction<UnwrapConstruction<Selected>>
-  }
-  : ConstructionSelectorFromCallable<NodeMakeInput<Node>, Builder, Result>
-
-type NestedTargetMethod<Node, Builder, Result, Path extends string> = Machine.NodeSchema<Node> extends never ? {
-    readonly from: NodeConstructionSelectorFromCallable<Node, Builder, Result>
-    readonly initial: InitialTargetFactory<Node, Path>
-  }
-  : {
-    readonly decoded: <Selected extends ConstructionResult<Result>>(
-      value: NodeValue<Node>,
-      state: (builder: Builder) => Selected
-    ) => Selected
-    readonly from: NodeConstructionSelectorFromCallable<Node, Builder, Result>
-    readonly initial: InitialTargetFactory<Node, Path>
-  }
-
-type ConstructionSelectorFromCallable<Input, Builder, Result> = {} extends Input ? {
-    <Selected extends ConstructionResult<Result>>(
-      state: (builder: Builder) => Selected
-    ): Machine.StateConstruction<UnwrapConstruction<Selected>>
-    <Selected extends ConstructionResult<Result>>(
-      input: Input,
-      state: (builder: Builder) => Selected
-    ): Machine.StateConstruction<UnwrapConstruction<Selected>>
-  }
-  : <Selected extends ConstructionResult<Result>>(
-    input: Input,
-    state: (builder: Builder) => Selected
-  ) => Machine.StateConstruction<UnwrapConstruction<Selected>>
-
-type FullSnapshotBuilderWithPrefix<
-  in out States extends Machine.StateSchemas,
-  in out Prefix extends string = ""
-> = {
-  readonly [Key in ActiveStateKey<States> | ChoiceStateKey<States>]: Key extends ActiveStateKey<States>
-    ? FullSnapshotMethod<States, Key, Prefix>
-    : () => Machine.ChoiceTargetInstruction<Machine.JoinPath<Prefix, Key>>
-}
-
-type FullSnapshotMethod<
-  in out States extends Machine.StateSchemas,
-  in out StateId extends ActiveStateKey<States>,
-  in out Prefix extends string
-> = {
-  readonly [
-    /** Constructs this node using schema make input or an already decoded value. */
-    Method in Machine.NodeSchema<States[StateId]> extends never ? "from" : "from" | "decoded"
-  ]: Method extends "from" ? FromCallable<
-      FullSnapshotFromArguments<States, StateId, Prefix>,
-      Machine.StateConstruction<FullSnapshotResult<States, StateId, Prefix>>
-    >
-    : (...args: FullSnapshotArguments<States, StateId, Prefix>) => FullSnapshotResult<States, StateId, Prefix>
-}
-
-type FullSnapshotArguments<
-  States extends Machine.StateSchemas,
-  StateId extends ActiveStateKey<States>,
-  Prefix extends string,
-  Path extends string = Machine.JoinPath<Prefix, StateId>
-> = States[StateId] extends infer Node ?
-  Node extends { readonly type: "parallel"; readonly states: infer Children extends Machine.StateSchemas } ?
-    WithNodeValue<Node, [
-      states: (
-        builder: FullParallelBuilder<Children, Path>
-      ) => SnapshotBuilderComplete<Machine.SnapshotRegionsWithPrefix<Children, Path>>
-    ]>
-  : Node extends { readonly states: infer Children extends Machine.StateSchemas } ? WithNodeValue<Node, [
-      state: (
-        builder: FullSnapshotBuilderWithPrefix<Children, Path>
-      ) =>
-        | Machine.SnapshotWithPrefix<Children, Path>
-        | Machine.ChoiceTargetInstruction<Machine.ChoiceIdentifierWithPrefix<Children, Path>>
-    ]>
-  : WithNodeValue<Node, []>
-  : never
-
-type FullSnapshotFromArguments<
-  States extends Machine.StateSchemas,
-  StateId extends ActiveStateKey<States>,
-  Prefix extends string,
-  Path extends string = Machine.JoinPath<Prefix, StateId>
-> = States[StateId] extends infer Node ?
-  Node extends { readonly type: "parallel"; readonly states: infer Children extends Machine.StateSchemas } ?
-    WithNodeInput<Node, [
-      states: (
-        builder: FullParallelBuilder<Children, Path>
-      ) => SnapshotBuilderComplete<Machine.SnapshotRegionsWithPrefix<Children, Path>, boolean>
-    ]>
-  : Node extends { readonly states: infer Children extends Machine.StateSchemas } ? WithNodeInput<Node, [
-      state: (
-        builder: FullSnapshotBuilderWithPrefix<Children, Path>
-      ) => ConstructionResult<
-        | Machine.SnapshotWithPrefix<Children, Path>
-        | Machine.ChoiceTargetInstruction<Machine.ChoiceIdentifierWithPrefix<Children, Path>>
-      >
-    ]>
-  : WithNodeInput<Node, []>
-  : never
 
 type FullSnapshotResult<
   States extends Machine.StateSchemas,
@@ -1285,88 +1081,6 @@ type FullSnapshotResult<
   Prefix extends string,
   Path extends string = Machine.JoinPath<Prefix, StateId>
 > = Machine.SnapshotByIdentifierWithPath<States, StateId, Path>
-
-type InitialEntryStateKey<States extends Machine.StateSchemas> = {
-  readonly [Key in ActiveStateKey<States>]: States[Key] extends { readonly states: Machine.StateSchemas } ? Key : never
-}[ActiveStateKey<States>]
-
-type FullInitialTargetBuilder<States extends Machine.StateSchemas> = {
-  readonly [Key in InitialEntryStateKey<States>]: InitialTargetMethod<States[Key], Key>
-}
-
-type FullParallelBuilder<
-  States extends Machine.StateSchemas,
-  Prefix extends string,
-  Remaining extends ActiveStateKey<States> = ActiveStateKey<States>,
-  Regions = {},
-  Constructed extends boolean = false
-> =
-  & SnapshotBuilderComplete<Regions, Constructed>
-  & {
-    readonly [Key in Remaining]: NodeBuilderMethod<
-      States[Key],
-      FullSnapshotArguments<States, Key, Prefix>,
-      FullParallelBuilder<
-        States,
-        Prefix,
-        Exclude<Remaining, Key>,
-        Regions & { readonly [Region in Key]: FullSnapshotResult<States, Key, Prefix> },
-        Constructed
-      >,
-      FullSnapshotFromArguments<States, Key, Prefix>,
-      FullParallelBuilder<
-        States,
-        Prefix,
-        Exclude<Remaining, Key>,
-        Regions & { readonly [Region in Key]: FullSnapshotResult<States, Key, Prefix> },
-        true
-      >
-    >
-  }
-
-type HistorySnapshotArguments<
-  States extends Machine.StateSchemas,
-  StateId extends ActiveStateKey<States>,
-  Prefix extends string,
-  Owner extends string,
-  Path extends string = Machine.JoinPath<Prefix, StateId>
-> = Path extends Owner ? FullSnapshotArguments<States, StateId, Prefix>
-  : States[StateId] extends infer Node ?
-    Node extends { readonly type: "parallel"; readonly states: infer Children extends Machine.StateSchemas } ?
-      WithNodeValue<Node, [
-        states: (
-          builder: HistoryParallelBuilder<Children, Path, Owner>
-        ) => SnapshotBuilderComplete<HistorySnapshotRegions<Children, Path, Owner>>
-      ]>
-    : Node extends { readonly states: infer Children extends Machine.StateSchemas } ? WithNodeValue<Node, [
-        state: (
-          builder: HistorySnapshotBuilderWithPrefix<Children, Owner, Path>
-        ) => ConstructionResult<HistorySnapshotWithPrefix<Children, Owner, Path>>
-      ]>
-    : never
-  : never
-
-type HistorySnapshotFromArguments<
-  States extends Machine.StateSchemas,
-  StateId extends ActiveStateKey<States>,
-  Prefix extends string,
-  Owner extends string,
-  Path extends string = Machine.JoinPath<Prefix, StateId>
-> = Path extends Owner ? FullSnapshotFromArguments<States, StateId, Prefix>
-  : States[StateId] extends infer Node ?
-    Node extends { readonly type: "parallel"; readonly states: infer Children extends Machine.StateSchemas } ?
-      WithNodeInput<Node, [
-        states: (
-          builder: HistoryParallelBuilder<Children, Path, Owner>
-        ) => SnapshotBuilderComplete<HistorySnapshotRegions<Children, Path, Owner>, boolean>
-      ]>
-    : Node extends { readonly states: infer Children extends Machine.StateSchemas } ? WithNodeInput<Node, [
-        state: (
-          builder: HistorySnapshotBuilderWithPrefix<Children, Owner, Path>
-        ) => ConstructionResult<HistorySnapshotWithPrefix<Children, Owner, Path>>
-      ]>
-    : never
-  : never
 
 type HistorySnapshotResult<
   States extends Machine.StateSchemas,
@@ -1390,22 +1104,6 @@ type HistorySnapshotResult<
     : never
   : never
 
-type HistorySnapshotMethod<
-  in out States extends Machine.StateSchemas,
-  in out StateId extends ActiveStateKey<States>,
-  in out Prefix extends string,
-  in out Owner extends string
-> = {
-  readonly [Key in Machine.NodeSchema<States[StateId]> extends never ? "from" : "from" | "decoded"]: Key extends
-    "from" ? FromCallable<
-      HistorySnapshotFromArguments<States, StateId, Prefix, Owner>,
-      Machine.StateConstruction<HistorySnapshotResult<States, StateId, Prefix, Owner>>
-    > :
-    (
-      ...args: HistorySnapshotArguments<States, StateId, Prefix, Owner>
-    ) => HistorySnapshotResult<States, StateId, Prefix, Owner>
-}
-
 type HistorySnapshotWithPrefix<
   States extends Machine.StateSchemas,
   Owner extends string,
@@ -1417,19 +1115,6 @@ type HistorySnapshotWithPrefix<
     HistorySnapshotResult<States, Key, Prefix, Owner>
     : never
 }[ActiveStateKey<States>]
-
-type HistorySnapshotBuilderWithPrefix<
-  States extends Machine.StateSchemas,
-  Owner extends string,
-  Prefix extends string = ""
-> = {
-  readonly [
-    Key in ActiveStateKey<States> as Owner extends
-      | Machine.JoinPath<Prefix, Key>
-      | (Machine.JoinPath<Prefix, Key> extends "" ? string : `${Machine.JoinPath<Prefix, Key>}.${string}`) ? Key
-      : never
-  ]: HistorySnapshotMethod<States, Key, Prefix, Owner>
-}
 
 type HistorySnapshotRegions<
   States extends Machine.StateSchemas,
@@ -1443,326 +1128,7 @@ type HistorySnapshotRegions<
     : FullSnapshotResult<States, Key, Prefix>
 }
 
-type HistoryParallelBuilder<
-  States extends Machine.StateSchemas,
-  Prefix extends string,
-  Owner extends string,
-  Remaining extends ActiveStateKey<States> = ActiveStateKey<States>,
-  Regions = {},
-  Constructed extends boolean = false
-> =
-  & SnapshotBuilderComplete<Regions, Constructed>
-  & {
-    readonly [Key in Remaining]: Owner extends
-      | Machine.JoinPath<Prefix, Key>
-      | (Machine.JoinPath<Prefix, Key> extends "" ? string : `${Machine.JoinPath<Prefix, Key>}.${string}`) ?
-      NodeBuilderMethod<
-        States[Key],
-        HistorySnapshotArguments<States, Key, Prefix, Owner>,
-        HistoryParallelBuilder<
-          States,
-          Prefix,
-          Owner,
-          Exclude<Remaining, Key>,
-          Regions & { readonly [Region in Key]: HistorySnapshotResult<States, Key, Prefix, Owner> },
-          Constructed
-        >,
-        HistorySnapshotFromArguments<States, Key, Prefix, Owner>,
-        HistoryParallelBuilder<
-          States,
-          Prefix,
-          Owner,
-          Exclude<Remaining, Key>,
-          Regions & { readonly [Region in Key]: HistorySnapshotResult<States, Key, Prefix, Owner> },
-          true
-        >
-      >
-      : NodeBuilderMethod<
-        States[Key],
-        FullSnapshotArguments<States, Key, Prefix>,
-        HistoryParallelBuilder<
-          States,
-          Prefix,
-          Owner,
-          Exclude<Remaining, Key>,
-          Regions & { readonly [Region in Key]: FullSnapshotResult<States, Key, Prefix> },
-          Constructed
-        >,
-        FullSnapshotFromArguments<States, Key, Prefix>,
-        HistoryParallelBuilder<
-          States,
-          Prefix,
-          Owner,
-          Exclude<Remaining, Key>,
-          Regions & { readonly [Region in Key]: FullSnapshotResult<States, Key, Prefix> },
-          true
-        >
-      >
-  }
-
 type ParentPath<Path extends string> = Machine.ImmediateParentStateIdentifier<Path>
-
-type IsCompoundNode<Node> = Node extends { readonly type: "parallel" } ? false
-  : Node extends { readonly states: Machine.StateSchemas } ? true
-  : false
-
-type NearestCompoundScope<
-  States extends Machine.StateSchemas,
-  Source extends Machine.StateNodeIdentifier<States>
-> = Source extends Machine.StateIdentifier<States> ?
-  IsCompoundNode<Machine.NodeByIdentifier<States, Source>> extends true ? Source
-  : ParentPath<Source> extends infer Parent extends Machine.StateIdentifier<States> ?
-    NearestCompoundScope<States, Parent>
-  : never
-  : ParentPath<Source> extends infer Parent extends Machine.StateIdentifier<States> ?
-    NearestCompoundScope<States, Parent>
-  : never
-
-type ChildrenOf<
-  States extends Machine.StateSchemas,
-  Path extends Machine.StateIdentifier<States>
-> = Machine.NodeByIdentifier<States, Path> extends { readonly states: infer Children extends Machine.StateSchemas } ?
-  Children
-  : never
-
-type StateIdentifierFromPath<
-  States extends Machine.StateSchemas,
-  Path extends string
-> = Extract<Path, Machine.StateIdentifier<States>>
-
-type LocalTargetResult<
-  AllStates extends Machine.StateSchemas,
-  States extends Machine.StateSchemas,
-  StateId extends ActiveStateKey<States>,
-  Prefix extends string,
-  Path extends string = Machine.JoinPath<Prefix, StateId>
-> = States[StateId] extends { readonly states: infer Children extends Machine.StateSchemas } ?
-  States[StateId] extends { readonly type: "parallel" } ?
-    Machine.Target<AllStates, StateIdentifierFromPath<AllStates, Path>>
-  : LocalTargetResultWithPrefix<AllStates, Children, Path>
-  : Machine.Target<AllStates, StateIdentifierFromPath<AllStates, Path>>
-
-type LocalTargetResultWithPrefix<
-  AllStates extends Machine.StateSchemas,
-  States extends Machine.StateSchemas,
-  Prefix extends string
-> =
-  | {
-    readonly [Key in ActiveStateKey<States>]: LocalTargetResult<AllStates, States, Key, Prefix>
-  }[ActiveStateKey<States>]
-  | Machine.ChoiceTarget<
-    AllStates,
-    Extract<Machine.JoinPath<Prefix, ChoiceStateKey<States>>, Machine.ChoiceIdentifier<AllStates>>
-  >
-
-type LocalTargetBuilderWithPrefix<
-  AllStates extends Machine.StateSchemas,
-  States extends Machine.StateSchemas,
-  Prefix extends string,
-  Source extends Machine.StateNodeIdentifier<AllStates>
-> =
-  & {
-    readonly [Key in ActiveStateKey<States>]: LocalTargetMethod<AllStates, States, Key, Prefix, Source>
-  }
-  & {
-    readonly [Key in ChoiceStateKey<States>]: () => Machine.ChoiceTarget<
-      AllStates,
-      Extract<Machine.JoinPath<Prefix, Key>, Machine.ChoiceIdentifier<AllStates>>
-    >
-  }
-
-type LocalTargetMethod<
-  AllStates extends Machine.StateSchemas,
-  States extends Machine.StateSchemas,
-  StateId extends ActiveStateKey<States>,
-  Prefix extends string,
-  Source extends Machine.StateNodeIdentifier<AllStates>,
-  Path extends string = Machine.JoinPath<Prefix, StateId>
-> = States[StateId] extends infer Node ?
-  Node extends { readonly type: "parallel"; readonly states: infer Children extends Machine.StateSchemas } ?
-    Source extends Path | (Path extends "" ? string : `${Path}.${string}`) ? NestedTargetMethod<
-        Node,
-        LocalTargetBuilderWithPrefix<AllStates, Children, Path, Source>,
-        LocalTargetResultWithPrefix<AllStates, Children, Path>,
-        Path
-      >
-    : NodeMethodWithInitial<
-      Node,
-      WithNodeValue<Node, [
-        states: (
-          builder: FullParallelBuilder<Children, Path>
-        ) => SnapshotBuilderComplete<Machine.SnapshotRegionsWithPrefix<Children, Path>>
-      ]>,
-      Machine.Target<AllStates, StateIdentifierFromPath<AllStates, Path>>,
-      WithNodeInput<Node, [
-        states: (
-          builder: FullParallelBuilder<Children, Path>
-        ) => SnapshotBuilderComplete<Machine.SnapshotRegionsWithPrefix<Children, Path>, boolean>
-      ]>,
-      Path
-    >
-  : Node extends { readonly states: infer Children extends Machine.StateSchemas } ? NestedTargetMethod<
-      Node,
-      LocalTargetBuilderWithPrefix<AllStates, Children, Path, Source>,
-      LocalTargetResultWithPrefix<AllStates, Children, Path>,
-      Path
-    >
-  : NodeMethod<
-    Node,
-    WithNodeValue<Node, []>,
-    Machine.Target<AllStates, StateIdentifierFromPath<AllStates, Path>>,
-    WithNodeInput<Node, []>
-  >
-  : never
-
-type LocalTargetBuilderForScope<
-  States extends Machine.StateSchemas,
-  Scope extends Machine.StateIdentifier<States>,
-  Source extends Machine.StateNodeIdentifier<States>
-> = ChildrenOf<States, Scope> extends infer Children extends Machine.StateSchemas ?
-    & LocalTargetBuilderWithPrefix<States, Children, Scope, Source>
-    & (Scope extends Machine.ValuedStateIdentifier<States> ? {
-        /**
-         * Updates the value of the state containing the local group and moves to
-         * one of the states inside it. Values in other active branches are kept.
-         *
-         * @since 0.4.0
-         */
-        readonly with: {
-          readonly decoded: <Result extends ConstructionResult<LocalTargetResultWithPrefix<States, Children, Scope>>>(
-            value: Machine.StateByIdentifier<States, Scope>,
-            state: (
-              builder: LocalTargetBuilderWithPrefix<States, Children, Scope, Source>
-            ) => Result
-          ) => Result
-          readonly from: ConstructionSelectorFromCallable<
-            Machine.SchemaByIdentifier<States, Scope>["~type.make.in"],
-            LocalTargetBuilderWithPrefix<States, Children, Scope, Source>,
-            LocalTargetResultWithPrefix<States, Children, Scope>
-          >
-        }
-      } :
-      {})
-  : {}
-
-type BranchTargetResult<
-  AllStates extends Machine.StateSchemas,
-  States extends Machine.StateSchemas,
-  StateId extends ActiveStateKey<States>,
-  Prefix extends string,
-  Path extends string = Machine.JoinPath<Prefix, StateId>
-> = States[StateId] extends { readonly states: infer Children extends Machine.StateSchemas } ?
-  States[StateId] extends { readonly type: "parallel" } ?
-    Machine.Target<AllStates, StateIdentifierFromPath<AllStates, Path>>
-  : BranchTargetResultWithPrefix<AllStates, Children, Path>
-  : Machine.Target<AllStates, StateIdentifierFromPath<AllStates, Path>>
-
-type BranchTargetResultWithPrefix<
-  AllStates extends Machine.StateSchemas,
-  States extends Machine.StateSchemas,
-  Prefix extends string
-> =
-  | {
-    readonly [Key in ActiveStateKey<States>]: BranchTargetResult<AllStates, States, Key, Prefix>
-  }[ActiveStateKey<States>]
-  | Machine.ChoiceTarget<
-    AllStates,
-    Extract<Machine.JoinPath<Prefix, ChoiceStateKey<States>>, Machine.ChoiceIdentifier<AllStates>>
-  >
-
-type BranchTargetBuilderWithPrefix<
-  AllStates extends Machine.StateSchemas,
-  States extends Machine.StateSchemas,
-  Prefix extends string,
-  Source extends Machine.StateNodeIdentifier<AllStates>
-> =
-  & {
-    readonly [Key in ActiveStateKey<States>]: BranchTargetMethod<AllStates, States, Key, Prefix, Source>
-  }
-  & {
-    readonly [Key in ChoiceStateKey<States>]: () => Machine.ChoiceTarget<
-      AllStates,
-      Extract<Machine.JoinPath<Prefix, Key>, Machine.ChoiceIdentifier<AllStates>>
-    >
-  }
-
-type BranchTargetMethod<
-  AllStates extends Machine.StateSchemas,
-  States extends Machine.StateSchemas,
-  StateId extends ActiveStateKey<States>,
-  Prefix extends string,
-  Source extends Machine.StateNodeIdentifier<AllStates>,
-  Path extends string = Machine.JoinPath<Prefix, StateId>
-> = States[StateId] extends infer Node ?
-  Node extends { readonly type: "parallel"; readonly states: infer Children extends Machine.StateSchemas } ?
-    Source extends Path | (Path extends "" ? string : `${Path}.${string}`) ?
-        & NestedTargetMethod<
-          Node,
-          BranchTargetBuilderWithPrefix<AllStates, Children, Path, Source>,
-          BranchTargetResultWithPrefix<AllStates, Children, Path>,
-          Path
-        >
-        & BranchTargetBuilderWithPrefix<AllStates, Children, Path, Source>
-    : NodeMethodWithInitial<
-      Node,
-      WithNodeValue<Node, [
-        states: (
-          builder: FullParallelBuilder<Children, Path>
-        ) => SnapshotBuilderComplete<Machine.SnapshotRegionsWithPrefix<Children, Path>>
-      ]>,
-      Machine.Target<AllStates, StateIdentifierFromPath<AllStates, Path>>,
-      WithNodeInput<Node, [
-        states: (
-          builder: FullParallelBuilder<Children, Path>
-        ) => SnapshotBuilderComplete<Machine.SnapshotRegionsWithPrefix<Children, Path>, boolean>
-      ]>,
-      Path
-    >
-  : Node extends { readonly states: infer Children extends Machine.StateSchemas } ?
-      & NestedTargetMethod<
-        Node,
-        BranchTargetBuilderWithPrefix<AllStates, Children, Path, Source>,
-        BranchTargetResultWithPrefix<AllStates, Children, Path>,
-        Path
-      >
-      & BranchTargetBuilderWithPrefix<AllStates, Children, Path, Source>
-  : NodeMethod<
-    Node,
-    WithNodeValue<Node, []>,
-    Machine.Target<AllStates, StateIdentifierFromPath<AllStates, Path>>,
-    WithNodeInput<Node, []>
-  >
-  : never
-
-type BranchTargetBuilderForRoot<
-  States extends Machine.StateSchemas,
-  Root extends ActiveStateKey<States>,
-  Source extends Machine.StateNodeIdentifier<States>
-> = {
-  readonly [Key in Root]: BranchTargetMethod<States, States, Key, "", Source>
-}
-
-type HistoryContainingKey<States extends Machine.StateSchemas> = {
-  readonly [Key in Extract<keyof States, string>]: States[Key] extends Machine.HistoryStateNodeConfig ? Key
-    : States[Key] extends { readonly states: infer Children extends Machine.StateSchemas } ?
-      [Machine.HistoryIdentifier<Children>] extends [never] ? never : Key
-    : never
-}[Extract<keyof States, string>]
-
-type HistoryTargetBuilderWithPrefix<
-  AllStates extends Machine.StateSchemas,
-  States extends Machine.StateSchemas,
-  Prefix extends string
-> = {
-  readonly [Key in HistoryContainingKey<States>]: States[Key] extends Machine.HistoryStateNodeConfig ?
-    () => Machine.HistoryTarget<
-      AllStates,
-      Extract<Machine.JoinPath<Prefix, Key>, Machine.HistoryIdentifier<AllStates>>
-    >
-    : States[Key] extends { readonly states: infer Children extends Machine.StateSchemas } ?
-      HistoryTargetBuilderWithPrefix<AllStates, Children, Machine.JoinPath<Prefix, Key>>
-    : never
-}
 
 type HasDirectShallowHistory<States extends Machine.StateSchemas> = {
   readonly [Key in HistoryStateKey<States>]: States[Key] extends { readonly history: "deep" } ? never : Key
@@ -2362,10 +1728,11 @@ type InvokeLifecycleId = string & { readonly [ChildAddressTypeId]?: never }
  *
  * **Details**
  *
- * The descriptor carries the child's address and complete machine type. Pass
- * a descriptor for the same id and machine to inline `invoke`, `sendTo`, and
- * child lookup APIs so state, event, error, and output types are inferred
- * without separate annotations.
+ * The descriptor carries the child's address and complete machine type.
+ * Register it in `make({ children })` to invoke it by `src`, and pass a
+ * descriptor for the same id and machine to `sendTo` and child lookup APIs, so
+ * state, event, error, and output types are inferred without separate
+ * annotations.
  *
  * @category models
  * @since 0.4.0
@@ -3009,7 +2376,7 @@ export declare namespace Machine {
     }
   }
 
-  /** A schema or an existing protocol accepted by an event builder. */
+  /** A schema or an existing protocol accepted by `eventsFromSchemas` and its internal and emitted counterparts. */
   export type EventProtocolInput<Kind extends EventProtocolKind> = TaggedSchema | EventProtocol.Any<Kind>
 
   type EventProtocolInputSchemas<
@@ -3207,8 +2574,8 @@ export declare namespace Machine {
    * Transient decision pseudo-state resolved immediately when targeted.
    *
    * Choice nodes have no value and never belong to an active configuration.
-   * Their required `choice` implementation uses ordinary TypeScript or an
-   * Effect to select a typed target.
+   * Their required `choice` transition selects a typed destination
+   * synchronously.
    *
    * @category models
    * @since 0.4.0
@@ -3245,29 +2612,13 @@ export declare namespace Machine {
   export type StateTree = Readonly<Record<string, TaggedSchema | StateNodeConfig>>
 
   /**
-   * State schema definitions accepted by `make`.
+   * State tree used as the topology parameter of machine types. A machine's
+   * tree holds its root node under the `""` key.
    *
    * @category models
    * @since 0.4.0
    */
   export type StateSchemas = StateTree
-
-  /**
-   * Builder for initial state snapshots generated by `states`.
-   *
-   * **When to use**
-   *
-   * Use when you need the type of the `initial` property returned by
-   * `states` or want to expose an initial snapshot builder from a helper.
-   *
-   * **Details**
-   *
-   * Initial builders enforce the declared initial child for compound states and
-   * require every direct region for parallel states.
-   *
-   * @category utility types
-   * @since 0.4.0
-   */
 
   /**
    * Typed snapshot access shared by state descriptors.
@@ -3545,7 +2896,17 @@ export declare namespace Machine {
       readonly outcome: "element" | "done" | "failure" | "snapshot"
     }
 
-  /** Static topology selected by a transition branch. */
+  /**
+   * Static topology selected by a transition branch.
+   *
+   * **Details**
+   *
+   * `kind` is `"state"` or `"choice"` for the path named by `target`,
+   * `"history"` for `history`, `"state"` with the root path `""` for
+   * `initialize`, and `"update"` for an `update` without a destination. A
+   * `{ stay: true }` entry, or a transition with only `reenter: true`, has kind
+   * `"none"` and no path. The machine's initial entry has kind `"initial"`.
+   */
   export interface TransitionTargetSelection<
     Path extends string | undefined = string | undefined,
     Kind extends Topology.TargetSelectionKind = Topology.TargetSelectionKind,
@@ -3585,9 +2946,11 @@ export declare namespace Machine {
    * **Details**
    *
    * Every branch exposes its static selection without executing its resolver.
-   * A compound local or branch target covers its descendants. An `update`
-   * selection keeps `target` undefined and records its value owner in
-   * `selection.path`; `none` identifies an explicitly targetless branch.
+   * Selecting a compound or parallel state also covers the descendants the
+   * transition enters through it. An `update` selection keeps `target`
+   * undefined and records its value owner in `selection.path`. A
+   * `{ stay: true }` entry keeps `target` undefined and has
+   * `selection.kind` `"none"`.
    *
    * @category models
    * @since 0.4.0
@@ -3647,7 +3010,8 @@ export declare namespace Machine {
   }
 
   /**
-   * Constructor arguments for a machine initial state function.
+   * Startup arguments: the decoded input when the machine declares an input
+   * schema, and none otherwise.
    *
    * @category utility types
    * @since 0.4.0
@@ -4462,7 +3826,7 @@ export declare namespace Machine {
       : never)
 
   /**
-   * Opaque state construction returned by a builder's `.from` method.
+   * Opaque state construction returned by a history default's `target`.
    *
    * The machine resolves the instruction through the selected state schema
    * while planning. Its decoded value is intentionally unavailable until
@@ -4560,7 +3924,11 @@ export declare namespace Machine {
     readonly [DeclinedTypeId]: typeof DeclinedTypeId
   }
 
-  /** Static acceptance contract of one transition definition. */
+  /**
+   * Static acceptance contract of one transition definition: `"declinable"`
+   * when it has a `guard` or lists `{ decline: true }` in `branches`, so it may
+   * leave the event to the next candidate, and `"required"` otherwise.
+   */
   export type TransitionAcceptance = "required" | "declinable"
 
   /**
@@ -4599,7 +3967,7 @@ export declare namespace Machine {
     readonly values?: never
   }
 
-  /** Branded transient target instruction used while constructing initial states. */
+  /** Branded instruction that enters a choice pseudo-state, before its parent is checked against a machine. */
   export interface ChoiceTargetInstruction<ChoiceId extends string = string> {
     readonly [ChoiceTargetTypeId]: typeof ChoiceTargetTypeId
     readonly path: ChoiceId
@@ -4615,26 +3983,9 @@ export declare namespace Machine {
     readonly parent: Extract<ParentPath<ChoiceId>, StateIdentifier<States>>
   }
 
-  /** Builder containing only history pseudo-state paths. */
-  export type HistoryTargetBuilder<States extends StateSchemas> = HistoryTargetBuilderWithPrefix<States, States, "">
-
   /**
-   * Builder for complete transition snapshots.
-   *
-   * **When to use**
-   *
-   * Use when a transition enters an inactive root or otherwise needs to provide
-   * every active child below the selected root.
-   *
-   * @category utility types
-   * @since 0.4.0
-   */
-  export type FullTargetBuilder<States extends StateSchemas> = [InitialEntryStateKey<States>] extends [never] ?
-    FullSnapshotBuilderWithPrefix<States>
-    : FullSnapshotBuilderWithPrefix<States> & FullInitialTargetBuilder<States>
-
-  /**
-   * Builder for a complete fallback configuration containing a history owner.
+   * Function that constructs a complete fallback configuration containing a
+   * history owner, supplied as `target` to a history default.
    *
    * @category utility types
    * @since 0.4.0
@@ -4645,114 +3996,6 @@ export declare namespace Machine {
   > = (
     construction: HistoryConstruction<States[""], Owner>
   ) => StateConstruction<CompleteSnapshotContaining<States, Owner>>
-
-  /**
-   * Builder for source-local transition targets.
-   *
-   * **When to use**
-   *
-   * Use when a transition stays inside the nearest active compound ancestor of
-   * the source state and should preserve active ancestor and sibling values.
-   *
-   * @category utility types
-   * @since 0.4.0
-   */
-  export type LocalTargetBuilder<
-    States extends StateSchemas,
-    Source extends StateNodeIdentifier<States>
-  > = NearestCompoundScope<States, Source> extends infer Scope ? [Scope] extends [never] ? {}
-    : Scope extends StateIdentifier<States> ? LocalTargetBuilderForScope<States, Scope, Source>
-    : {}
-    : {}
-
-  /**
-   * Builder for partial transition targets within the active source root.
-   *
-   * **When to use**
-   *
-   * Use when a transition should replace one descendant of the active source
-   * root while preserving unmentioned active ancestors or parallel regions.
-   *
-   * @category utility types
-   * @since 0.4.0
-   */
-  export type BranchTargetBuilder<
-    States extends StateSchemas,
-    Source extends StateNodeIdentifier<States>
-  > = BranchTargetBuilderForRoot<
-    States,
-    Extract<"" extends keyof States ? "" : RootStateIdentifier<Source>, ActiveStateKey<States>>,
-    Source
-  >
-
-  /**
-   * Machine-bound target builders available in transition contexts.
-   *
-   * **Details**
-   *
-   * `none()` handles without selecting a destination, `local` targets the
-   * nearest compound scope for the source state, `branch` targets descendants
-   * of the source root, and `full` builds complete snapshots for any root.
-   *
-   * These builders control how the next active configuration is assembled; they
-   * do not directly control state re-entry. Exit and entry paths are derived
-   * from the previous and next active paths. Shared active ancestors remain
-   * entered even when a `full` target supplies their values again. Use an event
-   * transition with `reenter: true` when the source should explicitly exit and
-   * enter again.
-   *
-   * @category models
-   * @since 0.4.0
-   */
-  export interface TargetBuilder<
-    in out States extends StateSchemas,
-    in out Source extends StateNodeIdentifier<States>
-  > {
-    /**
-     * Selects an explicitly targetless transition.
-     *
-     * The event or lifecycle outcome is handled and queued operations are
-     * retained, while the current state configuration remains the transition
-     * result.
-     *
-     * @since 0.10.0
-     */
-    readonly none: () => NoTarget
-
-    /**
-     * Moves to another state in the same local group. The value of the state
-     * containing that group, and values in other active branches, are kept.
-     *
-     * @since 0.4.0
-     */
-    readonly local: LocalTargetBuilder<States, Source>
-
-    /**
-     * Moves to a state elsewhere under the current top-level state. Parent
-     * values change only when their builder methods are explicitly called;
-     * other active branches are kept.
-     *
-     * @since 0.4.0
-     */
-    readonly branch: BranchTargetBuilder<States, Source>
-
-    /**
-     * Moves to any top-level state by building its complete active state
-     * configuration.
-     *
-     * **Details**
-     *
-     * When the target contains nested states, an active child must be selected.
-     * When it contains parallel states, an active state must be provided for
-     * every region.
-     *
-     * @since 0.4.0
-     */
-    readonly full: FullTargetBuilder<States>
-
-    /** Restores a declared shallow or deep history pseudo-state. */
-    readonly history: HistoryTargetBuilder<States>
-  }
 
   /**
    * Opaque exact destination selected while a machine definition is captured.
@@ -5147,7 +4390,7 @@ export declare namespace Machine {
   export type StateActionResult<E, R> = undefined
 
   /**
-   * Return value accepted from a machine initial state function.
+   * Initial target that a machine resolves at startup.
    *
    * @category utility types
    * @since 0.4.0
@@ -5155,14 +4398,14 @@ export declare namespace Machine {
   export type InitialResult<States extends StateSchemas, E, R> = InitialTarget<StateIdentifier<States>>
 
   /**
-   * Return value accepted from transition handlers.
+   * Result that a transition declaration resolves to.
    *
    * **Details**
    *
-   * Handlers return snapshots for complete state replacement, target builder
-   * results for path-safe partial transitions, state-value updates, or
-   * an explicit targetless result. In a machine definition, declare `{ stay: true }`.
-   * Raw decoded state values are not accepted as transition targets.
+   * A transition resolves to a complete snapshot, a target, history, or
+   * choice destination, a state-value update, a target combined with an
+   * owner update, or the targetless result of `{ stay: true }`. Raw decoded
+   * state values are not accepted as transition targets.
    *
    * @category utility types
    * @since 0.4.0
@@ -5222,7 +4465,7 @@ export declare namespace Machine {
    */
   export type HandlerServices<Handlers> = Effect.Services<HandlerEffect<Handlers>>
   /**
-   * Extracts the return value from an initial state function.
+   * Extracts the return type of a function type, or `never` for any other type.
    *
    * @category utility types
    * @since 0.4.0
@@ -5521,7 +4764,7 @@ export declare namespace Machine {
 
   export type InvokeSource<Value, Context> = Value | ((context: Context) => Value)
 
-  /** Inline state-owned work that runs for the lifetime of its active state. */
+  /** State-owned work that runs for the lifetime of its active state. */
   interface InvokeOwned<
     States extends StateSchemas,
     Events extends ReadonlyArray<TaggedSchema>,
@@ -5719,7 +4962,7 @@ export declare namespace Machine {
   > {
     /** Lifecycle event that attempted to restore this history node. */
     readonly event: LifecycleEvent<Events>
-    /** Complete target builder rooted at the history owner. */
+    /** Constructs the complete root configuration that contains the history owner. */
     readonly target: HistoryDefaultTargetBuilder<States, ParentId>
     /** State path whose child configuration is restored by this history node. */
     readonly owner: ParentId
@@ -6330,7 +5573,7 @@ export declare namespace Machine {
   export type LogicSources = Readonly<Record<string, unknown>>
   export type ValidateLogicSources<Sources> = {
     readonly [K in keyof Sources]: InvokeResolvedSource<Sources[K]> extends {
-      /** Enters a compound or parallel subtree through its declared initialization. */
+      /** Produces the first state of the registered logic. */
       readonly initial: (...args: never[]) => Effect.Effect<unknown, unknown, unknown>
       readonly run: (...args: never[]) => Effect.Effect<unknown, unknown, unknown>
     } ? unknown
@@ -7818,8 +7061,8 @@ export declare namespace Snapshot {
 /**
  * Extracts the decoded value owned by a schema-backed state path.
  *
- * The source may be the object returned by {@link states} or a machine
- * definition. Control-only state paths are intentionally excluded.
+ * The source may be a descriptor returned by {@link state} or a machine.
+ * Control-only state paths are intentionally excluded.
  *
  * @category utility types
  * @since 0.18.0
@@ -7832,9 +7075,8 @@ export type Value<
 /**
  * Extracts the logical snapshot rooted at a state path.
  *
- * The source may be the object returned by {@link states} or a machine
- * definition. This is the type-level counterpart of
- * `State.getSnapshot`.
+ * The source may be a descriptor returned by {@link state} or a machine.
+ * This is the type-level counterpart of a descriptor's `getSnapshot`.
  *
  * @category utility types
  * @since 0.18.0
@@ -7899,8 +7141,6 @@ export const isFinal: <
  * Pass the root descriptor to {@link make}. Nested states
  * can be declared inline or reused by mounting a descriptor in multiple places.
  * Initial edges and value constructors belong in the handler tree.
- *
- * **Example** (Repeated compound state)
  *
  * **Example** (Reusing one subtree in two parallel regions)
  *
@@ -8095,16 +7335,16 @@ type Make = {
  *
  * **Details**
  *
- * State and event schemas provide runtime boundary validation while their
- * decoded types drive handler, state, event, target, error, and service
- * inference. State-tree validation is applied whether `states` comes from
- * `states` or is passed inline. Call `handle` on the returned definition
- * to implement state behavior with ordinary TypeScript control flow.
+ * `root` is the `Machine.state` descriptor of the complete state tree. State
+ * and event schemas provide runtime boundary validation while their decoded
+ * types drive handler, state, event, target, error, and service inference.
+ * Call `handle` on the returned {@link Definition} to declare the initial
+ * target and the behavior of each state.
  *
- * `initial` is a target-first callback. Its outer selector runs once while the
- * definition is captured; an attached `.resolve(...)` callback remains lazy
- * until initial planning. Return a bare selected state when its schema supports
- * default construction.
+ * Register Effects, Streams, timers, logic, and child machines under
+ * `effects`, `streams`, `timers`, `logic`, and `children`. A state invokes a
+ * registered source by name with `invoke: { src }`, and only invoked sources
+ * add to the machine's requirements.
  *
  * `Machine.events` defines the public input protocol. `Machine.internalEvents`
  * adds raised events and other machine-local deliveries.
@@ -8115,7 +7355,48 @@ type Make = {
  * schemas opaquely for runtime validation. Public and internal tags must be
  * disjoint.
  *
- * **Example** (Typed counter machine)
+ * **Gotchas**
+ *
+ * Source names must be unique across all five registries. A top-level state
+ * cannot be named `root`, because `root` names the root state.
+ *
+ * **Example** (Invoking a registered Effect)
+ *
+ * ```ts import.meta.vitest
+ * import { Machine } from "@typeonce/effect-machine"
+ * import { Effect, Option, Schema } from "effect"
+ *
+ * const Lookup = Schema.TaggedUnion({ Loading: { id: Schema.String }, Ready: { name: Schema.String } })
+ * const States = Machine.state({ states: { Idle: {}, Loading: Lookup.cases.Loading, Ready: Lookup.cases.Ready } })
+ * const Events = Machine.events({ Load: { id: Schema.String } })
+ *
+ * const machine = Machine.make({
+ *   root: States,
+ *   events: Events,
+ *   effects: { findName: (id: string) => Effect.succeed(`User ${id}`) }
+ * }).handle({
+ *   initial: { target: "Idle" },
+ *   states: {
+ *     Idle: { on: { Load: { target: "Loading", data: ({ event }) => ({ id: event.id }) } } },
+ *     Loading: {
+ *       invoke: {
+ *         src: "findName",
+ *         input: ({ state }) => state.id,
+ *         onDone: { target: "Ready", data: ({ output }) => ({ name: output }) }
+ *       }
+ *     }
+ *   }
+ * })
+ *
+ * const name = Effect.scoped(Effect.gen(function*() {
+ *   const ref = yield* Machine.start(machine)
+ *   yield* ref.send(Events.Load({ id: "1" }))
+ *   const ready = yield* Machine.waitFor(ref, ({ state }) => state.state.path === "Ready").pipe(Effect.timeout("5 seconds"))
+ *   return States.get(ready.state, "Ready").pipe(Option.map((state) => state.name))
+ * }))
+ *
+ * await Effect.runPromise(name) // => Option.some("User 1")
+ * ```
  *
  * **Example** (Counting with schema classes)
  *
@@ -8169,9 +7450,50 @@ export type EventOf<Protocol extends Machine.EventProtocol.Any> = Machine.EventO
   Machine.EventProtocolSchemas<Protocol>
 >
 
+type EventFieldsSchemas<Cases extends Readonly<Record<string, Schema.Struct.Fields>>> = keyof Cases extends never
+  ? readonly []
+  : readonly [
+    Extract<
+      Schema.TaggedUnion<{ readonly [Tag in keyof Cases & string]: Schema.TaggedStruct<Tag, Cases[Tag]> }>,
+      Machine.TaggedSchema
+    >
+  ]
+type ValidateEventFields<Cases> = {
+  readonly [Tag in keyof Cases]: "_tag" extends keyof Cases[Tag]
+    ? EventProtocolError<"Event fields cannot declare _tag", Extract<Tag, PropertyKey>>
+    : unknown
+}
+
 /**
- * Defines a public event protocol and returns deferred constructors for every
- * statically finite configured event tag.
+ * Defines a public event protocol from tagged field records.
+ *
+ * Constructors defer schema validation until delivery. Use
+ * {@link eventsFromSchemas} when importing existing tagged schemas or protocol
+ * descriptors.
+ *
+ * **Example** (Defining events from fields)
+ *
+ * ```ts import.meta.vitest
+ * import { Machine } from "@typeonce/effect-machine"
+ * import { Schema } from "effect"
+ *
+ * const Events = Machine.events({ Increment: { by: Schema.Number }, Reset: {} })
+ *
+ * Events.Increment({ by: 1 })._tag // => "Increment"
+ * Events.Reset()._tag // => "Reset"
+ * ```
+ *
+ * @category constructors
+ * @since 0.32.0
+ */
+export const events: <const Cases extends Readonly<Record<string, Schema.Struct.Fields>>>(
+  cases: Cases & ValidateEventFields<NoInfer<Cases>> & ValidateEventProtocolBuilder<"public", EventFieldsSchemas<Cases>>
+) => Machine.EventProtocol<"public", EventFieldsSchemas<Cases>> = internal.eventsFromFields
+
+/**
+ * Defines a public event protocol from existing tagged schemas or protocol
+ * descriptors, without rebuilding their contracts, and returns deferred
+ * constructors for every statically finite configured event tag.
  *
  * Constructor inputs retain their schema-derived required fields, defaults,
  * and transformations. Construction is deferred until delivery so failures
@@ -8207,47 +7529,6 @@ export type EventOf<Protocol extends Machine.EventProtocol.Any> = Machine.EventO
  * await Effect.runPromise(count) // => 1
  * ```
  *
- * @category constructors
- * @since 0.10.0
- */
-type EventFieldsSchemas<Cases extends Readonly<Record<string, Schema.Struct.Fields>>> = keyof Cases extends never
-  ? readonly []
-  : readonly [
-    Extract<
-      Schema.TaggedUnion<{ readonly [Tag in keyof Cases & string]: Schema.TaggedStruct<Tag, Cases[Tag]> }>,
-      Machine.TaggedSchema
-    >
-  ]
-type ValidateEventFields<Cases> = {
-  readonly [Tag in keyof Cases]: "_tag" extends keyof Cases[Tag]
-    ? EventProtocolError<"Event fields cannot declare _tag", Extract<Tag, PropertyKey>>
-    : unknown
-}
-
-/** Defines a public event protocol from tagged field records.
- *
- * **Example** (Defining events from fields)
- *
- * ```ts import.meta.vitest
- * import { Machine } from "@typeonce/effect-machine"
- * import { Schema } from "effect"
- *
- * const Events = Machine.events({ Increment: { by: Schema.Number }, Reset: {} })
- *
- * Events.Increment({ by: 1 })._tag // => "Increment"
- * Events.Reset()._tag // => "Reset"
- * ```
- *
- * Constructors defer schema validation until delivery. Use eventsFromSchemas
- * when importing existing tagged schemas or protocol descriptors.
- * @category constructors
- * @since 0.32.0
- */
-export const events: <const Cases extends Readonly<Record<string, Schema.Struct.Fields>>>(
-  cases: Cases & ValidateEventFields<NoInfer<Cases>> & ValidateEventProtocolBuilder<"public", EventFieldsSchemas<Cases>>
-) => Machine.EventProtocol<"public", EventFieldsSchemas<Cases>> = internal.eventsFromFields
-
-/** Imports existing schemas and protocols without rebuilding their contracts.
  * @category constructors
  * @since 0.32.0
  */
@@ -8290,7 +7571,9 @@ export const optionalParent: <const Events extends ReadonlyArray<Machine.TaggedS
  *
  * Use these constructors for raised events and other machine-local deliveries.
  * Construction failures are reported through the
- * owning machine's `MachineSchemaDecodeError` channel.
+ * owning machine's `MachineSchemaDecodeError` channel. Use
+ * {@link internalEventsFromSchemas} when importing existing tagged schemas or
+ * protocol descriptors.
  *
  * **Example** (Raising an internal event)
  *
@@ -8299,12 +7582,7 @@ export const optionalParent: <const Events extends ReadonlyArray<Machine.TaggedS
  * import { Effect, Schema } from "effect"
  *
  * const Events = Machine.events({ Load: { value: Schema.String } })
- * const Internal = Machine.internalEventsFromSchemas(
- *   Schema.TaggedUnion({
- *     Loaded: { value: Schema.String },
- *     Failed: { message: Schema.String }
- *   })
- * )
+ * const Internal = Machine.internalEvents({ Loaded: { value: Schema.String }, Failed: { message: Schema.String } })
  * const machine = Machine.make({
  *   root: Machine.state({ fields: { value: Schema.String } }),
  *   events: Events,
@@ -8337,7 +7615,10 @@ export const internalEvents: <const Cases extends Readonly<Record<string, Schema
     & ValidateEventProtocolBuilder<"internal", EventFieldsSchemas<Cases>>
 ) => Machine.EventProtocol<"internal", EventFieldsSchemas<Cases>> = internal.internalEventsFromFields
 
-/** Imports existing schemas and protocols without rebuilding their contracts.
+/**
+ * Defines an internal event protocol from existing tagged schemas or protocol
+ * descriptors, without rebuilding their contracts.
+ *
  * @category constructors
  * @since 0.32.0
  */
@@ -8351,7 +7632,8 @@ export const internalEventsFromSchemas: {
  * Defines the ephemeral notifications a machine may publish to external
  * observers. Emitted events are separate from machine input and are never sent
  * implicitly to a parent machine. Observe them through `MachineRef.emissions` or
- * the AtomMachine emission stream adapters.
+ * the AtomMachine emission stream adapters. Use {@link emittedEventsFromSchemas}
+ * when importing existing tagged schemas or protocol descriptors.
  *
  * **Example** (Emitting an event to observers)
  *
@@ -8360,11 +7642,7 @@ export const internalEventsFromSchemas: {
  * import { Effect, Schema } from "effect"
  *
  * const Events = Machine.events({ Save: { id: Schema.String } })
- * const Emitted = Machine.emittedEventsFromSchemas(
- *   Schema.TaggedUnion({
- *     Saved: { id: Schema.String }
- *   })
- * )
+ * const Emitted = Machine.emittedEvents({ Saved: { id: Schema.String } })
  * const machine = Machine.make({
  *   root: Machine.state({ states: { Idle: {} } }),
  *   events: Events,
@@ -8397,7 +7675,10 @@ export const emittedEvents: <const Cases extends Readonly<Record<string, Schema.
     & ValidateEventProtocolBuilder<"emitted", EventFieldsSchemas<Cases>>
 ) => Machine.EventProtocol<"emitted", EventFieldsSchemas<Cases>> = internal.emittedEventsFromFields
 
-/** Imports existing schemas and protocols without rebuilding their contracts.
+/**
+ * Defines an emitted event protocol from existing tagged schemas or protocol
+ * descriptors, without rebuilding their contracts.
+ *
  * @category constructors
  * @since 0.32.0
  */
@@ -8720,9 +8001,9 @@ export const stateNodes: <M extends Machine.Any>(machine: M) => ReadonlyArray<
 /**
  * Returns the statically selected root entry used during machine startup.
  *
- * This function does not execute the initial resolver or require machine
- * input. `kind: "initial"` means that the selected root enters its declared
- * initial configuration.
+ * This function does not construct initial state values or require machine
+ * input. `kind: "initial"` means that the root enters its declared initial
+ * configuration.
  *
  * @category getters
  * @since 0.14.0
@@ -8736,7 +8017,8 @@ export const initialDefinition: <M extends Machine.Any>(machine: M) => Machine.I
  *
  * **Details**
  *
- * The returned tuple retains the schemas supplied to {@link events}, including
+ * The returned tuple retains the schemas supplied to {@link events} or
+ * {@link eventsFromSchemas}, including
  * grouped tagged unions. Internal and emitted event schemas are excluded. This
  * getter is intended for tooling that needs to describe or construct valid
  * external inputs without reaching into the opaque event protocol.
@@ -8748,16 +8030,16 @@ export const inputEventSchemas: <M extends Machine.Any>(machine: M) => Machine.I
   internal.inputEventSchemas
 
 /**
- * Returns every registered transition handler in state definition order.
+ * Returns every declared transition in state definition order.
  *
  * **Details**
  *
- * Event handlers retain their handler-key order within each source state and
- * are followed by eventless and completion handlers. This function does not
+ * Event transitions retain their key order within each source state and are
+ * followed by eventless and completion transitions. This function does not
  * execute resolvers. Every branch exposes its static selection. State updates
  * retain the updated owner in `selection.path` while leaving `target`
  * undefined because they do not change topology. `acceptance` reports whether
- * the resolver may decline the transition.
+ * the transition may decline the event.
  *
  * @category getters
  * @since 0.4.0
@@ -8775,7 +8057,7 @@ export const transitionDefinitions: <M extends Machine.Any>(machine: M) => Reado
  *
  * **Details**
  *
- * Static inline invocation definitions expose stable ownership and lifecycle
+ * Static invocation definitions expose stable ownership and lifecycle
  * metadata without serializing runtime values. Function-valued sources are
  * represented as dynamic and are never evaluated during inspection.
  *
@@ -8861,9 +8143,10 @@ export const enabled: <
  *
  * **Details**
  *
- * Required handlers are accepted from their structural eligibility.
- * Declinable handlers run their resolver only far enough to decide whether
- * they accept the event. Any commands, emissions, or raised events collected
+ * Required transitions are accepted from their structural eligibility.
+ * Declinable transitions, which have a `guard` or a `{ decline: true }` entry,
+ * run their guard or resolver only far enough to decide whether they accept
+ * the event. Any commands, emissions, or raised events collected
  * during that check are discarded.
  *
  * Event input is decoded through the machine's public and internal event protocols.
@@ -9137,8 +8420,11 @@ export const plan: <
  * which machine will eventually own it. Prefer typed output, typed child
  * addresses, or invocation lifecycle transitions when possible.
  *
- * Use an inline `invoke` with an `effect` source for one-shot work.
- * @see {@link transition} for event-driven state.
+ * For one-shot work, register an Effect in `make({ effects })` and invoke it
+ * with `invoke: { src }` instead. Register logic in `make({ logic })` to run it
+ * for the lifetime of one state.
+ *
+ * @see {@link make} for registering sources that states invoke by name.
  * @category constructors
  * @since 0.4.0
  */
@@ -9151,7 +8437,7 @@ export const logic: <
   InitialError = never,
   InitialRequirements = never
 >(options: {
-  /** Enters a compound or parallel subtree through its declared initialization. */
+  /** The first state, or an Effect that produces it from the process scope before `run` starts. */
   readonly initial:
     | State
     | ((
@@ -9311,7 +8597,6 @@ export const watch: <State, Event, Error = never, Output = never>(
  * Type predicates narrow the returned snapshot. Intermediate microsteps and
  * historical snapshots are not observed.
  *
- * @example
  * **Example** (Waiting for a state with a timeout)
  *
  * ```ts import.meta.vitest
@@ -9604,7 +8889,7 @@ export const start: <
  * the `Scope` is equivalent to `ref.stop`.
  *
  * `resume` validates and normalizes the supplied snapshot before publishing it
- * as the first state. It does not call the machine's initial function, replay
+ * as the first state. It does not construct the declared initial state, replay
  * entry or transition actions, re-deliver raised or emitted events, or
  * re-evaluate historical completion and eventless transitions. Active-state
  * invokes start once in ancestor and document order with {@link InitialEvent};

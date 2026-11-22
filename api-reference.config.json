@@ -59,7 +59,7 @@
         },
         {
           "title": "Create the definition",
-          "description": "Combine topology and protocols into a reusable machine definition with an explicit initial target.",
+          "description": "Combine topology, protocols, and registered sources into a reusable machine definition.",
           "entries": [
             {
               "declaration": "make"
@@ -68,7 +68,7 @@
         },
         {
           "title": "Implement state behavior",
-          "description": "Attach state-local actions, transitions, output, and invoked lifecycles to the definition.",
+          "description": "Declare the initial target and attach state-local actions, transitions, output, and invoked lifecycles to the definition.",
           "entries": [
             {
               "reflection": "Definition.handle",
@@ -266,6 +266,7 @@
         "decodeSnapshot",
         "encodeSnapshot",
         "events",
+        "eventsFromSchemas",
         "internalEvents",
         "make",
         "plan",

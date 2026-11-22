@@ -1396,8 +1396,8 @@ export const factory: <M extends Machine.Machine.Any>(
  * Creates a lazy atom bridge from a decoded logical snapshot.
  *
  * The bridge owns one freshly resumed runtime per `AtomRegistry`, with the same
- * lazy start and disposal semantics as {@link make}. The machine initial
- * function and its input, errors, and services are not involved.
+ * lazy start and disposal semantics as {@link make}. The machine's declared
+ * initial state and its input, errors, and services are not involved.
  *
  * @category constructors
  * @since 0.4.0

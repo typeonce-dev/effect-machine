@@ -715,7 +715,7 @@ export const renderVisualizer = (
     eyebrow.append(badge("walkthrough", "active"))
     const title = frame.choice === null
       ? "Initial configuration"
-      : frame.choice.title ?? triggerName(frame.choice.trigger)
+      : frame.choice.branchKey ?? triggerName(frame.choice.trigger)
     header.append(eyebrow, createElement("h2", undefined, title))
     header.append(metadata([
       ["Step", String(frame.step)],
@@ -760,7 +760,7 @@ export const renderVisualizer = (
     cardHeader.append(cardTitle, flags)
     card.append(cardHeader)
     card.append(metadata([
-      ["Title", choice.title],
+      ["Branch", choice.branchKey],
       ["Source", stateLink(choice.source, choice.source, navigateToState)],
       ["Target", choice.target === null ? "No target" : stateLink(choice.target, choice.target, navigateToState)],
       ["API", api]
@@ -936,7 +936,9 @@ export const renderVisualizer = (
     button.disabled = choice.unavailableReason !== null
     const main = createElement("span", "transition-picker-choice-main")
     main.append(createElement("strong", undefined, triggerName(choice.trigger)))
-    if (choice.title !== null) main.append(createElement("span", "transition-picker-choice-title", choice.title))
+    if (choice.branchKey !== null) {
+      main.append(createElement("span", "transition-picker-choice-title", choice.branchKey))
+    }
     button.append(main, createElement("span", "transition-picker-choice-route", choiceRoute(choice)))
     const contract = contractSummary(choice.input)
     if (contract !== null) button.append(createElement("span", "transition-picker-choice-contract", contract))
@@ -1028,7 +1030,7 @@ export const renderVisualizer = (
       : "Click a highlighted transition to advance"
     walkthroughTimeline.replaceChildren()
     timeline.forEach((frame) => {
-      const label = frame.choice === null ? "Initial" : frame.choice.title ?? triggerName(frame.choice.trigger)
+      const label = frame.choice === null ? "Initial" : frame.choice.branchKey ?? triggerName(frame.choice.trigger)
       const button = createElement(
         "button",
         `walkthrough-step${frame.step === cursor ? " is-current" : ""}`,
