@@ -6462,10 +6462,12 @@ export declare namespace Machine {
   type UnknownSourceMessage<R> = [Extract<SourceKeys<R>, string>] extends [never]
     ? "Unknown source. Register it in make with effects, streams, timers, logic, or children"
     : `Unknown source. Registered: ${JoinUnion<Extract<SourceKeys<R>, string>>}`
+  // Each array entry keeps its declaration: a config array is also checked against the element type of this tuple,
+  // so an entry carrying only validation keys would reject outcome keys such as `resolve` as excess properties.
   type ValidateObjectInvoke<I, R, Root, S extends StateSchemas, Path extends string> = I extends
     ReadonlyArray<unknown> ?
-    number extends I["length"] ? { readonly [K in keyof I]: ValidateInvokeEntry<I[K], R, never, Root, S, Path> }
-    : { readonly [K in keyof I]: ValidateInvokeEntry<I[K], R, DuplicateInvokeId<I, K, R>, Root, S, Path> } :
+    number extends I["length"] ? { readonly [K in keyof I]: I[K] & ValidateInvokeEntry<I[K], R, never, Root, S, Path> }
+    : { readonly [K in keyof I]: I[K] & ValidateInvokeEntry<I[K], R, DuplicateInvokeId<I, K, R>, Root, S, Path> } :
     ValidateInvokeEntry<I, R, never, Root, S, Path>
   // Handler config of a dotted state path, read from the root handler config.
   type HandlerConfigAt<Config, Path extends string> = Config extends { readonly states: infer Children } ?
