@@ -1,5 +1,12 @@
 # @typeonce/effect-machine-react
 
+## 0.47.1
+
+### Patch Changes
+
+- Updated dependencies [e94e508]
+  - @typeonce/effect-machine@0.47.1
+
 ## 0.47.0
 
 ### Minor Changes
