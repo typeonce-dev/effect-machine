@@ -80,8 +80,8 @@ when the module exports one machine implementation.
 
 Use `data` for schema make input. Constructor defaults and validation run while
 planning. Use `{ decoded: true, data }` for an existing schema Type; validation
-still applies. Named selectors take the same object format, with nested children
-under `states`. Structural states omit data. See [Root machine API](#root-machine-api) for
+still applies. `select.target` takes the same object format, with nested
+children under `states`. Structural states omit data. See [Root machine API](#root-machine-api) for
 startup input, root initialization, subtree construction, and history fallbacks.
 
 The examples below show one modeling decision at a time. They omit unchanged
@@ -412,9 +412,8 @@ Register a descriptor in `make({ children: { worker: Worker } })` and use
 `invoke: { src: "worker", ...outcomes }` when a child belongs to one state and
 must stop when that state exits. Use a child family and `children.spawn(...)`
 inside a registered Effect when runtime events determine ids or cardinality
-and the children must survive owner state changes. See the
-dynamic children example in the package README for the complete
-input mapping and service requirements.
+and the children must survive owner state changes. The Effect receives the
+`children` capability through its invocation `input` mapper.
 
 The Effect owns the startup attempt. The machine process owns every child that
 starts successfully. Leaving `Commissioning` does not stop those children.
@@ -1035,7 +1034,7 @@ src/
     └── auth-machine.ts           # States, events, and behavior
 ```
 
-`machine.ts` owns the workflow. A Context module only creates and distributes
+`auth-machine.ts` owns the workflow. A Context module only creates and distributes
 the machine atom. State-slot components decide which state paths they render.
 
 Bind service-backed machines once at the application runtime:
@@ -1624,8 +1623,9 @@ patterns.
 Run the recommended rules from
 `@typeonce/oxlint-plugin-effect-machine` before
 the manual review. They catch provable duplicate invocation identities,
-asynchronous work, browser access, nondeterminism, redundant resolvers, and
-conditional `none` fallbacks in direct same-module machine definitions.
+asynchronous work, browser access, nondeterminism, conditional `stay`
+fallbacks, and one-use intermediate definitions in direct same-module machine
+definitions.
 Continue with this review for cross-module ownership and architectural
 questions that syntax alone cannot answer.
 
@@ -1650,10 +1650,11 @@ Use `{ target: "Running", data: ({ event }) => ({ count: event.count }) }`
 when the destination needs data. The checker rejects missing required fields.
 Use `decoded` for values already decoded by their schema.
 
-Reserve named branch groups and `resolve` for conditional outcomes, commands,
-or nested construction. The group lives in `make`; its resolver selects only
-constructors derived from those declarations. Avoid an extra branch group for
-an ordinary transition. Use `reenter: true` when the source must restart.
+Reserve `branches` and `resolve` for conditional outcomes or nested
+construction. List them on the transition itself; the resolver can select only
+the entries listed next to it. Use `commands` to enqueue work on an ordinary
+transition instead of adding a resolver. Use `reenter: true` when the source
+must restart.
 A `{ stay: true }` branch accepts its event, so `Machine.can` and
 `AtomMachine.can` return `true` when a resolver selects it. Review check: for
 every event that enables or disables a control, refuse it with `guard` or with

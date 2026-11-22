@@ -42,11 +42,10 @@ and process layers. Testing implementations are isolated under
 `packages/effect-machine/src/internal/testing` and may only be consumed by the public testing module or
 other testing internals.
 
-`implementation.ts` owns the captured handler representation. Public handler
-callbacks author transitions through selectors; captured handlers contain the
-executable transitions. Semantic layers use `toImpl` to access that representation
-instead of treating the public erased handler fields as `any`. Existing public
-fields and type parameters remain available for compatibility.
+`implementation.ts` owns the captured handler representation. `.handle`
+captures the declarations of each state as executable transitions, and semantic
+layers use `toImpl` to read them instead of treating the erased public machine as
+`any`.
 
 Runtime responsibilities are separated as follows:
 

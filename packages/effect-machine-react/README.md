@@ -1,7 +1,7 @@
 # @typeonce/effect-machine-react
 
 React ownership and typed state rendering for
-[`@typeonce/effect-machine`](../effect-machine/README.md).
+[`@typeonce/effect-machine`](https://github.com/typeonce-dev/effect-machine/blob/main/packages/effect-machine/README.md).
 
 ```tsx
 import { createMachineContext, MachineState } from "@typeonce/effect-machine-react"
@@ -30,8 +30,8 @@ function AuthForm() {
 
 Each Provider creates an independent machine in the current Atom registry,
 including when two Providers receive equal inputs. Supply an Atom
-`RegistryProvider` at the application boundary. Bind Effect services through
-`AtomMachine.runtime(...)` before creating a factory when the machine needs them.
+`RegistryProvider` at the application boundary. When the machine needs Effect
+services, create the bridge through `AtomMachine.bind(Atom.runtime(layer))`.
 
 The Provider owns the reference without subscribing to state changes.
 `MachineState` subscribes to its typed path and infers the callback snapshot
@@ -83,5 +83,5 @@ the machine starts, where `useAtomValue` would return `Initial` again. Derive na
 and `Atom.withEquality` rather than hook options. Read `.result` for the whole logical snapshot or `.snapshot` for
 runtime status; the bridge has no separate `.state` projection.
 
-See the [React guide](../../ai-docs/src/30_react/index.md) for events,
+See the [React guide](https://github.com/typeonce-dev/effect-machine/blob/main/ai-docs/src/30_react/index.md) for events,
 services, child machines, and registry-owned families.

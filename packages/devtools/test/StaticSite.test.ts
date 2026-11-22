@@ -11,6 +11,9 @@ import * as ProjectInspector from "../src/ProjectInspector.js"
 
 const TestLayer = Layer.mergeAll(NodeServices.layer, ProjectInspector.layer)
 
+// A complete Vite build of every example machine takes several seconds on a busy machine.
+const staticBuildTimeout = 60_000
+
 const localExampleMachineIds = [
   "hierarchy-routing",
   "inspection-example",
@@ -65,7 +68,7 @@ describe("StaticSite", () => {
       )
       assert.isTrue(assets.some((asset) => asset.endsWith(".js")))
       assert.isTrue(assets.some((asset) => asset.endsWith(".css")))
-    }).pipe(Effect.provide(TestLayer)))
+    }).pipe(Effect.provide(TestLayer)), staticBuildTimeout)
 
   it.effect("refuses to generate an index without a head element", () =>
     Effect.gen(function*() {

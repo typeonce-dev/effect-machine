@@ -72,8 +72,8 @@ when the module exports one machine implementation.
 
 Use `data` for schema make input. Constructor defaults and validation run while
 planning. Use `{ decoded: true, data }` for an existing schema Type; validation
-still applies. Named selectors take the same object format, with nested children
-under `states`. Structural states omit data. See [Root machine API](#root-machine-api) for
+still applies. `select.target` takes the same object format, with nested
+children under `states`. Structural states omit data. See [Root machine API](#root-machine-api) for
 startup input, root initialization, subtree construction, and history fallbacks.
 
 The examples below show one modeling decision at a time. They omit unchanged
@@ -404,9 +404,8 @@ Register a descriptor in `make({ children: { worker: Worker } })` and use
 `invoke: { src: "worker", ...outcomes }` when a child belongs to one state and
 must stop when that state exits. Use a child family and `children.spawn(...)`
 inside a registered Effect when runtime events determine ids or cardinality
-and the children must survive owner state changes. See the
-dynamic children example in the package README for the complete
-input mapping and service requirements.
+and the children must survive owner state changes. The Effect receives the
+`children` capability through its invocation `input` mapper.
 
 The Effect owns the startup attempt. The machine process owns every child that
 starts successfully. Leaving `Commissioning` does not stop those children.

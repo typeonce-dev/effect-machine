@@ -897,6 +897,9 @@ describe("Static chart", () => {
     assert.include(failure.message, "route-overlap")
   })
 
+  // Laying out every example machine twice is CPU-bound and slows down sharply under load.
+  const corpusLayoutTimeout = 30_000
+
   it("keeps the example topology corpus deterministic and free of hard geometry violations", async () => {
     const corpus = [
       ["nested workflow", makeChartModel(MachineDocument.make(machine, { snapshot }))],
@@ -929,7 +932,7 @@ describe("Static chart", () => {
         name
       )
     }
-  })
+  }, corpusLayoutTimeout)
 
   it("places parallel regions side by side while each region flows downward", async () => {
     const model = makeChartModel(MachineDocument.make(parallelCompletionMachine))

@@ -88,9 +88,10 @@ boolean flags that allow impossible combinations. Put shared behavior on the
 lowest common ancestor, and reserve parallel states for independent modes.
 
 `Machine.state` declares topology. `Machine.make` captures protocols, startup
-input, sources, and named branch groups. `.handle` implements behavior in one
-nested object and returns an executable machine. One definition can create
-independent implementations by calling `.handle` more than once.
+input, and sources. `.handle` implements behavior in one nested object, with each
+transition declared next to the state that owns it, and returns an executable
+machine. One definition can create independent implementations by calling
+`.handle` more than once.
 
 ### Declare startup data and initial edges
 
@@ -191,9 +192,9 @@ unrestricted destination builder in the callback.
 
 ### Declare advanced and conditional transitions
 
-A resolver that chooses a branch, constructs nested children, or enqueues
-commands uses a named group in `make`. The group captures every possible edge
-before any resolver executes:
+A transition that chooses between outcomes or constructs nested children lists
+every possible outcome in `branches`, next to the `resolve` callback that picks
+one. The list is captured before any resolver executes:
 
 ```ts
 const machine = Machine.make({
@@ -325,7 +326,7 @@ adapter.
 ## Statechart capabilities
 
 The same root supports compound and parallel states, eventless `always`
-transitions, ordered named choices, final states, `onDone` completion,
+transitions, choice states, final states, `onDone` completion,
 initial declarations, shallow and deep history, and retained snapshots. The topology
 is captured directly from declarations; visualization and branch coverage do
 not execute user resolvers or depend on TypeScript source extraction.
@@ -503,8 +504,8 @@ type ProcessMachineAtom = ReturnType<typeof makeProcessMachine>
 Each call creates a fresh lazy bridge. `factory` does not cache by input;
 `AtomMachine.family` remains the keyed shared-identity interface.
 
-The bridge exposes `ref`, `snapshot`, `state`, fail-aware `result`, writable
-`send` and `stop` atoms, and `child(descriptor)`. Use `AtomMachine.select`,
+The bridge exposes `ref`, `snapshot`, fail-aware `result`, writable `send` and
+`stop` atoms, and `child(descriptor)`. Use `AtomMachine.select`,
 `AtomMachine.selectSnapshot`, and `AtomMachine.matches` for typed,
 equality-aware derivations. Repeating one of these calls with the same bridge
 and state path returns the same atom.
@@ -691,18 +692,19 @@ Each ESM entrypoint is independent and tree-shakeable.
 ## Reference and development
 
 - [API reference](https://effect-machine.typeonce.dev)
-- [Agent documentation](../../ai-docs/src/index.md), shipped in this package as `AGENTS.md` and `ai-docs/`
-- [Contributing guide](./CONTRIBUTING.md)
+- [Agent documentation](https://github.com/typeonce-dev/effect-machine/blob/main/ai-docs/src/index.md), shipped in this package as `AGENTS.md`, `CLAUDE.md`, and `ai-docs/`
+- [Contributing guide](https://github.com/typeonce-dev/effect-machine/blob/main/CONTRIBUTING.md)
 
-Use pnpm 10 and Node.js 20 or newer:
+Develop the repository with pnpm 10 and Node.js 22.22 or newer:
 
 ```sh
 pnpm install --frozen-lockfile
 pnpm check
 ```
 
-Pull requests that change `src/` or `package.json` need
-a changeset and the performance checks described in `AGENTS.md`.
+Pull requests that change `src/` or `package.json` need a changeset and the
+performance checks described in the repository's
+[`AGENTS.md`](https://github.com/typeonce-dev/effect-machine/blob/main/AGENTS.md).
 
 When equivalent Machine modules ship in Effect, this package is intended to
 become a compatibility re-export before eventual retirement.
