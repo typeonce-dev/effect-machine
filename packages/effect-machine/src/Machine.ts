@@ -2304,7 +2304,19 @@ export declare namespace Machine {
   /** Identifies whether an event protocol is accepted publicly or only inside a machine. */
   export type EventProtocolKind = "public" | "internal" | "emitted"
 
-  type EventConstructorInput<EventSchema extends TaggedSchema> = Omit<EventSchema["~type.make.in"], "_tag">
+  /**
+   * Fields accepted by the constructor of one event in an event protocol.
+   *
+   * **Details**
+   *
+   * The input is the event schema's constructor input without `_tag`, which
+   * the constructor supplies. When every field is optional, so is the
+   * constructor's argument.
+   *
+   * @category utility types
+   * @since 0.23.0
+   */
+  export type EventConstructorInput<EventSchema extends TaggedSchema> = Omit<EventSchema["~type.make.in"], "_tag">
 
   type EventConstructor<
     EventSchema extends TaggedSchema,
@@ -4764,8 +4776,20 @@ export declare namespace Machine {
 
   export type InvokeSource<Value, Context> = Value | ((context: Context) => Value)
 
-  /** State-owned work that runs for the lifetime of its active state. */
-  interface InvokeOwned<
+  /**
+   * State-owned work that runs for the lifetime of its active state.
+   *
+   * **Details**
+   *
+   * Every `invoke` entry carries this type-level marker, which records the
+   * state that owns the entry together with the machine's state schemas and
+   * event protocols. The marker property is optional and is never set at
+   * runtime.
+   *
+   * @category models
+   * @since 0.23.0
+   */
+  export interface InvokeOwned<
     States extends StateSchemas,
     Events extends ReadonlyArray<TaggedSchema>,
     Emits extends ReadonlyArray<TaggedSchema>,
@@ -4990,9 +5014,16 @@ export declare namespace Machine {
   /**
    * Fallback implementation for one direct history pseudo-state.
    *
+   * **Details**
+   *
+   * `default` runs only when the history state is entered before its owner has
+   * recorded a configuration, and returns the complete configuration to enter.
+   *
    * @inline
+   * @category models
+   * @since 0.23.0
    */
-  interface HistoryDefaultEntry<
+  export interface HistoryDefaultEntry<
     States extends StateSchemas,
     Events extends ReadonlyArray<TaggedSchema>,
     Emits extends ReadonlyArray<TaggedSchema>,
@@ -5017,8 +5048,18 @@ export declare namespace Machine {
     readonly [Key in HistoryStateKey<Children>]?: HistoryDefaultEntry<States, Events, Emits, ParentId>
   }
 
-  /** Required implementation for a choice pseudo-state. */
-  interface ChoiceStateConfig<
+  /**
+   * Required implementation for a choice pseudo-state.
+   *
+   * **Details**
+   *
+   * A choice state declares only `choice`, the transition that resolves it to
+   * a concrete destination. Every other handler key is rejected.
+   *
+   * @category models
+   * @since 0.23.0
+   */
+  export interface ChoiceStateConfig<
     States extends StateSchemas,
     Events extends ReadonlyArray<TaggedSchema>,
     Emits extends ReadonlyArray<TaggedSchema>,
@@ -7015,6 +7056,9 @@ export declare namespace Machine {
       | ChoiceStateConfig<States, Events, Emits, ChoiceIdentifier<States>>
     >
   >
+  // An explicit export makes this ambient namespace export only the members marked `export`; the rest stay private.
+  // oxlint-disable-next-line typescript/no-useless-empty-export -- the rule assumes module scope.
+  export {}
 }
 
 type StateSource = State<any> | Machine.Any
