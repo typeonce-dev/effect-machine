@@ -1,5 +1,100 @@
 # @typeonce/effect-machine
 
+## 0.47.0
+
+### Minor Changes
+
+- 67f11cc: Compile errors for common machine mistakes now name the fix instead of reporting `never`:
+  
+  ```ts
+  Pay: { target: "Archivd" }
+  // Unknown target "Archivd". Declared: Editing, Checkout, Archived
+  
+  invoke: { src: "loadd", onDone: { stay: true } }
+  // Unknown source. Registered: load
+  ```
+  
+  `Machine.handle` reports a misspelled target, source, or owner, a missing `data`, the root or a history state used as a target, and an `on`, `always`, `onDone`, or `invoke` on a final or choice state.
+  
+  A transition that targets a state below an inactive valued state, such as `{ target: "Checkout.Paid" }` from outside `Checkout`, used to fail while planning. It is now a compile error: target `"Checkout"` with a `branches` entry and construct the child with `select.target("Checkout", { data, states: { Paid: {} } })`.
+- 573636b: Ship agent documentation as `AGENTS.md`, `CLAUDE.md`, and `ai-docs/` in the package, replacing `docs/`.
+  
+  An agent working in a project can now read documentation matching the installed version from `node_modules/@typeonce/effect-machine/AGENTS.md`. Replace links to `docs/agent-guide.md`, `docs/root-api.md`, `docs/effect-atom-react.md`, and `docs/machine-review.md` with that file, or with the matching section under `ai-docs/src`.
+- 8f60a45: Export the `Machine.MachineRuntime` type, the service required by `Machine.sendTo`, `Machine.stopChild`, and `Machine.spawn`. Exported helpers built from these operations now emit declarations with `declaration: true`, whether their type is inferred or annotated:
+  
+  ```ts
+  export const stop = <Event>(
+    child: Machine.ChildAddress<Event>
+  ): Effect.Effect<void, never, Machine.MachineRuntime> => Machine.stopChild(child)
+  ```
+  
+  Only the type is public; the service is still provided by the running machine. `MachineTest` also exports `CausalRuntimeCommandAttempt` and `FiniteChoiceState`, the types of `CausalRuntimeCommandFailure.attempted` and the choice member of `FiniteState`, so values that use them can be named too.
+- 5202573: Exported machines now get compact declarations. `.handle` returns `Machine.Machine<…>` directly, so a library's emitted `.d.ts` names a machine by its schemas and outcomes instead of printing the whole handler config with every handler's context. The machine's type is unchanged. Declarations of `Machine.child` and `Machine.childFamily` descriptors built from a handled machine shrink the same way.
+  
+  `Machine.Machine.HandleTreeResult` is removed. Regenerate declarations that name it; the regenerated declarations name `Machine.Machine<…>` instead.
+- d1d9137: Add `MachineTest.check`, `MachineTest.analyze`, and the `effect-machine check` command, so a machine can be verified with one call and no browser.
+  
+  `check` reports states with no path from the initial state, public events with no handler, nondeterministic planning, planner law violations, invariant failures, and declared branches that were never taken. It derives input and events from the machine's schemas, and each finding from a run includes the events that reproduce it. A report is `"exhaustive"` only when nothing limited exploration; otherwise `limits` says why it is `"bounded"`.
+  
+  ```ts
+  const program = Effect.gen(function*() {
+    const report = yield* MachineTest.check(Checkout)
+    return report.ok // false when any finding is an error
+  })
+  ```
+  
+  From a shell, `effect-machine check src/checkout.ts --json` prints one JSON object and exits with status 1 on any error.
+- 8fe38a0: The `Machine.Machine` namespace now exposes only its public API. The internal helper types that implement `.handle` and its compile-time checks, such as `Machine.Machine.HandlerTreeEvidence`, `Machine.Machine.NormalizeObjectConfig`, and `Machine.Machine.ValidateObjectConfig`, are no longer reachable from outside the package, and the API reference no longer lists them.
+  
+  Code that named one of these helpers should name the public type it was used to compute, such as `Machine.Machine.States`, `Machine.Machine.Snapshot`, or `Machine.Machine.StateHandler`. `Machine.Machine.HistoryDefaultEntry`, `Machine.Machine.ChoiceStateConfig`, `Machine.Machine.InvokeOwned`, and `Machine.Machine.EventConstructorInput` stay public and are now documented, because handler configurations and event constructors are declared with them. Declarations emitted for exported machines, child descriptors, atoms, event constructors, and handler helpers are unchanged.
+- 284608e: `MachineTest` now has one name for each enqueue-oriented runtime API. The deprecated `runRuntimeCommands` and `formatRuntimeTranscript` are removed: use `runEnqueuedCommands` and `formatEnqueuedTranscript`. The duplicate type names `RuntimeModelStep`, `RuntimeModelOptions`, `RuntimeInspectionContext`, `RuntimeAssertionContext`, `RuntimeCommandActual`, `RuntimeCommandRecord`, and `RuntimeTranscript` are removed: use the same types under their `Enqueued` names, such as `EnqueuedRuntimeModelOptions` and `EnqueuedRuntimeTranscript`.
+  
+  Child states can now be named `initial` or `with`. Both names were reserved for target builders that no longer exist. `Machine.initialDefinition(machine).selection.kind` is now typed as `"initial"`, the only value it returns.
+  
+  Unused types that no API accepts or returns are removed: `Machine.Machine.ChoiceResult`, `InitialReturn`, `TargetSelection`, `HandlerEffect`, `HandlerError`, `HandlerServices`, `InvokeEmits`, `FinalOutputReturn`, `InvokeTransition`, and `StateConfigs`, `Machine.Runtime.Protocol`, `Machine.Runtime.Events`, and `Machine.Runtime.Emits`, and `Machine.SpawnIdOptions`. Use `Machine.SpawnOptions` with an `id` in place of `SpawnIdOptions`, and `Effect.Error` or `Effect.Services` in place of the handler extractors.
+- 17151f2: Remove the target builder types `Machine.Machine.TargetBuilder`, `LocalTargetBuilder`, `BranchTargetBuilder`, `FullTargetBuilder`, and `HistoryTargetBuilder`. No API accepts or returns them since transitions became declarations: name a destination with `target`, `update`, `history`, `initialize`, or `stay` instead, and type a snapshot with `Machine.Machine.SnapshotByIdentifier`.
+  
+  In the devtools, `MachineWalkthrough.Choice` no longer has a `title` field. It always held the same value as `branchKey`, the `branches` entry as written, such as `target:Paid`. Read `branchKey` instead.
+  
+  The API reference now describes the current API, including `Machine.make`, `Machine.logic`, `Machine.eventsFromSchemas`, and the transition inspection types.
+- bed3603: Exported values whose types expand public Effect Machine types now emit declarations with `declaration: true`. Interfaces such as `Machine.Machine`, `Machine.ChildMachine`, the target and transition results, and event constructions were keyed by private symbols, so a declaration that printed their members, for example through a mapped type, failed with TS4023. Their type-level keys are now string literals in the same form as `Machine.TypeId`, such as `"~effect/Machine/NoTarget"`. These keys exist only in the types; runtime values are unchanged.
+  
+  `Machine.StateDeclaration` names the declaration accepted by `Machine.state`, so a helper can use it as a constraint. `AtomMachine.select` and `AtomMachine.can` can now be re-exported from a module that emits declarations.
+- 42e2d90: Declare conditional transitions inline, with `branches` next to `resolve`, so one transition can be read and edited alone. The compiler checks one against the other in both directions, and rejects a resolver that does not return a `select` call on every path:
+  
+  ```ts
+  Pay: {
+    branches: [{ target: "Charging" }, { update: "root" }, { stay: true }, { decline: true }],
+    resolve: ({ event, select }) => {
+      if (event.amount < 0) return select.decline()
+      if (event.amount === 0) return select.stay()
+      return event.preview
+        ? select.update({ root: { total: event.amount } })
+        : select.target("Charging", { data: { amount: event.amount } })
+    }
+  }
+  ```
+  
+  To migrate: move each `make({ branches })` group into its transition and drop its keys and `title`, so `select.key(...)` becomes `select.target(path, ...)`, `select.update({ owner: value })`, `select.history(path)`, `select.initialize({ input })`, or `select.stay()`. Two keys that reached the same destination are now one entry. Remove `declinable: true`, list `{ decline: true }`, and replace the `decline()` context function with `select.decline()`.
+  
+  `none` is replaced: `{ none: true }` becomes `{ stay: true }`, `{ none: true, reenter: true }` becomes `{ reenter: true }`, and `{ none: true, resolve }` becomes `{ stay: true, commands }`. Every plain transition accepts `commands: (context, enqueue) => ...`.
+  
+  `update` is now a record with one owner, so `data` only ever means the target's value: `{ update: "root", data }` becomes `{ update: { root: data } }`, and `{ target, update: "Owner", data: () => ({ target, update }) }` becomes `{ target, data, update: { Owner: value } }`. Inside a `branches` list, an entry still names its owner as a string, `{ target, update: "Owner" }`, and the value goes in its `select` call.
+  
+  `guard` and `decline` now exist only on `on` handlers and `always`. On `onDone`, `onFailure`, `onElement`, `onSnapshot`, and `choice`, which have no other candidate, use `{ stay: true }` or select a destination. A retained transition's `branchKey` and a transition definition's `key` are now the entry as written, such as `target:Paid`, and `title` is removed.
+  
+  In the Oxlint plugin, `no-conditional-none-branch` becomes `no-conditional-stay-branch`, and `no-redundant-resolve` is removed because the compiler now rejects what it reported. Resolvers for invocation outcomes and `always` may select `stay` conditionally, because `Machine.can` queries only events.
+
+### Patch Changes
+
+- b24c367: The npm page for `@typeonce/effect-machine` now links to the API reference at https://effect-machine.typeonce.dev.
+- ca51c52: Every API example in the published source now has a title, and the core package's examples compile and run against the current API.
+- fda7c8c: Fix invocation results that were already queued when their state exited. Such a result no longer runs `onDone`, `onFailure`, `onElement`, or `onSnapshot` for the invocation started when the state is entered again, whether through `reenter: true`, an ancestor's reentry, or a separate exit and entry.
+  
+  This applies to Effect, Stream, timer, `Logic`, and child machine invocations. A result produced while its state stays active is still delivered, even after a finished child has been removed.
+- 104f98a: Internal: check the compiled execution plan's transition contexts, targets, and commands at compile time instead of through `any` casts. Machine behavior and the public API are unchanged.
+- 7ffcab7: Internal: check planner target resolution, invocation sources, and runtime child operations at compile time instead of through `any` casts. Machine behavior and the public API are unchanged.
+
 ## 0.46.0
 
 ### Minor Changes
