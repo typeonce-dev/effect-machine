@@ -60,11 +60,22 @@ try {
   // types of their exported values must be nameable through public entrypoints.
   const projects = ["tsconfig.json", "tsconfig.declarations.json"]
   const fixtures = (await readdir(consumer)).filter((file) => file.endsWith(".ts"))
+  // TypeScript expands a type alias the package stops exporting instead of
+  // reporting an error, which changes consumer declarations silently. These
+  // public aliases are printed in declarations.d.ts and the package still
+  // builds without them, so this check is what keeps them exported.
+  const printedAliases = ["Machine.Machine.EventConstructorInput<"]
   const assertPublicDeclarations = async () => {
     for (const fixture of fixtures) {
       const emitted = await readFile(join(consumer, "declarations", fixture.replace(/\.ts$/, ".d.ts")), "utf8")
       if (emitted.includes("/internal/")) {
         throw new Error(`consumer declarations for ${fixture} reference package internals:\n${emitted}`)
+      }
+      if (fixture === "declarations.ts") {
+        const expanded = printedAliases.filter((alias) => !emitted.includes(alias))
+        if (expanded.length > 0) {
+          throw new Error(`consumer declarations no longer name ${expanded.join(", ")}:\n${emitted}`)
+        }
       }
     }
     await rm(join(consumer, "declarations"), { recursive: true, force: true })

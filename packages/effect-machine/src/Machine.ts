@@ -2304,7 +2304,19 @@ export declare namespace Machine {
   /** Identifies whether an event protocol is accepted publicly or only inside a machine. */
   export type EventProtocolKind = "public" | "internal" | "emitted"
 
-  type EventConstructorInput<EventSchema extends TaggedSchema> = Omit<EventSchema["~type.make.in"], "_tag">
+  /**
+   * Fields accepted by the constructor of one event in an event protocol.
+   *
+   * **Details**
+   *
+   * The input is the event schema's constructor input without `_tag`, which
+   * the constructor supplies. When every field is optional, so is the
+   * constructor's argument.
+   *
+   * @category utility types
+   * @since 0.23.0
+   */
+  export type EventConstructorInput<EventSchema extends TaggedSchema> = Omit<EventSchema["~type.make.in"], "_tag">
 
   type EventConstructor<
     EventSchema extends TaggedSchema,

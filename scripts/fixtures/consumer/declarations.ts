@@ -94,3 +94,5 @@ export const reviewer = Machine.make({
     Done: {}
   }
 })
+
+export const editWorkspace = WorkspaceEvents.Edit
