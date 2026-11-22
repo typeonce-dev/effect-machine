@@ -1,8 +1,8 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Effect, Schema } from "effect"
 import { Machine } from "../../src/index.js"
-describe("local compound target selection", () => {
-  it.effect("captures and plans local.with from the compound scope", () =>
+describe("compound target selection", () => {
+  it.effect("selects a compound target with descendant values from the compound scope", () =>
     Effect.gen(function*() {
       const State = Schema.TaggedUnion({
         Search: { query: Schema.String },
@@ -100,7 +100,7 @@ describe("local compound target selection", () => {
         }
       })
     }))
-  it.effect("resolves local.with from a descendant invoke source", () =>
+  it.effect("selects a compound target with descendant values from a descendant invoke source", () =>
     Effect.gen(function*() {
       const State = Schema.TaggedUnion({
         Search: { query: Schema.String },
@@ -175,7 +175,7 @@ describe("local compound target selection", () => {
         }
       })
     }))
-  it("does not install local.with for a schema-less compound scope", () => {
+  it("handles a schema-less compound scope", () => {
     const Event = Schema.TaggedUnion({ Advance: {} })
     const states = Machine.state({
       states: {
@@ -187,7 +187,6 @@ describe("local compound target selection", () => {
         }
       }
     })
-    assert.notProperty("flow", "with")
     Machine.make({
       root: states,
       events: Machine.eventsFromSchemas(Event)

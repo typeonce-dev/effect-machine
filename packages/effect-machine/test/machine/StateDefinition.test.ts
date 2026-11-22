@@ -1,5 +1,5 @@
 import { assert, describe, it } from "@effect/vitest"
-import { Schema } from "effect"
+import { Effect, Fiber, Schema } from "effect"
 import { Machine } from "../../src/index.js"
 class Root extends Schema.TaggedClass<Root>("Root")("Root", {}) {}
 class Idle extends Schema.TaggedClass<Idle>("Idle")("Idle", {}) {}
@@ -328,35 +328,124 @@ describe("exact state-definition runtime validation", () => {
     }
     expectDefinitionError(() => makeFromUnknownStates({ 12: Idle }), "Machine.state", "12", "numeric forms")
   })
-  it("rejects child keys reserved by definition-time target selectors", () => {
-    expectDefinitionError(
-      () =>
-        unsafeState({
-          states: {
-            Root: {
-              states: { initial: Idle }
+  it.effect("runs child states named initial and with", () =>
+    Effect.gen(function*() {
+      class Flow extends Schema.TaggedClass<Flow>("Flow")("Flow", { query: Schema.String }) {}
+      class With extends Schema.TaggedClass<With>("With")("With", { count: Schema.Number }) {}
+      const Events = Schema.TaggedUnion({
+        Next: {},
+        Update: { query: Schema.String },
+        Split: {}
+      })
+      const states = Machine.state({
+        states: {
+          flow: {
+            schema: Flow,
+            states: {
+              initial: {},
+              with: With
             }
-          } as any
-        }),
-      "Machine.state",
-      "Root.initial",
-      "reserved target selector key"
-    )
-    expectDefinitionError(
-      () =>
-        unsafeState({
-          states: {
-            Root: {
-              schema: Root,
-              states: { with: Idle }
+          },
+          regions: {
+            type: "parallel",
+            states: {
+              initial: {
+                states: {
+                  first: {},
+                  second: {}
+                }
+              },
+              with: {}
             }
-          } as any
-        }),
-      "Machine.state",
-      "Root.with",
-      "reserved local target selector key"
-    )
-  })
+          }
+        }
+      })
+      const machine = Machine.make({
+        root: states,
+        events: Machine.eventsFromSchemas(Events)
+      }).handle({
+        initial: { target: "flow", data: { query: "" } },
+        states: {
+          flow: {
+            initial: { target: "flow.initial" },
+            on: {
+              Update: {
+                branches: [{ target: "flow" }],
+                reenter: true,
+                resolve: ({ event, select }) =>
+                  select.target("flow", { data: { query: event.query }, states: { with: { data: { count: 1 } } } })
+              },
+              Split: { target: "regions" }
+            },
+            states: {
+              initial: {
+                on: { Next: { target: "flow.with", data: { count: 0 } } }
+              },
+              with: {}
+            }
+          },
+          regions: {
+            states: {
+              initial: {
+                initial: { target: "regions.initial.first" },
+                states: {
+                  first: {
+                    on: { Next: { target: "regions.initial.second" } }
+                  },
+                  second: {}
+                }
+              },
+              with: {}
+            }
+          }
+        }
+      })
+      const activePaths = (snapshot: Machine.Machine.Snapshot<Machine.Machine.States<typeof machine>>) =>
+        Machine.configuration(machine, snapshot).map((node) => node.path)
+
+      const initial = yield* Machine.planInitial(machine)
+      assert.deepStrictEqual(activePaths(initial.state), ["", "flow", "flow.initial"])
+      const next = yield* Machine.plan(machine, initial.state, Events.cases.Next.make({}))
+      assert.deepStrictEqual(activePaths(next.next), ["", "flow", "flow.with"])
+      assert.deepStrictEqual(next.next.state, {
+        path: "flow",
+        value: new Flow({ query: "" }),
+        state: { path: "flow.with", value: new With({ count: 0 }) }
+      })
+      const updated = yield* Machine.plan(machine, next.next, Events.cases.Update.make({ query: "q" }))
+      assert.deepStrictEqual(updated.next.state, {
+        path: "flow",
+        value: new Flow({ query: "q" }),
+        state: { path: "flow.with", value: new With({ count: 1 }) }
+      })
+      const split = yield* Machine.plan(machine, updated.next, Events.cases.Split.make({}))
+      assert.deepStrictEqual(activePaths(split.next), [
+        "",
+        "regions",
+        "regions.initial",
+        "regions.initial.first",
+        "regions.with"
+      ])
+      const encoded = yield* Machine.encodeSnapshot(machine, split.next)
+      const decoded = yield* Machine.decodeSnapshot(machine, JSON.parse(JSON.stringify(encoded)))
+      assert.deepStrictEqual(decoded, split.next)
+
+      const ref = yield* Machine.resume(machine, decoded)
+      const observer = yield* Machine.waitFor(ref, (snapshot) =>
+        Machine.configuration(machine, snapshot.state).some((node) =>
+          node.path === "regions.initial.second"
+        )).pipe(Effect.forkChild)
+      yield* ref.send(Events.cases.Next.make({}))
+      const settled = yield* Fiber.join(observer)
+      assert.deepStrictEqual(activePaths(settled.state), [
+        "",
+        "regions",
+        "regions.initial",
+        "regions.initial.second",
+        "regions.with"
+      ])
+      yield* ref.stop
+    }))
   it("rejects unknown or non-string pseudo-state annotations", () => {
     expectDefinitionError(
       () =>

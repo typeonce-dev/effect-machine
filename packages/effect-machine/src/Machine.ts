@@ -69,7 +69,6 @@ declare const InitialTargetTypeId: "~effect/Machine/InitialTarget"
 declare const ChoiceTargetTypeId: "~effect/Machine/ChoiceTarget"
 declare const NoTargetTypeId: "~effect/Machine/NoTarget"
 declare const DeclinedTypeId: "~effect/Machine/Declined"
-declare const TargetSelectionTypeId: "~effect/Machine/TargetSelection"
 declare const StateUpdateTypeId: "~effect/Machine/StateUpdate"
 declare const CombinedTargetTypeId: "~effect/Machine/CombinedTarget"
 declare const SelectedBranchTypeId: "~effect/Machine/SelectedBranch"
@@ -673,33 +672,6 @@ export type Command =
  */
 export declare namespace Runtime {
   /**
-   * Protocol annotation for managed event delivery.
-   *
-   * @category models
-   * @since 0.4.0
-   */
-  export interface Protocol {
-    readonly events?: unknown
-    readonly emits?: unknown
-  }
-
-  /**
-   * Extracts the events required by a runtime protocol annotation.
-   *
-   * @category utility types
-   * @since 0.4.0
-   */
-  export type Events<Protocol> = Protocol extends { readonly events: infer Events } ? Events : never
-
-  /**
-   * Extracts the emitted events required by a runtime protocol annotation.
-   *
-   * @category utility types
-   * @since 0.4.0
-   */
-  export type Emits<Protocol> = Protocol extends { readonly emits: infer Emits } ? Emits : never
-
-  /**
    * Opaque service requirement for a machine runtime capability.
    *
    * @category services
@@ -758,8 +730,6 @@ type RootCompatibilityError<Message extends string> = {
 type ActiveStateKey<States extends Machine.StateSchemas> = Machine.ActiveStateKey<States>
 
 type HistoryStateKey<States extends Machine.StateSchemas> = Machine.HistoryStateKey<States>
-
-type ChoiceStateKey<States extends Machine.StateSchemas> = Machine.ChoiceStateKey<States>
 
 type StateDefinitionPath<Prefix extends string, Key extends PropertyKey> = Key extends string ?
   Key extends "" ? Prefix extends "" ? "<empty>" : `${Prefix}.<empty>`
@@ -869,29 +839,6 @@ type ValidateOutputSchema<Node> = "output" extends keyof Node ? Node extends { r
   : StateDefinitionError<"State output must be a schema">
   : unknown
 
-type SelectorChildKey<Children extends Machine.StateSchemas> = ActiveStateKey<Children> | ChoiceStateKey<Children>
-
-type ValidateInitialSelectorChild<Children extends Machine.StateSchemas, Path extends PropertyKey> = "initial" extends
-  SelectorChildKey<Children> ? StateDefinitionError<
-    "Active and choice child states cannot use the reserved target selector key \"initial\"",
-    StateDefinitionPath<Extract<Path, string>, "initial">,
-    "initial"
-  >
-  : unknown
-
-type ValidateWithSelectorChild<
-  Node extends Machine.StateNodeConfig,
-  Children extends Machine.StateSchemas,
-  Path extends PropertyKey
-> = Node extends { readonly schema: Machine.TaggedSchema } ?
-  "with" extends SelectorChildKey<Children> ? StateDefinitionError<
-      "Schema-backed compound child states cannot use the reserved local target selector key \"with\"",
-      StateDefinitionPath<Extract<Path, string>, "with">,
-      "with"
-    >
-  : unknown
-  : unknown
-
 type ValidateStateNodeWithChildren<
   Node extends Machine.StateNodeConfig,
   Children,
@@ -899,9 +846,8 @@ type ValidateStateNodeWithChildren<
 > = Children extends Machine.StateSchemas ?
   Node extends { readonly type: "final" } ? StateDefinitionError<"Final states cannot declare child states">
   : Node extends { readonly type: "parallel" } ?
-      & ValidateInitialSelectorChild<Children, Path>
-      & ("initial" extends keyof Node ? StateDefinitionError<"Parallel states cannot declare an initial child">
-        : { readonly states: ValidateStateTree<Children, true, Extract<Path, string>> } & ValidateOutputSchema<Node>)
+    "initial" extends keyof Node ? StateDefinitionError<"Parallel states cannot declare an initial child">
+    : { readonly states: ValidateStateTree<Children, true, Extract<Path, string>> } & ValidateOutputSchema<Node>
   : "output" extends keyof Node ? StateDefinitionError<"Only final and parallel states can declare output">
   : ValidateCompoundStateNode<Node, Children, Path>
   : StateDefinitionError<"Child states must be a state tree">
@@ -911,9 +857,7 @@ type ValidateCompoundStateNode<
   Children extends Machine.StateSchemas,
   Path extends PropertyKey
 > = "initial" extends keyof Node ? StateDefinitionError<"Declare initial edges in handle", Path>
-  : ValidateInitialSelectorChild<Children, Path> & ValidateWithSelectorChild<Node, Children, Path> & {
-    readonly states: ValidateStateTree<Children, true, Extract<Path, string>>
-  }
+  : { readonly states: ValidateStateTree<Children, true, Extract<Path, string>> }
 
 type ValidateStateNodeWithoutChildren<Node extends Machine.StateNodeConfig> = "initial" extends keyof Node ?
   StateDefinitionError<"Atomic states cannot declare an initial child">
@@ -1987,16 +1931,6 @@ export interface SpawnOptions {
 }
 
 /**
- * Options for spawning child processes with a parent-local id.
- *
- * @category models
- * @since 0.4.0
- */
-export interface SpawnIdOptions extends SpawnOptions {
-  readonly id: string
-}
-
-/**
  * Namespace containing type-level members associated with `Machine`.
  *
  * @category models
@@ -2949,7 +2883,7 @@ export declare namespace Machine {
   /** The statically selected root entry for machine startup. */
   export interface InitialDefinition<Path extends string = string> {
     readonly target: Path
-    readonly selection: TransitionTargetSelection<Path, "state" | "initial", "initial">
+    readonly selection: TransitionTargetSelection<Path, "initial", "initial">
   }
 
   /**
@@ -4010,43 +3944,6 @@ export declare namespace Machine {
   ) => StateConstruction<CompleteSnapshotContaining<States, Owner>>
 
   /**
-   * Opaque exact destination selected while a machine definition is captured.
-   * The selection contains topology only; state values are constructed later
-   * by the selected branch's resolver.
-   *
-   * @category models
-   * @since 0.14.0
-   */
-  export interface TargetSelection<
-    out Result,
-    out Path extends string | undefined = string | undefined,
-    out Kind extends Topology.TargetSelectionKind = Topology.TargetSelectionKind,
-    out Scope extends Topology.TargetSelectionScope | undefined = Topology.TargetSelectionScope | undefined
-  > {
-    readonly [TargetSelectionTypeId]: typeof TargetSelectionTypeId
-    readonly kind: Kind
-    readonly scope: Scope
-    readonly path: Path
-    readonly "~effect/Machine/TargetSelectionResult"?: Types.Covariant<Result>
-  }
-
-  type SelectionValue<
-    Builder,
-    Path extends string,
-    Kind extends Topology.TargetSelectionKind = "state",
-    Scope extends Topology.TargetSelectionScope | undefined = Topology.TargetSelectionScope | undefined
-  > = TargetSelection<Builder, Path, Kind, Scope>
-
-  type SelectionMethod<
-    Builder,
-    Path extends string,
-    Kind extends Topology.TargetSelectionKind = "state",
-    Scope extends Topology.TargetSelectionScope | undefined = Topology.TargetSelectionScope | undefined
-  > = () => SelectionValue<Builder, Path, Kind, Scope>
-
-  type RootBuilder<Builder> = Builder extends { readonly "": infer Root } ? Root : never
-
-  /**
    * Context passed to a state/event handler.
    *
    * @category models
@@ -4442,47 +4339,6 @@ export declare namespace Machine {
     >
     | NoTarget
 
-  /** A choice resolver must always select a typed target synchronously. */
-  export type ChoiceResult<States extends StateSchemas, E, R> =
-    | Snapshot<States>
-    | Target<States, StateIdentifier<States>>
-    | HistoryTarget<States, HistoryIdentifier<States>>
-    | ChoiceTarget<States, ChoiceIdentifier<States>>
-    | StateConstruction<
-      | Snapshot<States>
-      | Target<States, StateIdentifier<States>>
-      | HistoryTarget<States, HistoryIdentifier<States>>
-      | ChoiceTarget<States, ChoiceIdentifier<States>>
-    >
-
-  /**
-   * Extracts the union of handler return values from a handler map.
-   *
-   * @category utility types
-   * @since 0.4.0
-   */
-  export type HandlerEffect<Handlers> = Handlers[keyof Handlers]
-  /**
-   * Extracts the error type from a handler return value.
-   *
-   * @category utility types
-   * @since 0.4.0
-   */
-  export type HandlerError<Handlers> = Effect.Error<HandlerEffect<Handlers>>
-  /**
-   * Extracts the service requirements from a handler return value.
-   *
-   * @category utility types
-   * @since 0.4.0
-   */
-  export type HandlerServices<Handlers> = Effect.Services<HandlerEffect<Handlers>>
-  /**
-   * Extracts the return type of a function type, or `never` for any other type.
-   *
-   * @category utility types
-   * @since 0.4.0
-   */
-  export type InitialReturn<Initial> = Initial extends (...args: any) => infer Ret ? Ret : never
   /**
    * Extracts the return value from an entry or exit action.
    *
@@ -4631,17 +4487,6 @@ export declare namespace Machine {
     readonly [InvokeTypeId]: { readonly requirements: Types.Covariant<infer Requirements> }
   } ? Requirements
     : LogicServicesOf<InvokeLogic<Invoke>>
-  /**
-   * Extracts events emitted directly by an invoked child.
-   *
-   * @category utility types
-   * @since 0.4.0
-   */
-  export type InvokeEmits<Invoke> = Invoke extends {
-    readonly [InvokeTypeId]: { readonly emits: Types.Covariant<infer Emitted> }
-  } ? Emitted
-    : Invoke extends { readonly child: ChildMachine<string, infer M> } ? EmittedEvent<M>
-    : never
 
   /** Public parent inputs required by an invoked child machine. */
   export type InvokeParentEvents<Invoke> = Invoke extends {
@@ -4720,15 +4565,6 @@ export declare namespace Machine {
   export type DoneReturn<Config> = Config extends { readonly onDone?: infer OnDone }
     ? EventTransitionReturn<NonNullable<OnDone>>
     : never
-  /**
-   * Extracts the return value from a final state output function.
-   *
-   * @category utility types
-   * @since 0.4.0
-   */
-  export type FinalOutputReturn<Config> = Config extends { readonly output?: infer Output }
-    ? NonNullable<Output> extends (...args: any) => infer Ret ? Ret : never
-    : never
 
   /**
    * Extracts all service requirements contributed by a state handler config.
@@ -4765,14 +4601,6 @@ export declare namespace Machine {
       readonly result: Types.Covariant<Result>
     }
   }
-
-  export type InvokeTransition<
-    States extends StateSchemas,
-    Events extends ReadonlyArray<TaggedSchema>,
-    Emits extends ReadonlyArray<TaggedSchema>,
-    StateId extends StateNodeIdentifier<States>,
-    Context
-  > = TransitionConfig<States, Events, Emits, StateId, Context, true, TransitionAcceptance>
 
   export type InvokeSource<Value, Context> = Value | ((context: Context) => Value)
 
@@ -5090,44 +4918,6 @@ export declare namespace Machine {
     readonly [Key in keyof Config as Key extends "states" | "initial" | "root" ? never : Key]: Config[Key]
   }
 
-  type HandlerNodeChildrenConfig<Config> = "states" extends keyof Config ?
-    Config extends { readonly states?: infer Children } ? NonNullable<Children>
-    : never
-    : never
-
-  type HandlerNodeByPath<States extends StateSchemas, Path extends string> = "" extends keyof States ?
-    Path extends "" ? States[""]
-    : States[""] extends { readonly states: infer Children extends StateSchemas } ? HandlerNodeByPath<Children, Path>
-    : never
-    : Path extends `${infer Head}.${infer Rest}` ? Head extends keyof States ? States[Head] extends {
-          readonly states: infer Children extends StateSchemas
-        } ? HandlerNodeByPath<Children, Rest>
-        : never
-      : never
-    : Path extends keyof States ? States[Path]
-    : never
-
-  // Resolve only the supplied branch for a flattened state-node path. Keeping
-  // this recursion on the finite path avoids recursively expanding an open
-  // generic handler config.
-  type HandlerConfigAtPath<Config, Path extends string> = [Config] extends [never] ? never :
-    "" extends keyof Config ? Path extends "" ? Config[""]
-      : HandlerConfigAtPath<HandlerNodeChildrenConfig<Config[""]>, Path>
-    : Path extends `${infer Head}.${infer Rest}` ?
-      Head extends keyof Config ? HandlerConfigAtPath<HandlerNodeChildrenConfig<Config[Head]>, Rest>
-      : never
-    : Path extends keyof Config ? Config[Path]
-    : never
-
-  // Rebuild the public nested handler shape so branded validation errors stay
-  // attached to the exact property that introduced them.
-  type HandlerValidationAtPath<Path extends string, Validation> = Path extends `${infer Head}.${infer Rest}` ? {
-      readonly [Key in Head]?: {
-        readonly states: HandlerValidationAtPath<Rest, Validation>
-      }
-    }
-    : { readonly [Key in Path]?: Validation }
-
   type HandlerNodeConfigKey =
     | "always"
     | "choice"
@@ -5241,42 +5031,6 @@ export declare namespace Machine {
       }
     }
     : unknown
-
-  type TransitionResultInitialTargetPath<Result> = IsAny<Result> extends true ? never
-    : Result extends Effect.Effect<infer Success, any, any> ? TransitionResultInitialTargetPath<Success>
-    : Result extends SelectedBranch<any, infer Selected> ? TransitionResultInitialTargetPath<Selected>
-    : Result extends StateConstruction<infer Constructed> ? TransitionResultInitialTargetPath<Constructed>
-    : Result extends {
-      readonly [InitialTargetTypeId]: typeof InitialTargetTypeId
-      readonly _tag: "InitialTarget"
-    } ? Result extends { readonly path: infer Path extends string } ? Path : never
-    : never
-
-  type HandlerConfigInitialTargetPath<Config> = TransitionResultInitialTargetPath<
-    | EventHandlerReturn<Config>
-    | AlwaysReturn<Config>
-    | DoneReturn<Config>
-    | ChoiceReturn<Config>
-    | InvokeOutcomeReturn<InvokeReturn<Config>>
-  >
-
-  type RequiredInitializersForTargetPath<
-    AllStates extends StateSchemas,
-    Path
-  > = string extends Path ? never : Path extends StateIdentifier<AllStates> ? InitializerClosureForNode<
-      AllStates,
-      NodeByIdentifier<AllStates, Path>,
-      Path
-    >
-  : never
-
-  type HandlerTreeInitialTargetPath<Config> = string extends keyof Config ? never
-    : Config extends object ? {
-        readonly [Key in keyof Config]:
-          | HandlerConfigInitialTargetPath<HandlerConfigPart<Config[Key]>>
-          | (Config[Key] extends { readonly states: infer Children } ? HandlerTreeInitialTargetPath<Children> : never)
-      }[keyof Config]
-    : never
 
   type HandlerChildrenValidation<
     Node,
@@ -5408,34 +5162,6 @@ export declare namespace Machine {
     >
   > = [Incompatible] extends [never] ? unknown
     : HandlerValidationError<"Handler config requires an incompatible machine runtime", StateId, Incompatible>
-
-  type RootInitialTargetValidation<States extends StateSchemas, Config> =
-    RequiredInitializersForTargetPath<States, HandlerTreeInitialTargetPath<{ readonly "": Config }>> extends
-      infer Required ? Types.UnionToIntersection<
-        Required extends string ?
-          HandlerConfigAtPath<{ readonly "": Config }, Required> extends infer NodeConfig ?
-            [NodeConfig] extends [never] ? RootInitializeError<Required>
-            : "initial" extends keyof NodeConfig ? never
-            : RootInitializeError<Required>
-          : never :
-          unknown
-      > :
-      unknown
-
-  type RootInitializeError<Path extends string> = Path extends "" ? {
-      readonly initialize: HandlerValidationError<
-        "State requires initialize because a transition enters its declared initial configuration",
-        Path
-      >
-    } :
-    {
-      readonly states: HandlerValidationAtPath<Path, {
-        readonly initialize: HandlerValidationError<
-          "State requires initialize because a transition enters its declared initial configuration",
-          Path
-        >
-      }>
-    }
 
   type HandlerTreeValidation<
     States extends StateSchemas,
@@ -5597,13 +5323,6 @@ export declare namespace Machine {
     { readonly "": NormalizeObjectConfig<C, R> }
   >
 
-  type ObjectCompoundPath<S extends StateSchemas> = {
-    readonly [P in StateIdentifier<S>]: NodeByIdentifier<S, P> extends {
-      /** Child handlers nested according to the declared root topology. */
-      readonly states: StateSchemas
-    } ? P :
-      never
-  }[StateIdentifier<S>]
   type LazyProgramValue = Effect.Effect<unknown, unknown, unknown> | Stream.Stream<unknown, unknown, unknown>
 
   /** Registered lazy programs and their optional explicit input adapters. */
@@ -5650,7 +5369,6 @@ export declare namespace Machine {
   }
   type RegisteredInput<R> = R extends { readonly "~input": infer I extends Schema.Top } ? I : typeof Schema.Void
   type Registered<R, Kind extends PropertyKey> = Kind extends keyof R ? NonNullable<R[Kind]> : {}
-  type RefPath<R> = PathOf<R>
   type ConstructionData<Node> = [NodeSchema<Node>] extends [never] ? { readonly data?: never; readonly decoded?: never }
     :
       | (
@@ -7035,27 +6753,6 @@ export declare namespace Machine {
     readonly on?: EventHandlerMap<States, Events, Emits, StateId, EventTag, E, R>
   }
 
-  /**
-   * Runtime handler table stored on a machine.
-   *
-   * @category models
-   * @since 0.4.0
-   */
-  export type StateConfigs<
-    States extends StateSchemas,
-    Events extends ReadonlyArray<TaggedSchema>,
-    Emits extends ReadonlyArray<TaggedSchema>,
-    StateId extends StateIdentifier<States>,
-    EventTag extends TagOf<Events[number]>,
-    E,
-    R
-  > = Readonly<
-    Record<
-      PropertyKey,
-      | StateConfig<States, Events, Emits, StateId, EventTag, E, R>
-      | ChoiceStateConfig<States, Events, Emits, ChoiceIdentifier<States>>
-    >
-  >
   // An explicit export makes this ambient namespace export only the members marked `export`; the rest stay private.
   // oxlint-disable-next-line typescript/no-useless-empty-export -- the rule assumes module scope.
   export {}

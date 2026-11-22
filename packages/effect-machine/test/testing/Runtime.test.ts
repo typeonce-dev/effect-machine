@@ -92,10 +92,6 @@ const generatedRuntimeCommands = MachineTest.runtimeCommands(propertyMachine, {
   includeCheckpoint: true
 })
 describe("MachineTest runtime commands", () => {
-  it("keeps deprecated ambiguous names as enqueue-oriented compatibility aliases", () => {
-    assert.strictEqual(MachineTest.runRuntimeCommands, MachineTest.runEnqueuedCommands)
-    assert.strictEqual(MachineTest.formatRuntimeTranscript, MachineTest.formatEnqueuedTranscript)
-  })
   it("derives only public send commands and shrinkable clock/lifecycle commands", () => {
     const machine = makeCounterMachine()
     const generated = MachineTest.runtimeCommands(machine, {

@@ -139,22 +139,56 @@ describe("exact state definitions", () => {
     expect<InvalidProperty["Root"]["states"]["Idle"]["details"]>().type.toBe<"nestedUnknown">()
   })
 
-  it("rejects child keys reserved by definition-time target selectors", () => {
-    expect(Machine.state).type.not.toBeCallableWith({
+  it("accepts child states named initial and with", () => {
+    expect(Machine.state).type.toBeCallableWith({
       states: {
         Root: {
-          states: { initial: Idle }
+          states: { initial: Idle, with: Done }
         }
       }
     })
-    expect(Machine.state).type.not.toBeCallableWith({
+    expect(Machine.state).type.toBeCallableWith({
       states: {
         Root: {
           schema: Root,
-          states: { with: Idle }
+          states: { initial: Idle, with: Done }
         }
       }
     })
+    expect(Machine.state).type.toBeCallableWith({
+      states: {
+        Root: {
+          type: "parallel",
+          states: { initial: Idle, with: Done }
+        }
+      }
+    })
+    const states = Machine.state({
+      states: {
+        Root: {
+          schema: Root,
+          states: { initial: Idle, with: Done }
+        }
+      }
+    })
+    const machine = Machine.make({
+      root: states,
+      events: Machine.eventsFromSchemas()
+    }).handle({
+      initial: { target: "Root" },
+      states: {
+        Root: {
+          initial: { target: "Root.initial" },
+          states: {
+            initial: { always: { target: "Root.with" } },
+            with: {}
+          }
+        }
+      }
+    })
+    expect<Machine.Machine.StateIdentifier<Machine.Machine.States<typeof machine>>>().type.toBe<
+      "" | "Root" | "Root.initial" | "Root.with"
+    >()
   })
 
   it("checks reusable state definitions and finite path families against the full tree", () => {
