@@ -96,7 +96,12 @@ export interface FiniteHistoryState {
   readonly fallback: string
 }
 
-/** A deterministic transient choice pseudo-state in a finite model. */
+/**
+ * A deterministic transient choice pseudo-state in a finite model.
+ *
+ * @category models
+ * @since 0.47.0
+ */
 export interface FiniteChoiceState {
   readonly _tag: "Choice"
   readonly key: string

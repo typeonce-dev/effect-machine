@@ -28,7 +28,7 @@ import * as internal from "./internal/machine/machine.js"
 import { InitialEventTypeId } from "./internal/machine/machine.js"
 import type { EnsureExecutable } from "./internal/machine/readiness.js"
 import type { ExcludeCompatibleRuntime } from "./internal/machine/requirements.js"
-import type * as internalRuntime from "./internal/machine/runtimeProtocol.js"
+import type { MachineRuntime } from "./internal/machine/runtimeProtocol.js"
 import type * as StateDefinition from "./internal/machine/stateDefinition.js"
 import type * as Topology from "./internal/machine/topology.js"
 
@@ -429,9 +429,31 @@ export {
   StoppedError
 } from "./internal/machine/machine.js"
 
+export type {
+  /**
+   * Service required by operations that act on the machine executing them,
+   * such as `sendTo`, `stopChild`, and `spawn`.
+   *
+   * **When to use**
+   *
+   * Name this requirement when annotating a reusable helper built from those
+   * operations, or when exporting a value whose inferred type includes it.
+   *
+   * **Details**
+   *
+   * A running machine provides this service to the effects it executes, so it
+   * never appears in the requirements of the machine itself. Only the type is
+   * public: the service cannot be constructed or provided outside a running
+   * machine.
+   *
+   * @category services
+   * @since 0.47.0
+   */
+  MachineRuntime
+} from "./internal/machine/runtimeProtocol.js"
+
 const RuntimeRequirementTypeId = "~effect/Machine/RuntimeRequirement"
 const ActionRequirementTypeId = "~effect/Machine/ActionRequirement"
-type MachineRuntimeRequirement = internalRuntime.MachineRuntime
 
 /**
  * Opaque marker used to keep staged action errors and services separate from
@@ -479,8 +501,8 @@ export type PlanningServices<Requirements> = Exclude<Requirements, ActionRequire
  * @since 0.4.0
  */
 export type ExecutionServices<Requirements> =
-  | Exclude<PlanningServices<Requirements>, MachineRuntimeRequirement>
-  | Exclude<ActionServices<Requirements>, MachineRuntimeRequirement>
+  | Exclude<PlanningServices<Requirements>, MachineRuntime>
+  | Exclude<ActionServices<Requirements>, MachineRuntime>
 
 /**
  * Managed runtime capability used to deliver raised events and publish
@@ -1779,7 +1801,7 @@ type SpawnError<Options extends SpawnOptions> = SpawnIdError<Options>
 type SpawnResult<State, Event, Error, Requirements, Output, SpawnError, InitialError = never> = Effect.Effect<
   MachineRef<State, Event, Error, Output>,
   SpawnError | InitialError,
-  MachineRuntimeRequirement | SpawnRequirements<Requirements>
+  MachineRuntime | SpawnRequirements<Requirements>
 >
 
 /**
@@ -2424,7 +2446,7 @@ export declare namespace ChildMachine {
    */
   export type StartRequirements<Child extends Any> = Child extends ChildMachine<string, infer M> ? Exclude<
       ExcludeCompatibleRuntime<
-        Exclude<ExecutionServices<Machine.InitialServices<M> | Machine.Services<M>>, MachineRuntimeRequirement>,
+        Exclude<ExecutionServices<Machine.InitialServices<M> | Machine.Services<M>>, MachineRuntime>,
         Machine.Event<M>,
         Machine.EmittedEvent<M>
       >,
@@ -5244,7 +5266,7 @@ export declare namespace Machine {
       EventInput<InputEvent<M>>,
       Error<M> | ActionError<Services<M>> | InfiniteTransitionError | MachineSchemaDecodeError | StoppedError,
       ExcludeCompatibleRuntime<
-        Exclude<ExecutionServices<InitialServices<M> | Services<M>>, internalRuntime.MachineRuntime>,
+        Exclude<ExecutionServices<InitialServices<M> | Services<M>>, MachineRuntime>,
         Event<M>,
         EmittedEvent<M>
       >,
@@ -5389,7 +5411,7 @@ export declare namespace Machine {
    */
   export type InvokeRequirements<Config> = [InvokeReturn<Config>] extends [never] ? never
     :
-      | MachineRuntimeRequirement
+      | MachineRuntime
       | InvokeServices<InvokeReturn<Config>>
       | InvokeOutcomeServices<InvokeReturn<Config>>
   /**
@@ -9237,11 +9259,11 @@ export const sendTo: {
   <Child extends ChildMachine.Any>(
     child: Child,
     event: ChildMachine.Event<Child>
-  ): Effect.Effect<void, StoppedError, MachineRuntimeRequirement>
+  ): Effect.Effect<void, StoppedError, MachineRuntime>
   <Address extends ChildAddress<never>>(
     id: Address,
     event: ChildAddress.Event<Address>
-  ): Effect.Effect<void, StoppedError, MachineRuntimeRequirement>
+  ): Effect.Effect<void, StoppedError, MachineRuntime>
 } = internal.sendTo
 
 /**
@@ -9251,8 +9273,8 @@ export const sendTo: {
  * @since 0.4.0
  */
 export const stopChild: {
-  <Event>(child: ChildAddress<Event>): Effect.Effect<void, never, MachineRuntimeRequirement>
-  <Child extends ChildMachine.Any>(child: Child): Effect.Effect<void, never, MachineRuntimeRequirement>
+  <Event>(child: ChildAddress<Event>): Effect.Effect<void, never, MachineRuntime>
+  <Child extends ChildMachine.Any>(child: Child): Effect.Effect<void, never, MachineRuntime>
 } = internal.stopChild
 
 /**
