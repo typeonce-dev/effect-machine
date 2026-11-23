@@ -1,6 +1,6 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Deferred, Effect, Fiber, Schema, Stream } from "effect"
-import { Machine } from "../../src/index.js"
+import { LocalMachine, Machine } from "../../src/index.js"
 class Editing extends Schema.TaggedClass<Editing>("SynchronousDeliveryEditing")("Editing", {
   value: Schema.String
 }) {}
@@ -105,8 +105,8 @@ const makeFormMachine = (save: Effect.Effect<void>) =>
 const leaf = (snapshot: Machine.RuntimeSnapshot<any, any, any>) => snapshot.state.state
 
 const starts = [
-  ["without invocations", () => Machine.start(makeEditorMachine())],
-  ["with invocations", () => Machine.start(makeFormMachine(Effect.void))]
+  ["without invocations", () => LocalMachine.start(makeEditorMachine())],
+  ["with invocations", () => LocalMachine.start(makeFormMachine(Effect.void))]
 ] as const
 
 describe("synchronous delivery to an idle machine", () => {
@@ -197,7 +197,7 @@ describe("synchronous delivery to an idle machine", () => {
   it.effect("commits the transition before send returns and continues suspended work in the background", () =>
     Effect.gen(function*() {
       const release = yield* Deferred.make<void>()
-      const ref = yield* Machine.start(makeFormMachine(Deferred.await(release)))
+      const ref = yield* LocalMachine.start(makeFormMachine(Deferred.await(release)))
       Effect.runSync(ref.send(new Changed({ value: "a" })))
       Effect.runSync(ref.send(new Save({})))
       assert.deepStrictEqual(leaf(Effect.runSync(ref.snapshot)), {

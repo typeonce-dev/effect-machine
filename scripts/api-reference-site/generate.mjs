@@ -81,7 +81,7 @@ const readSiteModel = (inputDirectory, config) => {
     revision: dataset.revision,
     package: packageManifest,
     modules,
-    guideModule: modules.find((module) => (module.api.referenceSections ?? []).length > 0),
+    guideModules: modules.filter((module) => (module.api.referenceSections ?? []).length > 0),
     navigation: groupNavigation(modules),
     changelog,
     agentGuide
@@ -106,7 +106,7 @@ const writeSite = (outputDirectory, site) => {
   writePage(join(outputDirectory, "index.html"), renderIndexPage(site))
   writePage(join(outputDirectory, "changelog", "index.html"), renderChangelogPage(site))
   writePage(join(outputDirectory, "agent-guide", "index.html"), renderAgentGuidePage(site))
-  if (site.guideModule !== undefined) {
+  if (site.guideModules.length > 0) {
     writePage(join(outputDirectory, "guide", "index.html"), renderGuidePage(site))
   }
   for (const module of site.modules) {
@@ -296,11 +296,12 @@ export const renderModulePage = (site, module) => {
 }
 
 export const renderGuidePage = (site) => {
-  const module = site.guideModule
-  if (module === undefined) throw new Error("The guide reference requires a configured guide module")
-  const declarationIds = uniqueDeclarationIds(module.api.groups)
-  const entryIds = referenceIds(module.api.referenceSections, declarationIds)
-  const entryCount = module.api.referenceSections.reduce((count, section) => count + section.entries.length, 0)
+  const modules = site.guideModules
+  if (modules.length === 0) throw new Error("The guide reference requires a configured guide module")
+  const sections = modules.flatMap((module) => module.api.referenceSections)
+  const declarationIds = uniqueDeclarationIds(modules.flatMap((module) => module.api.groups))
+  const entryIds = referenceIds(sections, declarationIds)
+  const entryCount = sections.reduce((count, section) => count + section.entries.length, 0)
   const content = `
     <article class="guide-reference" data-pagefind-meta="type:guide">
       <header class="guide-header">
@@ -312,13 +313,13 @@ export const renderGuidePage = (site) => {
         <h1>Machine authoring guide</h1>
         <p>The core APIs and nested parameters used to define, implement, and run a machine, organized in authoring order.</p>
         <div class="module-meta">
-          <span>${module.api.referenceSections.length} sections</span>
+          <span>${sections.length} sections</span>
           <span>${entryCount} core APIs</span>
-          <code>${escapeHtml(module.export)}</code>
+          ${modules.map((module) => `<code>${escapeHtml(module.export)}</code>`).join("\n          ")}
         </div>
       </header>
       <div class="guide-sections">
-        ${module.api.referenceSections.map((section) => `
+        ${sections.map((section) => `
           <section class="workflow-section" aria-labelledby="workflow-${slugify(section.title)}">
             <header class="workflow-section__header">
               <h2 id="workflow-${slugify(section.title)}">${escapeHtml(section.title)}</h2>
@@ -337,7 +338,7 @@ export const renderGuidePage = (site) => {
     content,
     currentRoute: "guide",
     pageKind: "guide",
-    toc: renderGuideToc(module.api.referenceSections, entryIds)
+    toc: renderGuideToc(sections, entryIds)
   })
 }
 
@@ -625,7 +626,7 @@ const renderNavigation = (site, currentRoute) => `
     <a class="navigation-overview${currentRoute === "" ? " is-current" : ""}" href="${siteUrl(site, "")}">Overview</a>
     <a class="navigation-changelog${currentRoute === "changelog" ? " is-current" : ""}" href="${siteUrl(site, "changelog")}">Changelog</a>
     <a class="navigation-agent-guide${currentRoute === "agent-guide" ? " is-current" : ""}" href="${siteUrl(site, "agent-guide")}">Agent guide</a>
-    ${site.guideModule === undefined ? "" : `
+    ${site.guideModules.length === 0 ? "" : `
       <a class="navigation-guide${currentRoute === "guide" ? " is-current" : ""}" href="${siteUrl(site, "guide")}">Machine API</a>`}
     ${site.navigation.map((group) => `
       <section>
@@ -1089,7 +1090,7 @@ Sitemap: ${absoluteSiteUrl(site, "sitemap.xml")}
 
 export const renderSitemap = (site) => `<?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
-${["", "changelog/", "agent-guide/", ...(site.guideModule === undefined ? [] : ["guide/"]), ...site.modules.map((module) => `${module.route}/`)]
+${["", "changelog/", "agent-guide/", ...(site.guideModules.length === 0 ? [] : ["guide/"]), ...site.modules.map((module) => `${module.route}/`)]
     .map((route) => `  <url><loc>${escapeXml(absoluteSiteUrl(site, route))}</loc></url>`)
     .join("\n")}
 </urlset>
@@ -1192,7 +1193,7 @@ const validateSite = (outputDirectory, site) => {
     "index.html",
     "changelog/index.html",
     "agent-guide/index.html",
-    ...(site.guideModule === undefined ? [] : ["guide/index.html"]),
+    ...(site.guideModules.length === 0 ? [] : ["guide/index.html"]),
     "assets/styles.css",
     "assets/client.js",
     "apple-touch-icon.png",

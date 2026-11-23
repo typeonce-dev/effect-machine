@@ -15,7 +15,7 @@ import { type CapturedStateConfig, toImpl } from "./implementation.js"
 import * as Invocation from "./invocation.js"
 import * as InvocationChanges from "./invocationChanges.js"
 import * as internalPlanner from "./planner.js"
-import * as internalRuntime from "./runtime.js"
+import * as ProcessRuntime from "./runtime.js"
 import * as internalRuntimeProtocol from "./runtimeProtocol.js"
 import * as Serialization from "./serialization.js"
 
@@ -413,7 +413,7 @@ const initialResult = (
     ? { state: planned.state, done: true, output: planned.output }
     : { state: planned.state, done: false, output: undefined }
 
-// Process logic executes erased machine definitions. The public `Machine`
+// Process logic executes erased machine definitions. The public `LocalMachine`
 // module owns the typed contract that specializes this boundary.
 const makeProcessLogic = (
   machine: Machine.Any,
@@ -740,13 +740,18 @@ const toResumedProcessLogic = (
 ): internalRuntimeProtocol.ProcessLogic<any, any, any, any, any, any> =>
   makeProcessLogic(machine, { _tag: "Resume", snapshot })
 
+const toChildProcessLogic: internalRuntimeProtocol.MakeChildLogic = (machine, input) =>
+  machine.input === undefined ? toProcessLogic(machine) : toProcessLogic(machine, input)
+
+const runtime = ProcessRuntime.make(toChildProcessLogic)
+
 /** @internal Test-only runtime strategy selection for a fresh machine. */
 export const startWithRuntimeStrategyForTesting = (
   machine: Machine.Any,
-  strategy: internalRuntime.ProcessRuntimeStrategy,
+  strategy: ProcessRuntime.ProcessRuntimeStrategy,
   ...args: ReadonlyArray<unknown>
 ): Effect.Effect<internalRuntimeProtocol.MachineRef<any, any, any, any>, any, any> =>
-  internalRuntime.startProcessWithStrategyForTesting(
+  runtime.startProcessWithStrategyForTesting(
     toProcessLogic(machine, ...args),
     strategy,
     machine.id === undefined ? undefined : { id: machine.id }
@@ -755,10 +760,10 @@ export const startWithRuntimeStrategyForTesting = (
 /** @internal Test-only prepared startup strategy selection for a fresh machine. */
 export const prepareWithRuntimeStrategyForTesting = (
   machine: Machine.Any,
-  strategy: internalRuntime.ProcessRuntimeStrategy,
+  strategy: ProcessRuntime.ProcessRuntimeStrategy,
   ...args: ReadonlyArray<unknown>
 ): Effect.Effect<internalRuntimeProtocol.PreparedProcess<any, any, any, any, any, any, any>, any, any> =>
-  internalRuntime.prepareProcessWithStrategyForTesting(
+  runtime.prepareProcessWithStrategyForTesting(
     toProcessLogic(machine, ...args),
     strategy,
     machine.id === undefined ? undefined : { id: machine.id }
@@ -768,9 +773,9 @@ export const prepareWithRuntimeStrategyForTesting = (
 export const resumeWithRuntimeStrategyForTesting = (
   machine: Machine.Any,
   snapshot: Machine.Snapshot<any>,
-  strategy: internalRuntime.ProcessRuntimeStrategy
+  strategy: ProcessRuntime.ProcessRuntimeStrategy
 ): Effect.Effect<internalRuntimeProtocol.MachineRef<any, any, any, any>, any, any> =>
-  internalRuntime.startProcessWithStrategyForTesting(
+  runtime.startProcessWithStrategyForTesting(
     toResumedProcessLogic(machine, snapshot),
     strategy,
     machine.id === undefined ? undefined : { id: machine.id }
@@ -780,21 +785,21 @@ export const resumeWithRuntimeStrategyForTesting = (
 export const prepareResumedWithRuntimeStrategyForTesting = (
   machine: Machine.Any,
   snapshot: Machine.Snapshot<any>,
-  strategy: internalRuntime.ProcessRuntimeStrategy
+  strategy: ProcessRuntime.ProcessRuntimeStrategy
 ): Effect.Effect<internalRuntimeProtocol.PreparedProcess<any, any, any, any, any, any, any>, any, any> =>
-  internalRuntime.prepareProcessWithStrategyForTesting(
+  runtime.prepareProcessWithStrategyForTesting(
     toResumedProcessLogic(machine, snapshot),
     strategy,
     machine.id === undefined ? undefined : { id: machine.id }
   )
 
-// The public `Machine` module owns the typed start, prepare, and resume
+// The public `LocalMachine` module owns the typed start, prepare, and resume
 // signatures. These implementations are the erased boundary they specialize.
 export const start = (
   machine: Machine.Any,
   ...args: ReadonlyArray<unknown>
 ): Effect.Effect<internalRuntimeProtocol.MachineRef<any, any, any, any, any>, any, any> =>
-  internalRuntime.startProcess(
+  runtime.startProcess(
     toProcessLogic(machine, ...args),
     machine.id === undefined ? undefined : { id: machine.id }
   )
@@ -803,7 +808,7 @@ export const prepare = (
   machine: Machine.Any,
   ...args: ReadonlyArray<unknown>
 ): Effect.Effect<internalRuntimeProtocol.PreparedProcess<any, any, any, any, any, any, any>> =>
-  internalRuntime.prepareProcess(
+  runtime.prepareProcess(
     toProcessLogic(machine, ...args),
     machine.id === undefined ? undefined : { id: machine.id }
   )
@@ -812,7 +817,7 @@ export const resume = (
   machine: Machine.Any,
   snapshot: Machine.Snapshot<any>
 ): Effect.Effect<internalRuntimeProtocol.MachineRef<any, any, any, any, any>, any, any> =>
-  internalRuntime.startProcess(
+  runtime.startProcess(
     toResumedProcessLogic(machine, snapshot),
     machine.id === undefined ? undefined : { id: machine.id }
   )

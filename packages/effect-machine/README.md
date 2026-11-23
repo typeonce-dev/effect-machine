@@ -28,7 +28,7 @@ The package is pre-1.0: a clearer or safer long-term API takes priority over
 backward compatibility. Breaking changes use minor releases, compatible fixes
 use patch releases, and compatibility aliases are not added by default.
 
-The core machine model remains local. Distributed identity, placement,
+The core machine model does not depend on the host that runs it. Distributed identity, placement,
 transport, routing, delivery, and remote lifecycle semantics belong to Effect
 Cluster and are exposed only through explicit integration boundaries.
 
@@ -50,7 +50,7 @@ packed-consumer tests.
 Declare the root once, then add behavior with event maps:
 
 ```ts
-import { Machine } from "@typeonce/effect-machine"
+import { LocalMachine, Machine } from "@typeonce/effect-machine"
 import { Effect, Schema } from "effect"
 const Root = Machine.state({ fields: { count: Schema.Number } })
 const Events = Machine.events({ Increment: { by: Schema.Number } })
@@ -66,7 +66,7 @@ const Counter = Machine.make({
   }
 })
 const program = Effect.scoped(Effect.gen(function*() {
-  const ref = yield* Machine.start(Counter)
+  const ref = yield* LocalMachine.start(Counter)
   yield* ref.send(Events.Increment({ by: 1 }))
 }))
 ```
@@ -74,6 +74,10 @@ const program = Effect.scoped(Effect.gen(function*() {
 Root data is shared state. `update: { root: ... }` replaces that value while
 retaining the active child configuration and its running work. Ordinary
 transitions target a descendant; the root itself is not a destination.
+
+`Machine` declares the model. `LocalMachine` runs it in memory, and other hosts
+run the same model elsewhere: `AtomMachine` in an Atom registry, and
+`ClusterMachine` as a persisted Cluster entity.
 
 A started machine is owned by the enclosing `Scope`. Closing it is equivalent
 to `ref.stop`: invocations are interrupted, owned children stop, and later
@@ -318,7 +322,7 @@ Handlers receive typed `self` and, when declared, `parent` references. Resolvers
 use their second `enqueue` parameter to raise, emit, send, or stop work.
 Planning stays synchronous: perform asynchronous work in an invocation.
 
-`Machine.prepare(machine)` exposes an `inspection` stream for the live local
+`LocalMachine.prepare(machine)` exposes an `inspection` stream for the live local
 machine tree; subscribe before running `prepared.start` to observe startup. Distributed
 placement, transport, routing, and identity belong to the explicit Cluster
 adapter.
@@ -592,7 +596,7 @@ Snapshots can be validated for storage or transport:
 const resumed = Effect.gen(function*() {
   const encoded = yield* Machine.encodeSnapshot(machine, snapshot)
   const decoded = yield* Machine.decodeSnapshot(machine, encoded)
-  return yield* Machine.resume(machine, decoded) // owned by the current Scope
+  return yield* LocalMachine.resume(machine, decoded) // owned by the current Scope
 })
 ```
 
@@ -681,7 +685,7 @@ paths and seeds do not preserve the same generated cases after migration.
 ## Entrypoints
 
 ```ts
-import { Machine } from "@typeonce/effect-machine"
+import { LocalMachine, Machine } from "@typeonce/effect-machine"
 import { ClusterMachine } from "@typeonce/effect-machine/cluster"
 import { AtomMachine } from "@typeonce/effect-machine/reactivity"
 import { MachineTest } from "@typeonce/effect-machine/testing"

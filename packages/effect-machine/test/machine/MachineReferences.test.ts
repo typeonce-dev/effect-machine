@@ -1,6 +1,6 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Effect, Fiber, Option, Schema, Stream } from "effect"
-import { Machine } from "../../src/index.js"
+import { LocalMachine, Machine } from "../../src/index.js"
 const collectNext = <A>(stream: Stream.Stream<A>) =>
   stream.pipe(Stream.take(1), Stream.runCollect, Effect.map(Array.from), Effect.forkChild({ startImmediately: true }))
 describe("machine reference event channels", () => {
@@ -47,7 +47,7 @@ describe("machine reference event channels", () => {
           }
         }
       })
-      const prepared = yield* Machine.prepare(machine)
+      const prepared = yield* LocalMachine.prepare(machine)
       assert.strictEqual(initializations, 0)
       assert.strictEqual(prepared.id, "prepared-emission")
       const emitted = yield* collectNext(prepared.emissions)
@@ -95,7 +95,7 @@ describe("machine reference event channels", () => {
           }
         }
       })
-      const prepared = yield* Machine.prepare(machine)
+      const prepared = yield* LocalMachine.prepare(machine)
       const observed = yield* prepared.emissions.pipe(Stream.runCollect, Effect.forkChild({ startImmediately: true }))
       const error = yield* Effect.flip(prepared.start)
       assert.instanceOf(error, Machine.MachineSchemaDecodeError)
@@ -141,7 +141,7 @@ describe("machine reference event channels", () => {
           }
         }
       })
-      const ref = yield* Machine.start(machine)
+      const ref = yield* LocalMachine.start(machine)
       const early = yield* ref.emissions.pipe(
         Stream.take(2),
         Stream.runCollect,
@@ -197,7 +197,7 @@ describe("machine reference event channels", () => {
           }
         }
       })
-      const ref = yield* Machine.start(machine)
+      const ref = yield* LocalMachine.start(machine)
       const observed = yield* ref.emissions.pipe(
         Stream.runCollect,
         Effect.map(Array.from),
@@ -268,7 +268,7 @@ describe("machine reference event channels", () => {
         }
       })
       assert.strictEqual(childMachine.parent?.mode, "optional")
-      const root = yield* Machine.start(childMachine)
+      const root = yield* LocalMachine.start(childMachine)
       const rootChanged = yield* root.changes.pipe(
         Stream.filter((snapshot) => snapshot.state.state.path === "Reported"),
         Stream.take(1),
@@ -315,7 +315,7 @@ describe("machine reference event channels", () => {
           Finished: { output: ({ state }) => state.source }
         }
       })
-      const parent = yield* Machine.start(parentMachine)
+      const parent = yield* LocalMachine.start(parentMachine)
       const child = Option.getOrThrow(yield* parent.child(Child))
       const notice = yield* collectNext(child.emissions)
       yield* child.send(ChildEvents.Trigger())
@@ -410,7 +410,7 @@ describe("machine reference event channels", () => {
           ParentDone: { output: () => undefined }
         }
       })
-      const parent = yield* Machine.start(parentMachine)
+      const parent = yield* LocalMachine.start(parentMachine)
       assert.strictEqual(yield* parent.join, undefined)
     }) as Effect.Effect<void, unknown, any>)
 })

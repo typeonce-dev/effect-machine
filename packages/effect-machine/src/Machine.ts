@@ -1,5 +1,10 @@
 /**
- * Schema-first machine definitions.
+ * Schema-first machine models.
+ *
+ * This module declares machines, plans their steps, encodes their snapshots, and
+ * defines the contracts their types mention. It runs nothing: a host executes a
+ * machine, such as `LocalMachine` in memory or `ClusterMachine` as a Cluster
+ * entity.
  *
  * @since 0.4.0
  */
@@ -7,7 +12,6 @@
 import type * as Cause from "effect/Cause"
 import type * as Duration from "effect/Duration"
 import type * as Effect from "effect/Effect"
-import type * as Exit from "effect/Exit"
 import type * as Option from "effect/Option"
 import type { Pipeable } from "effect/Pipeable"
 import { hasProperty } from "effect/Predicate"
@@ -16,6 +20,7 @@ import type * as Scope from "effect/Scope"
 import type * as Stream from "effect/Stream"
 import type * as Types from "effect/Types"
 import type * as Activities from "./internal/machine/activities.js"
+import type { MachineRuntime } from "./internal/machine/capability.js"
 import type {
   ChildAlreadyExistsError,
   InfiniteTransitionError,
@@ -27,7 +32,6 @@ import type {
 import * as internal from "./internal/machine/machine.js"
 import { InitialEventTypeId } from "./internal/machine/machine.js"
 import type { EnsureExecutable } from "./internal/machine/readiness.js"
-import type { MachineRuntime } from "./internal/machine/runtimeProtocol.js"
 import type * as StateDefinition from "./internal/machine/stateDefinition.js"
 import type * as Topology from "./internal/machine/topology.js"
 
@@ -59,7 +63,6 @@ declare const EventConstructionTypeId: "~effect/Machine/EventConstruction"
 declare const EmittedEventConstructionTypeId: "~effect/Machine/EmittedEventConstruction"
 declare const EventProtocolTypeId: "~effect/Machine/EventProtocol"
 declare const ParentModeTypeId: "~effect/Machine/ParentMode"
-declare const ChildMachineLogicTypeId: "~effect/Machine/ChildMachineLogic"
 declare const InvokeTypeId: "~effect/Machine/Invoke"
 declare const StateConstructionTypeId: "~effect/Machine/StateConstruction"
 declare const TargetSnapshotTypeId: "~effect/Machine/TargetSnapshot"
@@ -442,8 +445,8 @@ export {
 
 export type {
   /**
-   * Service required by operations that act on the machine executing them,
-   * such as `sendTo`, `stopChild`, and `spawn`.
+   * Capability to act on the children of the running machine, required by
+   * `spawn`, `sendTo`, and `stopChild`.
    *
    * **When to use**
    *
@@ -452,48 +455,43 @@ export type {
    *
    * **Details**
    *
-   * A running machine provides this service to the effects it executes, so it
-   * never appears in the requirements of the machine itself. Only the type is
-   * public: the service cannot be constructed or provided outside a running
-   * machine.
+   * The model declares this capability, and a host provides it to the work it
+   * runs. `LocalMachine` provides it, also when `AtomMachine` hosts the machine.
+   *
+   * `Machine.Machine.Services` contains it for every machine that invokes work,
+   * whether or not that work uses it. `LocalMachine.RequiredServices` removes it.
+   *
+   * **Gotchas**
+   *
+   * `ClusterMachine` does not provide it. Its types accept a machine whose work
+   * uses the capability, and that work fails the machine with a missing service.
+   *
+   * Only the type is public: hosts of this library provide the service, and it
+   * cannot be constructed elsewhere.
    *
    * @category services
    * @since 0.47.0
    */
   MachineRuntime
-} from "./internal/machine/runtimeProtocol.js"
-
-/**
- * Resolves the services a host must provide to execute a machine.
- *
- * **When to use**
- *
- * Use when writing a generic host over a machine, to name the services that host
- * requires from its environment.
- *
- * **Details**
- *
- * Removes {@link MachineRuntime} from the machine's requirements, because the
- * running machine provides it.
- *
- * @category utility types
- * @since 0.4.0
- */
-export type ExecutionServices<Requirements> = Exclude<Requirements, MachineRuntime>
+} from "./internal/machine/capability.js"
 
 /**
  * Minimal typed target accepted by inter-machine send commands.
  *
- * `send` reports whether the event was accepted for delivery. It promises
- * nothing about when the target processes it; a local {@link MachineRef}
- * strengthens that guarantee.
+ * `send` reports whether the event was accepted for delivery. When the target
+ * processes it is up to the host that runs the target.
  *
  * @category models
  * @since 0.12.0
  */
 export interface MachineTarget<in Event> {
+  /** Id of the target, such as its machine definition id or child address. */
   readonly id: string
+
+  /** Unique identity of the running target. */
   readonly sessionId: string
+
+  /** Accepts an event for delivery, or fails with `StoppedError` once the target has terminated. */
   readonly send: (event: Event) => Effect.Effect<void, StoppedError>
 }
 
@@ -586,6 +584,8 @@ export interface Enqueue<in Events, in Emits> {
 
 /**
  * A closed machine command recorded by a synchronous transition.
+ *
+ * Planning only records commands. The host that runs the machine executes them.
  *
  * @category models
  * @since 0.4.0
@@ -1056,7 +1056,8 @@ type SpawnResult<State, Event, Error, Requirements, Output, SpawnError, InitialE
 >
 
 /**
- * Represents the active or terminal lifecycle state of a running machine.
+ * Represents the active or terminal lifecycle state of a running machine, as its
+ * host publishes it.
  *
  * **Details**
  *
@@ -1086,190 +1087,6 @@ export type RuntimeSnapshot<State, Error = never, Output = never> =
     readonly status: "stopped"
     readonly state: State
   }
-
-/**
- * Live, root-scoped records describing one prepared machine tree.
- *
- * Inspection records deliberately erase machine-specific values to `unknown`:
- * one stream may contain unrelated root, child-machine, and `Logic` protocols.
- * The record structure remains a closed discriminated union, while typed
- * application observation continues through `changes` and `emissions`.
- * Records retain decoded local events and snapshots and are not themselves a
- * stable JSON export format. Telemetry exporters must project process-local
- * values into an explicit portable representation.
- *
- * @category models
- * @since 0.13.0
- */
-export declare namespace Inspection {
-  /** Read-only identity of a local machine endpoint. */
-  export interface Endpoint {
-    readonly id: string
-    readonly sessionId: string
-  }
-
-  /** Read-only identity of a runtime represented in the inspection tree. */
-  export interface Subject extends Endpoint {
-    readonly kind: "Machine" | "Logic"
-  }
-
-  /** Causal origin of an inspected runtime. */
-  export type Origin =
-    | { readonly _tag: "Root" }
-    | {
-      readonly _tag: "Invoke"
-      readonly ownerPath: string
-      readonly invokeId: string
-    }
-    | {
-      readonly _tag: "Spawn"
-      readonly address: string | undefined
-    }
-
-  /** Causal owner of a send or emission. */
-  export type Causation =
-    | { readonly _tag: "Initialization" }
-    | { readonly _tag: "Macrostep"; readonly macrostepId: number }
-    | { readonly _tag: "Activity"; readonly activitySessionId: string }
-
-  /** Closed command projection safe for observation. */
-  export type Command =
-    | {
-      readonly _tag: "SendTo"
-      readonly target: Endpoint | { readonly id: string }
-      readonly event: unknown
-    }
-    | {
-      readonly _tag: "Stop"
-      readonly target: Endpoint | { readonly id: string }
-    }
-
-  /** One statechart microstep in a committed macrostep. */
-  export interface Microstep {
-    readonly event: unknown
-    readonly transitions: ReadonlyArray<Machine.RetainedTransition>
-    readonly raisedEvents: ReadonlyArray<unknown>
-    readonly emittedEvents: ReadonlyArray<unknown>
-    readonly commands: ReadonlyArray<Command>
-    readonly exitPaths: ReadonlyArray<string>
-    readonly entryPaths: ReadonlyArray<string>
-    readonly changed: boolean
-  }
-
-  /** Common ordering and identity fields for every record. */
-  export interface Base {
-    /** Total publication order within this prepared root. */
-    readonly sequence: number
-    /** Session id of the prepared root that owns this inspection stream. */
-    readonly rootSessionId: string
-    /** Runtime instance described by this record. */
-    readonly subject: Subject
-  }
-
-  /** Announces allocation of a root or owned process identity. */
-  export interface Created extends Base {
-    readonly _tag: "Created"
-    readonly parent: Subject | undefined
-    readonly origin: Origin
-    /** Compiled statechart definition; absent for generic `Logic`. */
-    readonly definition: Machine.Any | undefined
-  }
-
-  /** Announces successful initialization. */
-  export interface Initialized extends Base {
-    readonly _tag: "Initialized"
-    readonly snapshot: RuntimeSnapshot<unknown, unknown, unknown>
-    readonly initialEntryPaths: ReadonlyArray<string>
-    readonly microsteps: ReadonlyArray<Microstep>
-  }
-
-  /** Announces failure before an initial runtime snapshot exists. */
-  export interface StartFailed extends Base {
-    readonly _tag: "StartFailed"
-    readonly cause: Cause.Cause<unknown>
-  }
-
-  /** Announces acceptance of an event by a local mailbox. */
-  export interface EventSent extends Base {
-    readonly _tag: "EventSent"
-    readonly deliveryId: number
-    readonly source: Subject | undefined
-    readonly target: Endpoint
-    readonly event: unknown
-    readonly causedBy: Causation | undefined
-  }
-
-  /** Announces complete processing of one statechart mailbox event. */
-  export interface EventProcessed extends Base {
-    readonly _tag: "EventProcessed"
-    readonly macrostepId: number
-    readonly deliveryId: number
-    readonly source: Subject | undefined
-    readonly event: unknown
-    readonly before: RuntimeSnapshot<unknown, unknown, unknown>
-    readonly after: RuntimeSnapshot<unknown, unknown, unknown>
-    readonly handled: boolean
-    readonly configurationChanged: boolean
-    readonly microsteps: ReadonlyArray<Microstep>
-  }
-
-  /** Announces a direct state update made by generic `Logic`. */
-  export interface StateChanged extends Base {
-    readonly _tag: "StateChanged"
-    readonly before: unknown
-    readonly after: unknown
-    readonly causedByDeliveryId: number | undefined
-  }
-
-  /** Announces actual publication on a machine's domain emission stream. */
-  export interface Emitted extends Base {
-    readonly _tag: "Emitted"
-    readonly emission: unknown
-    readonly causedBy: Causation | undefined
-  }
-
-  /** Identity of one Effect or timer invocation run. */
-  export interface Activity {
-    readonly id: string
-    readonly sessionId: string
-    readonly owner: Subject
-    readonly ownerPath: string
-    readonly kind: "Effect" | "Stream" | "Timer"
-  }
-
-  /** Announces an Effect, Stream, or timer invocation starting. */
-  export interface ActivityStarted extends Base {
-    readonly _tag: "ActivityStarted"
-    readonly activity: Activity
-  }
-
-  /** Announces an Effect or timer invocation outcome. */
-  export interface ActivityStopped extends Base {
-    readonly _tag: "ActivityStopped"
-    readonly activity: Activity
-    /** Success or failure from the invoke; interruption means its owner stopped it. */
-    readonly exit: Exit.Exit<unknown, unknown>
-  }
-
-  /** Announces a terminal local runtime snapshot. */
-  export interface Terminated extends Base {
-    readonly _tag: "Terminated"
-    readonly snapshot: RuntimeSnapshot<unknown, unknown, unknown>
-  }
-
-  /** Complete live inspection protocol. */
-  export type Event =
-    | Created
-    | Initialized
-    | StartFailed
-    | EventSent
-    | EventProcessed
-    | StateChanged
-    | Emitted
-    | ActivityStarted
-    | ActivityStopped
-    | Terminated
-}
 
 /**
  * Represents a classified terminal outcome derived from a runtime snapshot.
@@ -1311,63 +1128,22 @@ export type RuntimeOutcome<State, Error = never, Output = never> =
   }
 
 /**
- * A fresh machine whose observable streams exist before initialization.
- *
- * Subscribe to `emissions` before evaluating `start` when initial-entry
- * emissions must be observed. `start` is one-shot: concurrent and repeated
- * evaluations share the same initialization and running reference, and the
- * `Scope` of the first evaluation owns the machine.
- *
- * @category models
- * @since 0.11.0
- */
-export interface Prepared<out State, in Event, out Error, out Output, out Emitted, out StartError, StartRequirements> {
-  /** Stable machine definition id, or a generated fallback when none was declared. */
-  readonly id: string
-
-  /** Unique identity reserved for this prepared machine instance. */
-  readonly sessionId: string
-
-  /** Waits for startup, then streams the initial lifecycle snapshot and later changes. */
-  readonly changes: Stream.Stream<RuntimeSnapshot<State, Error, Output>, StartError>
-
-  /** Streams ephemeral notifications published after subscription. */
-  readonly emissions: Stream.Stream<Emitted>
-
-  /**
-   * Streams ordered operational records for this root and every locally owned
-   * descendant. The stream is hot, non-replayed, never fails, and completes
-   * after the prepared root terminates. Subscribe before evaluating `start` to
-   * observe initialization.
-   */
-  readonly inspection: Stream.Stream<Inspection.Event>
-
-  /** Initializes this machine once, owned by the first evaluating `Scope`, and returns its running reference. */
-  readonly start: Effect.Effect<MachineRef<State, Event, Error, Output, Emitted>, StartError, StartRequirements>
-}
-
-/**
  * Provides access to a running machine's state, lifecycle, event input, and
  * termination operations.
  *
+ * **Details**
+ *
+ * This is the contract every host's reference satisfies. `send` reports whether
+ * an event was accepted for delivery. Errors that occur while processing an
+ * accepted event are observed through `snapshot`, `changes`, or `join`. Sending
+ * after termination fails with `StoppedError`.
+ *
  * **Gotchas**
  *
- * `send` reports whether an event was accepted for delivery. A running
- * machine reference is local, so an idle machine processes an accepted event
- * in the sender's turn: work that completes without suspending is reflected
- * by `snapshot` when `send` returns. Work invoked by an entered state also
- * starts in the sender's turn and runs until it first suspends, so browser
- * APIs that require user activation, such as `window.open`, can run in the
- * first step of an invoked Effect. Work that suspends continues in the
- * background, and its outcome is handled in a later turn, even when the work
- * completes without suspending, so the entered state is always observed
- * before the outcome leaves it. An event sent while the machine is processing
- * is queued behind the current work. `changes` subscribers receive every committed
- * snapshot in order once the sender yields, with consecutive sends delivered
- * together. This guarantee belongs to `MachineRef`; a `MachineTarget` only
- * promises delivery. Errors that occur while processing an accepted event are
- * observed through `snapshot`, `changes`, or `join`. Sending after
- * termination fails with `StoppedError`.
+ * When an accepted event is processed is up to the host. Code written against
+ * `MachineRef` cannot assume that `snapshot` reflects an event once `send`
+ * returns. `LocalMachine.start` documents the delivery order that a reference to
+ * a local machine adds to this contract.
  *
  * @category models
  * @since 0.4.0
@@ -1399,15 +1175,10 @@ export interface MachineRef<out State, in Event, out Error = never, out Output =
   /** Waits for machine output or fails when execution fails or is stopped. */
   readonly join: Effect.Effect<Output, Error | StoppedError>
 
-  /** Stops this machine instance and its owned child processes. */
+  /** Stops this machine instance and the children it owns. */
   readonly stop: Effect.Effect<void>
 
-  /**
-   * Accepts an event for processing by this local machine. An idle machine
-   * processes it in the sender's turn until the work first suspends, so
-   * `snapshot` reflects it when `send` returns. Work invoked by an entered
-   * state starts in the same turn; its outcome is handled in a later turn.
-   */
+  /** Accepts an event for delivery. When the machine processes it is up to its host. */
   readonly send: (event: Event) => Effect.Effect<void, StoppedError>
 
   /**
@@ -1430,7 +1201,11 @@ export interface MachineRef<out State, in Event, out Error = never, out Output =
 }
 
 /**
- * Machine-specific process logic used by `spawn` and state-owned invocations.
+ * Stateful process logic used by `spawn` and state-owned invocations.
+ *
+ * Logic describes a process by what it needs from a host: the capabilities of
+ * `Logic.Scope` and `Logic.Context`. `LocalMachine` runs it as a process owned by
+ * the machine. `ClusterMachine` rejects a machine that invokes it.
  *
  * @category models
  * @since 0.4.0
@@ -1451,14 +1226,14 @@ export interface Logic<
 }
 
 /**
- * Public types used by advanced machine process logic.
+ * Capabilities a host gives to process logic.
  *
  * @category models
  * @since 0.4.0
  */
 export declare namespace Logic {
   /**
-   * Machine-local endpoint that can receive events and be stopped.
+   * Endpoint of a process that can receive events and be stopped.
    *
    * @category models
    * @since 0.4.0
@@ -1518,7 +1293,7 @@ export declare namespace Logic {
   }
 
   /**
-   * Machine-local capabilities available while process logic initializes.
+   * Capabilities available while process logic initializes.
    *
    * @category models
    * @since 0.4.0
@@ -1547,7 +1322,7 @@ export declare namespace Logic {
   }
 
   /**
-   * Machine-local capabilities available while stateful process logic runs.
+   * Capabilities available while stateful process logic runs.
    *
    * @category models
    * @since 0.4.0
@@ -1580,8 +1355,8 @@ type InvokeLifecycleId = string & { readonly [ChildAddressTypeId]?: never }
  *
  * **Details**
  *
- * The descriptor carries the child's address and complete machine type.
- * Register it in `make({ children })` to invoke it by `src`, and pass a
+ * The descriptor holds the child's id and machine definition, and nothing a host
+ * needs to run the child: the host that starts it decides how. Register it in `make({ children })` to invoke it by `src`, and pass a
  * descriptor for the same id and machine to `sendTo` and child lookup APIs, so
  * state, event, error, and output types are inferred without separate
  * annotations.
@@ -1597,9 +1372,6 @@ export interface ChildMachine<Id extends string, M extends Machine.Any> {
 
   /** Complete machine definition carried by this descriptor. */
   readonly machine: M
-
-  /** @internal Brand of descriptors built by `child` and `childFamily`. */
-  readonly [ChildMachineLogicTypeId]: typeof ChildMachineLogicTypeId
 }
 
 /**
@@ -1689,13 +1461,14 @@ export declare namespace ChildMachine {
     : never
 
   /**
-   * Services needed to initialize a spawned child machine.
+   * Services needed to initialize a spawned child machine, without those its host
+   * provides to every machine it runs.
    *
    * @category utility types
    * @since 0.20.0
    */
   export type StartRequirements<Child extends Any> = Child extends ChildMachine<string, infer M> ?
-    Exclude<ExecutionServices<Machine.Services<M>>, Scope.Scope>
+    Exclude<Machine.Services<M>, MachineRuntime | Scope.Scope>
     : never
 
   /**
@@ -1727,8 +1500,12 @@ export declare namespace ChildMachine {
 }
 
 /**
- * Effectful operations for child machines owned directly by the current
- * machine process.
+ * Effectful operations for child machines owned directly by the running
+ * machine.
+ *
+ * Input mappers receive it from the host. `LocalMachine` runs each child as an
+ * owned local machine. The owner that `ClusterMachine` supplies refuses every
+ * operation with {@link ProcessLocalError}.
  *
  * @category models
  * @since 0.20.0
@@ -1755,7 +1532,7 @@ export interface ChildOwner<OwnerEvent> {
 }
 
 /**
- * Parent-local address for a child process that can receive events.
+ * Typed address of a child, unique within the machine that owns it.
  *
  * @category models
  * @since 0.4.0
@@ -1826,6 +1603,7 @@ export declare namespace ChildAddress {
  * @since 0.4.0
  */
 export interface SpawnOptions {
+  /** Address of the child, unique among the active children of its owner. */
   readonly id?: string
 }
 
@@ -4260,7 +4038,7 @@ export declare namespace Machine {
       Snapshot<States<M>>,
       EventInput<InputEvent<M>>,
       Error<M> | InfiniteTransitionError | MachineSchemaDecodeError | StoppedError,
-      ExecutionServices<Services<M>>,
+      Exclude<Services<M>, MachineRuntime>,
       Output<M>,
       | Error<M>
       | InfiniteTransitionError
@@ -6588,7 +6366,7 @@ type Make = {
  * **Example** (Invoking a registered Effect)
  *
  * ```ts import.meta.vitest
- * import { Machine } from "@typeonce/effect-machine"
+ * import { LocalMachine, Machine } from "@typeonce/effect-machine"
  * import { Effect, Option, Schema } from "effect"
  *
  * const Lookup = Schema.TaggedUnion({ Loading: { id: Schema.String }, Ready: { name: Schema.String } })
@@ -6614,7 +6392,7 @@ type Make = {
  * })
  *
  * const name = Effect.scoped(Effect.gen(function*() {
- *   const ref = yield* Machine.start(machine)
+ *   const ref = yield* LocalMachine.start(machine)
  *   yield* ref.send(Events.Load({ id: "1" }))
  *   const ready = yield* Machine.waitFor(ref, ({ state }) => state.state.path === "Ready").pipe(Effect.timeout("5 seconds"))
  *   return States.get(ready.state, "Ready").pipe(Option.map((state) => state.name))
@@ -6728,7 +6506,7 @@ export const events: <const Cases extends Readonly<Record<string, Schema.Struct.
  * **Example** (Reusing a tagged union as the event protocol)
  *
  * ```ts import.meta.vitest
- * import { Machine } from "@typeonce/effect-machine"
+ * import { LocalMachine, Machine } from "@typeonce/effect-machine"
  * import { Effect, Schema } from "effect"
  *
  * const Event = Machine.eventsFromSchemas(
@@ -6746,7 +6524,7 @@ export const events: <const Cases extends Readonly<Record<string, Schema.Struct.
  * })
  *
  * const count = Effect.scoped(Effect.gen(function*() {
- *   const ref = yield* Machine.start(machine)
+ *   const ref = yield* LocalMachine.start(machine)
  *   yield* ref.send(Event.Increment({ by: 1 }))
  *   return (yield* ref.state).value.count
  * }))
@@ -6919,7 +6697,7 @@ export const emittedEventsFromSchemas: {
  * **When to use**
  *
  * Use when you need to store or transport a statechart snapshot independently
- * of its local machine runtime.
+ * of the host that runs the machine.
  *
  * **Details**
  *
@@ -7091,9 +6869,9 @@ export const decodeSnapshot: <
  *
  * **Gotchas**
  *
- * `start` executes the closed command list as part of the managed machine commit
- * protocol. Manual planners may inspect commands but need running machine targets
- * to execute child-addressed operations.
+ * Planning does not execute the closed command list. A host such as `LocalMachine`
+ * executes it as part of its commit protocol. Manual planners may inspect commands
+ * but need running machine targets to execute child-addressed operations.
  *
  * **Example** (Planning startup without running the machine)
  *
@@ -7112,7 +6890,6 @@ export const decodeSnapshot: <
  * ```
  *
  * @see {@link plan} for planning a received event.
- * @see {@link start} for the managed runtime protocol.
  * @category constructors
  * @since 0.4.0
  */
@@ -7485,8 +7262,8 @@ export const can: {
  *
  * **Gotchas**
  *
- * `plan` returns data; it does not implement the managed machine commit protocol.
- * `start` executes child commands, publishes `next`, and then delivers
+ * `plan` returns data; it does not implement a commit protocol. A host such as
+ * `LocalMachine` executes child commands, publishes `next`, and then delivers
  * `emittedEvents`. Events with no enabled transition are ignored and produce
  * an unchanged plan.
  *
@@ -7517,7 +7294,6 @@ export const can: {
  * ```
  *
  * @see {@link planInitial} for planning machine startup.
- * @see {@link start} for managed execution and lifecycle observation.
  * @category combinators
  * @since 0.4.0
  */
@@ -7690,8 +7466,8 @@ export const childAddress: <Event = never>(id: string) => ChildAddress<Event> = 
  *
  * **Gotchas**
  *
- * This Effect requires a managed process runtime. A named child id must be
- * unique for the current parent until that child stops.
+ * This Effect requires {@link MachineRuntime}, which only some hosts provide. A
+ * named child id must be unique for the current parent until that child stops.
  *
  * Register logic in `make({ logic })` and use `invoke: { src, id, address, ...outcomes }` for children
  * that start and stop with that state.
@@ -7770,6 +7546,9 @@ export const stopChild: {
 /**
  * Returns a stream of terminal lifecycle outcomes for a running machine.
  *
+ * Reads only the `changes` of the reference, so it works with a reference from
+ * any host.
+ *
  * @category combinators
  * @since 0.4.0
  */
@@ -7779,6 +7558,9 @@ export const watch: <State, Event, Error = never, Output = never>(
 
 /**
  * Waits for the first current or subsequent published snapshot matching a predicate.
+ *
+ * Reads only the `changes` of the reference, so it works with a reference from
+ * any host.
  *
  * Use for external Effect coordination and tests. Prefer atom selectors for UI
  * reads, invocation outcomes for workflow behavior, and `ref.join` for output.
@@ -7797,7 +7579,7 @@ export const watch: <State, Event, Error = never, Output = never>(
  * **Example** (Waiting for a state with a timeout)
  *
  * ```ts import.meta.vitest
- * import { Machine } from "@typeonce/effect-machine"
+ * import { LocalMachine, Machine } from "@typeonce/effect-machine"
  * import { Effect } from "effect"
  *
  * const Events = Machine.events({ Finish: {} })
@@ -7812,7 +7594,7 @@ export const watch: <State, Event, Error = never, Output = never>(
  * })
  *
  * const path = Effect.scoped(Effect.gen(function*() {
- *   const ref = yield* Machine.start(machine)
+ *   const ref = yield* LocalMachine.start(machine)
  *   yield* ref.send(Events.Finish())
  *   const ready = yield* Machine.waitFor(ref, ({ state }) => state.state.path === "Ready").pipe(Effect.timeout("5 seconds"))
  *   return ready.state.state.path
@@ -7845,314 +7627,3 @@ export const waitFor: {
     predicate: (snapshot: RuntimeSnapshot<State, Error, Output>) => boolean
   ): Effect.Effect<RuntimeSnapshot<State, Error, Output>, Error | StoppedError | Cause.NoSuchElementError>
 } = internal.waitFor
-
-/**
- * Prepares a fresh machine without initializing it.
- *
- * Use this constructor when observation must be composed before initial-entry
- * actions run. Subscribe to `prepared.emissions`, then evaluate
- * `prepared.start`. Ordinary callers can continue to use {@link start}, which
- * starts directly and does not allocate the prepared lifecycle boundary.
- *
- * `prepared.start` is one-shot and scoped: the `Scope` that first evaluates it
- * owns the machine, and closing that `Scope` is equivalent to `ref.stop`.
- *
- * **Example** (Observing emissions before startup)
- *
- * ```ts import.meta.vitest
- * import { Machine } from "@typeonce/effect-machine"
- * import { Effect, Stream } from "effect"
- *
- * const Emitted = Machine.emittedEvents({ Started: {} })
- * const machine = Machine.make({
- *   root: Machine.state({ states: { Idle: {} } }),
- *   events: Machine.events({}),
- *   emittedEvents: Emitted
- * }).handle({
- *   initial: { target: "Idle" },
- *   states: {
- *     Idle: {
- *       entry: (_, enqueue) => {
- *         enqueue.emit(Emitted.Started())
- *       }
- *     }
- *   }
- * })
- *
- * const emitted = Effect.scoped(Effect.gen(function*() {
- *   const prepared = yield* Machine.prepare(machine)
- *   const seen: Array<string> = []
- *   yield* prepared.emissions.pipe(
- *     Stream.runForEach((event) => Effect.sync(() => seen.push(event._tag))),
- *     Effect.forkScoped({ startImmediately: true })
- *   )
- *   yield* prepared.start
- *   yield* Effect.yieldNow
- *   return seen
- * }))
- *
- * await Effect.runPromise(emitted) // => ["Started"]
- * ```
- *
- * @category constructors
- * @since 0.11.0
- */
-export const prepare: <
-  const States extends Machine.StateSchemas,
-  const Events extends ReadonlyArray<Machine.TaggedSchema>,
-  const Emits extends ReadonlyArray<Machine.TaggedSchema> = readonly [],
-  const Input extends Schema.Top = typeof Schema.Void,
-  UnhandledStates extends Machine.StateIdentifier<States> = Machine.StateIdentifier<States>,
-  E = never,
-  R = never,
-  FinalStates extends Machine.StateIdentifier<States> = never,
-  Output = never,
-  OutputStates extends Machine.StateIdentifier<States> = never,
-  InputEvents extends ReadonlyArray<Machine.TaggedSchema> = Events,
-  ParentEvents extends ReadonlyArray<Machine.TaggedSchema> = readonly []
->(
-  machine:
-    & Machine<
-      States,
-      Events,
-      Input,
-      UnhandledStates,
-      E,
-      R,
-      FinalStates,
-      Output,
-      Emits,
-      OutputStates,
-      InputEvents,
-      ParentEvents
-    >
-    & EnsureExecutable<States, UnhandledStates, OutputStates>
-    & Machine.RootCompatible<ParentEvents>,
-  ...args: [...Machine.InputArgs<Input>]
-) => Effect.Effect<
-  Prepared<
-    Machine.Snapshot<States>,
-    Machine.EventInputOf<InputEvents>,
-    | E
-    | InfiniteTransitionError
-    | MachineSchemaDecodeError
-    | StoppedError,
-    Output,
-    Machine.EmittedEventOf<Emits>,
-    | E
-    | InfiniteTransitionError
-    | MachineSchemaDecodeError
-    | StartupError
-    | StoppedError,
-    | Scope.Scope
-    | ExecutionServices<R>
-  >
-> = internal.prepare
-
-/**
- * Starts a machine owned by the current `Scope`.
- *
- * **When to use**
- *
- * Use when you want asynchronous event delivery, lifecycle snapshots, `join`,
- * and machine-owned spawned or invoked children.
- *
- * **Details**
- *
- * For each accepted event the runtime plans the complete synchronous
- * macrostep, executes closed machine commands, stops invokes for exited states,
- * publishes the new state, delivers emitted events, and then starts invokes
- * for entered states.
- *
- * The machine is a scoped resource, like `Effect.forkScoped`. Closing the
- * `Scope` is equivalent to `ref.stop`: active invocations are interrupted,
- * owned children stop, the snapshot becomes `stopped`, and later sends fail
- * with `StoppedError`. An earlier `ref.stop` or terminal completion leaves the
- * finalizer with nothing to do. Own a `Scope` explicitly, for example with
- * `Scope.make` and `Scope.provide`, when the machine must outlive the caller.
- *
- * **Gotchas**
- *
- * The returned handle's `send` operation only enqueues events. Transition
- * failures are reported through the runtime snapshot, `changes`, and `join`
- * rather than being returned by `send`. Sending after the machine reaches any
- * terminal state fails immediately with `StoppedError`.
- *
- * **Example** (Starting a machine in a scope)
- *
- * ```ts import.meta.vitest
- * import { Machine } from "@typeonce/effect-machine"
- * import { Effect } from "effect"
- *
- * const States = Machine.state({ states: { Idle: {} } })
- * const machine = Machine.make({ root: States, events: Machine.events({}) }).handle({
- *   initial: { target: "Idle" }
- * })
- *
- * const path = Effect.scoped(Effect.gen(function*() {
- *   const ref = yield* Machine.start(machine)
- *   return (yield* ref.state).state.path
- * }))
- *
- * await Effect.runPromise(path) // => "Idle"
- * ```
- *
- * @see {@link plan} for inspecting the same transition plan without executing it.
- * @see {@link watch} for classified terminal outcomes.
- * @category constructors
- * @since 0.4.0
- */
-export const start: <
-  const States extends Machine.StateSchemas,
-  const Events extends ReadonlyArray<Machine.TaggedSchema>,
-  const Emits extends ReadonlyArray<Machine.TaggedSchema> = readonly [],
-  const Input extends Schema.Top = typeof Schema.Void,
-  UnhandledStates extends Machine.StateIdentifier<States> = Machine.StateIdentifier<States>,
-  E = never,
-  R = never,
-  FinalStates extends Machine.StateIdentifier<States> = never,
-  Output = never,
-  OutputStates extends Machine.StateIdentifier<States> = never,
-  InputEvents extends ReadonlyArray<Machine.TaggedSchema> = Events,
-  ParentEvents extends ReadonlyArray<Machine.TaggedSchema> = readonly []
->(
-  machine:
-    & Machine<
-      States,
-      Events,
-      Input,
-      UnhandledStates,
-      E,
-      R,
-      FinalStates,
-      Output,
-      Emits,
-      OutputStates,
-      InputEvents,
-      ParentEvents
-    >
-    & EnsureExecutable<States, UnhandledStates, OutputStates>
-    & Machine.RootCompatible<ParentEvents>,
-  ...args: [...Machine.InputArgs<Input>]
-) => Effect.Effect<
-  MachineRef<
-    Machine.Snapshot<States>,
-    Machine.EventInputOf<InputEvents>,
-    | E
-    | InfiniteTransitionError
-    | MachineSchemaDecodeError
-    | StoppedError,
-    Output,
-    Machine.EmittedEventOf<Emits>
-  >,
-  | E
-  | InfiniteTransitionError
-  | MachineSchemaDecodeError
-  | StartupError
-  | StoppedError,
-  | Scope.Scope
-  | ExecutionServices<R>
-> = internal.start
-
-/**
- * Starts a fresh managed runtime from a decoded logical snapshot, owned by the
- * current `Scope`.
- *
- * **Details**
- *
- * The resumed machine has the same scoped lifetime as {@link start}: closing
- * the `Scope` is equivalent to `ref.stop`.
- *
- * `resume` validates and normalizes the supplied snapshot before publishing it
- * as the first state. It does not construct the declared initial state, replay
- * entry or transition actions, re-deliver raised or emitted events, or
- * re-evaluate historical completion and eventless transitions. Active-state
- * invokes start once in ancestor and document order with {@link InitialEvent};
- * timer invocations restart their complete duration and child-machine
- * invocations start from their own initial state.
- *
- * Only logical state, completion, and history metadata are resumed. Queues,
- * scopes, subscriptions, fibers, spawned children, invoke progress, and prior
- * runtime status are process-local and are not restored. A final snapshot
- * immediately produces a completed ref with its current-machine output.
- *
- * Decode encoded data explicitly with {@link decodeSnapshot} before calling
- * this function. Stable snapshots are hosted as supplied; newly enabled
- * eventless or completion transitions in a changed machine definition are not
- * evaluated merely because the runtime was resumed; only ordinary subsequent
- * transition planning can enter and stabilize states.
- *
- * **Example** (Resuming from a decoded snapshot)
- *
- * ```ts import.meta.vitest
- * import { Machine } from "@typeonce/effect-machine"
- * import { Effect } from "effect"
- *
- * const States = Machine.state({ states: { Idle: {} } })
- * const machine = Machine.make({ root: States, events: Machine.events({}) }).handle({
- *   initial: { target: "Idle" }
- * })
- *
- * const path = Effect.scoped(Effect.gen(function*() {
- *   const initial = yield* Machine.planInitial(machine)
- *   const encoded = yield* Machine.encodeSnapshot(machine, initial.state)
- *   const snapshot = yield* Machine.decodeSnapshot(machine, encoded)
- *   const ref = yield* Machine.resume(machine, snapshot)
- *   return (yield* ref.state).state.path
- * }))
- *
- * await Effect.runPromise(path) // => "Idle"
- * ```
- *
- * @see {@link decodeSnapshot} for the schema and transport boundary.
- * @see {@link start} for ordinary initial startup.
- * @category constructors
- * @since 0.4.0
- */
-export const resume: <
-  const States extends Machine.StateSchemas,
-  const Events extends ReadonlyArray<Machine.TaggedSchema>,
-  const Emits extends ReadonlyArray<Machine.TaggedSchema> = readonly [],
-  const Input extends Schema.Top = typeof Schema.Void,
-  UnhandledStates extends Machine.StateIdentifier<States> = Machine.StateIdentifier<States>,
-  E = never,
-  R = never,
-  FinalStates extends Machine.StateIdentifier<States> = never,
-  Output = never,
-  OutputStates extends Machine.StateIdentifier<States> = never,
-  InputEvents extends ReadonlyArray<Machine.TaggedSchema> = Events,
-  ParentEvents extends ReadonlyArray<Machine.TaggedSchema> = readonly []
->(
-  machine:
-    & Machine<
-      States,
-      Events,
-      Input,
-      UnhandledStates,
-      E,
-      R,
-      FinalStates,
-      Output,
-      Emits,
-      OutputStates,
-      InputEvents,
-      ParentEvents
-    >
-    & EnsureExecutable<States, UnhandledStates, OutputStates>
-    & Machine.RootCompatible<ParentEvents>,
-  snapshot: Machine.Snapshot<States>
-) => Effect.Effect<
-  MachineRef<
-    Machine.Snapshot<States>,
-    Machine.EventInputOf<InputEvents>,
-    | E
-    | InfiniteTransitionError
-    | MachineSchemaDecodeError
-    | StoppedError,
-    Output,
-    Machine.EmittedEventOf<Emits>
-  >,
-  MachineSchemaDecodeError,
-  | Scope.Scope
-  | ExecutionServices<R>
-> = internal.resume

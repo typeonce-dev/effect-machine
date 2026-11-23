@@ -1,6 +1,6 @@
 import { Effect, Schema } from "effect"
 import { describe, expect, it } from "tstyche"
-import { Machine } from "../../src/index.js"
+import { LocalMachine, Machine } from "../../src/index.js"
 import { MachineTest } from "../../src/testing/index.js"
 describe("MachineTest probe", () => {
   class State extends Schema.TaggedClass<State>("ProbeTypeState")("State", {
@@ -32,7 +32,7 @@ describe("MachineTest probe", () => {
     }
   })
   it("retains the machine state and public event protocol", () => {
-    const started = Machine.start(machine)
+    const started = LocalMachine.start(machine)
     const attached = Effect.flatMap(started, (ref) => MachineTest.probe(machine, ref))
     const sent = Effect.flatMap(attached, (probe) => probe.sendAndAwait(new PublicEvent({})))
     expect<Effect.Success<typeof attached>["machine"]>().type.toBe<typeof machine>()
@@ -47,7 +47,7 @@ describe("MachineTest probe", () => {
     expect<MachineTest.ProbeUnavailableError>().type.toBeAssignableTo<Effect.Error<typeof attached>>()
   })
   it("infers causal command evidence and probe-bound asynchronous observations", () => {
-    const started = Machine.start(machine)
+    const started = LocalMachine.start(machine)
     const executed = Effect.flatMap(
       started,
       (ref) =>
@@ -103,7 +103,7 @@ describe("MachineTest probe", () => {
       })
     ]
     const verified = Effect.flatMap(
-      Machine.start(machine),
+      LocalMachine.start(machine),
       (ref) =>
         Effect.flatMap(MachineTest.probe(machine, ref), (probe) =>
           MachineTest.verifyCausalCommands(probe, [

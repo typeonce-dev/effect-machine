@@ -14,10 +14,12 @@ import { AsyncResult, Atom, AtomRegistry } from "effect/reactivity"
 import type * as Schema from "effect/Schema"
 import type * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
+import type * as LocalMachine from "../../LocalMachine.js"
 import type * as Machine from "../../Machine.js"
 import type { Bound, ChildMachineAtom, MachineAtom } from "../../unstable/reactivity/AtomMachine.js"
 import * as internalMachine from "./machine.js"
 import * as PlannedSnapshot from "./plannedSnapshot.js"
+import * as Process from "./process.js"
 import type { EnsureExecutable } from "./readiness.js"
 import { isSnapshotObservable, snapshotObserver } from "./runtimeProtocol.js"
 import * as Topology from "./topology.js"
@@ -54,7 +56,7 @@ type MachineStartError<E, RuntimeError = never> =
 
 const preparedByMachineAtom = new WeakMap<
   object,
-  Atom.Atom<AsyncResult.AsyncResult<Machine.Prepared<any, any, any, any, any, any, any>, any>>
+  Atom.Atom<AsyncResult.AsyncResult<LocalMachine.Prepared<any, any, any, any, any, any, any>, any>>
 >()
 
 const machineByMachineAtom = new WeakMap<object, Machine.Machine.Any>()
@@ -118,7 +120,7 @@ const startPreparedMachineAtomEffect = <State, Event, Error, Output, Emitted, St
   get: Atom.AtomContext,
   prepared: Atom.Atom<
     AsyncResult.AsyncResult<
-      Machine.Prepared<State, Event, Error, Output, Emitted, StartError, Requirements>,
+      LocalMachine.Prepared<State, Event, Error, Output, Emitted, StartError, Requirements>,
       never
     >
   >
@@ -129,7 +131,7 @@ const resumeMachineAtomEffect = (
   get: Atom.AtomContext,
   machine: Machine.Machine.Any,
   snapshot: Machine.Machine.Snapshot<any>
-) => runMachineAtomEffect(get, internalMachine.resume(machine, snapshot))
+) => runMachineAtomEffect(get, Process.resume(machine, snapshot))
 
 // Server reads. A server read renders the planned startup snapshot and never
 // evaluates a bridge ref, because evaluating it starts the machine. Effect
@@ -231,7 +233,7 @@ export const emissions = <State, Event, Error, Output, StartError, Emitted>(
 
 export const inspection = <State, Event, Error, Output, StartError, Emitted>(
   self: MachineAtom<State, Event, Error, Output, StartError, Emitted>
-): Stream.Stream<Machine.Inspection.Event, StartError, AtomRegistry.AtomRegistry> => {
+): Stream.Stream<LocalMachine.Inspection.Event, StartError, AtomRegistry.AtomRegistry> => {
   const prepared = preparedByMachineAtom.get(self)
   if (prepared === undefined) return Stream.empty
   return Stream.unwrap(
@@ -991,7 +993,7 @@ export const make: {
         InputEvents,
         ParentEvents
       >
-      & EnsureNoExternalRequirements<Machine.ExecutionServices<R>>
+      & EnsureNoExternalRequirements<LocalMachine.RequiredServices<R>>
       & EnsureExecutable<States, UnhandledStates, OutputStates>
       & Machine.Machine.RootCompatible<ParentEvents>,
     ...args: [...Machine.Machine.InputArgs<Input>]
@@ -1004,7 +1006,7 @@ export const make: {
     Machine.Machine.EmittedEventOf<Emits>
   >
 } = ((machine: Machine.Machine.Any, ...args: ReadonlyArray<unknown>) => {
-  const prepared = Atom.make(() => internalMachine.prepare(machine, ...args))
+  const prepared = Atom.make(() => Process.prepare(machine, ...args))
   const ref = Atom.make((get) => startPreparedMachineAtomEffect(get, prepared as any))
   const result = makeFromRefAtom(ref as any, machine, lazyPlan(() => PlannedSnapshot.planStart(machine, args)))
   preparedByMachineAtom.set(result, prepared as any)
@@ -1018,7 +1020,7 @@ export const resume: {
   <M extends Machine.Machine.Any>(
     machine:
       & M
-      & EnsureNoExternalRequirements<Machine.ExecutionServices<Machine.Machine.Services<NoInfer<M>>>>
+      & EnsureNoExternalRequirements<LocalMachine.RequiredServices<Machine.Machine.Services<NoInfer<M>>>>
       & EnsureMachineExecutable<NoInfer<M>>
       & Machine.Machine.RootCompatible<Machine.Machine.ParentEvents<NoInfer<M>>>,
     snapshot: Machine.Machine.Snapshot<Machine.Machine.States<M>>
@@ -1033,7 +1035,7 @@ const makeWithRuntime = (
   machine: Machine.Machine.Any,
   args: ReadonlyArray<unknown>
 ): MachineAtom<any, any, any, any, any, any> => {
-  const prepared = runtime.atom(() => internalMachine.prepare(machine, ...args))
+  const prepared = runtime.atom(() => Process.prepare(machine, ...args))
   const ref = runtime.atom((get) => startPreparedMachineAtomEffect(get, prepared as any))
   const result = makeFromRefAtom(ref as any, machine, lazyPlan(() => PlannedSnapshot.planStart(machine, args)))
   preparedByMachineAtom.set(result, prepared as any)

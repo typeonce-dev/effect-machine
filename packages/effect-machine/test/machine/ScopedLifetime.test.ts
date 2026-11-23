@@ -1,6 +1,6 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Deferred, Effect, Exit, Option, Ref, Scope, Stream } from "effect"
-import { Machine } from "../../src/index.js"
+import { LocalMachine, Machine } from "../../src/index.js"
 
 const Events = Machine.events({ Go: {} })
 
@@ -19,7 +19,7 @@ describe("Machine scoped lifetime", () => {
     Effect.gen(function*() {
       const released = yield* Ref.make(false)
       const machine = makeWatcher(released)
-      const ref = yield* Effect.scoped(Machine.start(machine))
+      const ref = yield* Effect.scoped(LocalMachine.start(machine))
       assert.strictEqual(yield* Ref.get(released), true)
       const snapshot = yield* ref.snapshot
       assert.strictEqual(snapshot.status, "stopped")
@@ -55,7 +55,7 @@ describe("Machine scoped lifetime", () => {
         }
       })
       const { childRef, ref } = yield* Effect.scoped(Effect.gen(function*() {
-        const ref = yield* Machine.start(parent)
+        const ref = yield* LocalMachine.start(parent)
         const childRef = yield* ref.childChanges(Child).pipe(
           Stream.filter(Option.isSome),
           Stream.runHead,
@@ -75,7 +75,7 @@ describe("Machine scoped lifetime", () => {
       const released = yield* Ref.make(false)
       const machine = makeWatcher(released)
       const ref = yield* Effect.scoped(Effect.gen(function*() {
-        const ref = yield* Machine.start(machine)
+        const ref = yield* LocalMachine.start(machine)
         yield* ref.stop
         assert.strictEqual(yield* Ref.get(released), true)
         return ref
@@ -90,7 +90,7 @@ describe("Machine scoped lifetime", () => {
         events: Machine.events({})
       }).handle({ initial: { target: "Done" }, states: { Done: {} } })
       const ref = yield* Effect.scoped(Effect.gen(function*() {
-        const ref = yield* Machine.start(machine)
+        const ref = yield* LocalMachine.start(machine)
         yield* ref.join
         return ref
       }))
@@ -102,13 +102,13 @@ describe("Machine scoped lifetime", () => {
       const resumedReleased = yield* Ref.make(false)
       const resumedMachine = makeWatcher(resumedReleased)
       const initial = yield* Machine.planInitial(resumedMachine)
-      const resumed = yield* Effect.scoped(Machine.resume(resumedMachine, initial.state))
+      const resumed = yield* Effect.scoped(LocalMachine.resume(resumedMachine, initial.state))
       assert.strictEqual(yield* Ref.get(resumedReleased), true)
       assert.strictEqual((yield* resumed.snapshot).status, "stopped")
 
       const preparedReleased = yield* Ref.make(false)
       const preparedMachine = makeWatcher(preparedReleased)
-      const prepared = yield* Machine.prepare(preparedMachine)
+      const prepared = yield* LocalMachine.prepare(preparedMachine)
       const started = yield* Effect.scoped(prepared.start)
       assert.strictEqual(yield* Ref.get(preparedReleased), true)
       assert.strictEqual((yield* started.snapshot).status, "stopped")
@@ -117,7 +117,7 @@ describe("Machine scoped lifetime", () => {
   it.effect("the scope that first evaluates prepared.start owns the machine", () =>
     Effect.gen(function*() {
       const released = yield* Ref.make(false)
-      const prepared = yield* Machine.prepare(makeWatcher(released))
+      const prepared = yield* LocalMachine.prepare(makeWatcher(released))
       const owner = yield* Scope.make()
       const ref = yield* prepared.start.pipe(Scope.provide(owner))
       const again = yield* Effect.scoped(prepared.start)
@@ -132,7 +132,7 @@ describe("Machine scoped lifetime", () => {
       const released = yield* Ref.make(false)
       const machine = makeWatcher(released)
       const owner = yield* Scope.make()
-      const ref = yield* Effect.scoped(Machine.start(machine).pipe(Scope.provide(owner)))
+      const ref = yield* Effect.scoped(LocalMachine.start(machine).pipe(Scope.provide(owner)))
       assert.strictEqual(yield* Ref.get(released), false)
       assert.strictEqual((yield* ref.snapshot).status, "active")
       yield* Scope.close(owner, Exit.void)

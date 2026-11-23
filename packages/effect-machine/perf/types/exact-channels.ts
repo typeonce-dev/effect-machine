@@ -1,5 +1,5 @@
 import { Effect } from "effect"
-import { Machine } from "../../dist/index.js"
+import { LocalMachine, Machine } from "../../dist/index.js"
 import { Done, Idle, Input, Loaded, Notice, Start, States } from "./exact-channels-control.js"
 type Equal<Left, Right> = (<Type>() => Type extends Left ? 1 : 2) extends (<Type>() => Type extends Right ? 1 : 2)
   ? true
@@ -57,7 +57,7 @@ type ServicesAreNotAny = Expect<Equal<IsAny<Machine.Machine.Services<typeof comp
 type OutputIsNotAny = Expect<Equal<IsAny<Machine.Machine.Output<typeof complete>>, false>>
 void States
 void Machine.planInitial(complete, { seed: 1 })
-void Machine.start(complete, { seed: 1 })
+void LocalMachine.start(complete, { seed: 1 })
 export type {
   EmitIsExact,
   ErrorIsExact,

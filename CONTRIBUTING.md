@@ -28,13 +28,17 @@ every filename. Runtime tests mirror the same domains. Tests below
 The core dependency direction is:
 
 ```text
-public entrypoint -> public module -> process -> planner
-                                      |          |
-                                      v          v
-                                    runtime     model
-                                      |          |
-                                      └-> errors <-┘
+public entrypoint -> Machine -> model and planner <- process <- LocalMachine
+                                        |               |
+                                        v               v
+                                      errors  <----  runtime
 ```
+
+`Machine` is the model. It declares machines, plans their steps, and defines the
+contracts their types mention, and it imports nothing from a host, not even a
+type. A host runs the model: `LocalMachine` in memory, `AtomMachine` by hosting a
+local machine in an Atom registry, and `ClusterMachine` as a persisted entity,
+without the local runtime.
 
 Internal machine modules may refer back to the public `Machine` types through
 type-only imports. The runtime is intentionally unaware of the model, planner,
@@ -49,7 +53,11 @@ layers use `toImpl` to read them instead of treating the erased public machine a
 
 Runtime responsibilities are separated as follows:
 
-- `runtime.ts` allocates a root runtime and selects an execution strategy.
+- `process.ts` compiles machine definitions into process logic, for roots and for
+  child machines, and implements `LocalMachine`.
+- `runtime.ts` allocates a root runtime and selects an execution strategy. It is
+  bound to a function that builds the logic of a child machine, because child
+  descriptors hold no process logic.
 - `runtimeProtocol.ts` owns shared process contracts, child ownership, mailboxes,
   and observation. It receives startup functions from the coordinator so child
   startup does not create a dependency back to either execution strategy.
@@ -67,6 +75,8 @@ understands imports, re-exports, and dynamic imports, and enforces:
 
 - public entrypoints do not leak internals;
 - internal back-edges and layer dependencies keep their intended direction;
+- the model and the Cluster host do not depend on the local runtime, directly or
+  transitively, including through type-only imports;
 - production code does not depend on testing internals;
 - black-box tests do not depend on implementation internals;
 - production runtime imports are acyclic;

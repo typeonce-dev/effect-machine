@@ -1,6 +1,6 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Cause, Effect, Schema, Stream } from "effect"
-import { Machine } from "../../src/index.js"
+import { LocalMachine, Machine } from "../../src/index.js"
 class Loading extends Schema.TaggedClass<Loading>("InvokeLoading")("Loading", {}) {}
 class Complete extends Schema.TaggedClass<Complete>("InvokeComplete")("Complete", {
   value: Schema.String
@@ -142,7 +142,7 @@ describe("inline invoke", () => {
           }]
         }
       ])
-      const ref = yield* Machine.start(machine)
+      const ref = yield* LocalMachine.start(machine)
       yield* ref.changes.pipe(
         Stream.filter((snapshot) => snapshot.state.state.path === "Complete"),
         Stream.take(1),
@@ -182,7 +182,7 @@ describe("inline invoke", () => {
           Failed: {}
         }
       })
-      const ref = yield* Machine.start(machine)
+      const ref = yield* LocalMachine.start(machine)
       yield* ref.changes.pipe(
         Stream.filter((snapshot) => snapshot.state.state.path === "Failed"),
         Stream.take(1),
@@ -214,7 +214,7 @@ describe("inline invoke", () => {
           Failed: {}
         }
       })
-      const ref = yield* Machine.start(machine)
+      const ref = yield* LocalMachine.start(machine)
       yield* ref.changes.pipe(Stream.runDrain)
       const snapshot = yield* ref.snapshot
       assert.strictEqual(snapshot.status, "error")
@@ -268,7 +268,7 @@ describe("inline invoke", () => {
           Failed: {}
         }
       })
-      const ref = yield* Machine.start(machine)
+      const ref = yield* LocalMachine.start(machine)
       yield* ref.changes.pipe(
         Stream.filter((snapshot) => snapshot.state.state.path === "Complete"),
         Stream.take(1),
@@ -318,7 +318,7 @@ describe("inline invoke", () => {
           updates: []
         }]
       }])
-      const ref = yield* Machine.start(machine)
+      const ref = yield* LocalMachine.start(machine)
       for (let index = 0; index < 5; index += 1) {
         yield* Effect.yieldNow
       }
@@ -354,7 +354,7 @@ describe("inline invoke", () => {
           Failed: {}
         }
       })
-      const ref = yield* Machine.start(machine)
+      const ref = yield* LocalMachine.start(machine)
       for (let index = 0; index < 5; index += 1) {
         yield* Effect.yieldNow
       }
@@ -391,7 +391,7 @@ describe("inline invoke", () => {
           Failed: {}
         }
       })
-      const ref = yield* Machine.start(machine)
+      const ref = yield* LocalMachine.start(machine)
       yield* ref.send(new Start({}))
       for (let index = 0; index < 5; index += 1) {
         yield* Effect.yieldNow
@@ -431,7 +431,7 @@ describe("inline invoke", () => {
           Failed: {}
         }
       })
-      const ref = yield* Machine.start(machine)
+      const ref = yield* LocalMachine.start(machine)
       yield* ref.send(new Start({}))
       for (let index = 0; index < 5; index += 1) {
         yield* Effect.yieldNow

@@ -10,13 +10,15 @@ import * as PubSub from "effect/PubSub"
 import * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
 import type * as Take from "effect/Take"
+import type { Inspection, Prepared as PublicPrepared } from "../../LocalMachine.js"
 import type {
   MachineRef as PublicMachineRef,
-  Prepared as PublicPrepared,
   RuntimeOutcome as PublicRuntimeOutcome,
   RuntimeSnapshot as PublicRuntimeSnapshot
 } from "../../Machine.js"
-import type { ChildMachine, Inspection, Machine as MachineDefinition, MachineTarget } from "../../Machine.js"
+import type { ChildMachine, Machine as MachineDefinition, MachineTarget } from "../../Machine.js"
+import { MachineRuntime } from "./capability.js"
+import { isChildMachine } from "./child.js"
 import {
   type ChildDescriptor,
   type ChildEntry,
@@ -36,7 +38,6 @@ import { ChildAlreadyExistsError, StoppedError } from "./errors.js"
 import * as InspectionRuntime from "./inspectionRuntime.js"
 import type * as InvocationEvent from "./invocationEvent.js"
 import { InvocationGenerations } from "./invocationGeneration.js"
-import { type ChildMachineLogicSlot, ChildMachineLogicTypeId } from "./symbols.js"
 
 /** @internal */
 export const activeSnapshotObserver: unique symbol = Symbol.for("effect/Machine/activeSnapshotObserver")
@@ -517,90 +518,10 @@ interface ProcessSpawn<OwnerEvent = unknown> {
   >
 }
 
-/**
- * Service required by operations that act on the machine executing them,
- * such as `sendTo`, `stopChild`, and `spawn`.
- *
- * **When to use**
- *
- * Name this requirement when annotating a reusable helper built from those
- * operations, or when exporting a value whose inferred type includes it.
- *
- * **Details**
- *
- * A running machine provides this service to the effects it executes, so it
- * never appears in the requirements of the machine itself. Only the type is
- * public: the service cannot be constructed or provided outside a running
- * machine.
- *
- * @category services
- * @since 0.47.0
- */
-export class MachineRuntime extends Context.Service<MachineRuntime, ProcessScope<any>>()(
-  "effect/Machine/MachineRuntime"
-) {}
-
 export const provideMachineRuntime = <A, E, R, Event>(
   effect: Effect.Effect<A, E, R>,
   scope: ProcessScope<Event>
-): Effect.Effect<A, E, Exclude<R, MachineRuntime>> =>
-  Effect.provideService(effect, MachineRuntime, scope as ProcessScope<any>)
-
-export const classifyOutcome = <State, Error, Output>(
-  snapshot: RuntimeSnapshot<State, Error, Output>
-): RuntimeOutcome<State, Error, Output> | undefined => {
-  switch (snapshot.status) {
-    case "active": {
-      return undefined
-    }
-    case "done": {
-      return {
-        _tag: "Done",
-        output: snapshot.output,
-        snapshot
-      }
-    }
-    case "error": {
-      const failure = snapshot.cause.reasons.find(Cause.isFailReason)
-      if (failure !== undefined) {
-        return {
-          _tag: "Failure",
-          error: failure.error,
-          cause: snapshot.cause,
-          snapshot
-        }
-      }
-      const defect = snapshot.cause.reasons.find(Cause.isDieReason)
-      if (defect !== undefined) {
-        return {
-          _tag: "Defect",
-          defect: defect.defect,
-          cause: snapshot.cause,
-          snapshot
-        }
-      }
-      const interrupted = snapshot.cause.reasons.find(Cause.isInterruptReason)
-      if (interrupted !== undefined) {
-        return {
-          _tag: "Interrupted",
-          cause: snapshot.cause,
-          snapshot
-        }
-      }
-      return {
-        _tag: "Cause",
-        cause: snapshot.cause,
-        snapshot
-      }
-    }
-    case "stopped": {
-      return {
-        _tag: "Stopped",
-        snapshot
-      }
-    }
-  }
-}
+): Effect.Effect<A, E, Exclude<R, MachineRuntime>> => Effect.provideService(effect, MachineRuntime, scope)
 
 export const notifyActiveSnapshot = <State, Error, Output>(
   onSnapshot: (
@@ -613,14 +534,11 @@ export const notifyActiveSnapshot = <State, Error, Output>(
     Effect.asVoid
   )
 
-export const watch = <State, Event, Error = never, Output = never>(
-  ref: MachineRef<State, Event, Error, Output>
-): Stream.Stream<RuntimeOutcome<State, Error, Output>> =>
-  ref.changes.pipe(
-    Stream.filter((snapshot) => snapshot.status !== "active"),
-    Stream.map((snapshot) => classifyOutcome(snapshot)!),
-    Stream.take(1)
-  )
+/** Builds the process logic that runs a child machine with the given input. */
+export type MakeChildLogic = (
+  machine: MachineDefinition.Any,
+  input: unknown
+) => ProcessLogic<any, any, any, any, any, any>
 
 export interface ProcessRuntime {
   readonly start: StartProcess
@@ -630,13 +548,15 @@ export interface ProcessRuntime {
     services: Context.Context<any>,
     sessionId: string
   ) => Effect.Effect<MachineRef<any, any, any, any>, any, any>
+  readonly makeChildLogic: MakeChildLogic
   readonly nextSessionId: Effect.Effect<string>
   inspection?: InspectionRuntime.Runtime
 }
 
 export const makeProcessRuntime = (
   start: StartProcess,
-  startCompiledSync: ProcessRuntime["startCompiledSync"]
+  startCompiledSync: ProcessRuntime["startCompiledSync"],
+  makeChildLogic: MakeChildLogic
 ): Effect.Effect<ProcessRuntime> => {
   // Strategy hooks belong to the shared prototype. Each root owns only its
   // session counter and optional inspection runtime, independent of other roots.
@@ -655,6 +575,10 @@ export const makeProcessRuntime = (
 
     get startCompiledSync(): ProcessRuntime["startCompiledSync"] {
       return startCompiledSync
+    }
+
+    get makeChildLogic(): MakeChildLogic {
+      return makeChildLogic
     }
   }
   return Effect.sync(() => new Runtime())
@@ -770,13 +694,25 @@ export interface StartInternalOptions {
   readonly inspectionRoot?: boolean
 }
 
+/**
+ * Work started by an owner: lazily built process logic, or a child machine
+ * whose logic the runtime builds from its definition. A child machine is named
+ * rather than wrapped, so a running owner retains no closure for it.
+ *
+ * @internal
+ */
+export type OwnedChildSource = (() => ProcessLogic<any, any, any, any, any, any>) | {
+  readonly child: ChildMachine.Any
+  /** Constructs the child's input, or `undefined` when none is declared. */
+  readonly input: (() => unknown) | undefined
+}
+
 /** @internal */
 interface OwnedChildSpawnOptions {
   readonly key: string
   readonly path: string
   readonly id: string
   readonly duplicateId: string
-  readonly descriptor?: ChildDescriptor
   readonly onOutcome: (
     isCurrent: () => boolean,
     outcome: RuntimeOutcome<any, any, any>,
@@ -796,7 +732,7 @@ interface OwnedChildSpawnOptions {
 /** @internal */
 export interface OwnedChildRuntime {
   readonly spawn: (
-    makeLogic: () => ProcessLogic<any, any, any, any, any, any>,
+    source: OwnedChildSource,
     options: OwnedChildSpawnOptions
   ) => Effect.Effect<void, any, any>
   /**
@@ -858,7 +794,7 @@ class OwnedChildRuntimeImpl extends InvocationGenerations implements OwnedChildR
   }
 
   spawn(
-    makeLogic: () => ProcessLogic<any, any, any, any, any, any>,
+    source: OwnedChildSource,
     options: OwnedChildSpawnOptions
   ): Effect.Effect<void, any, any> {
     const token = Symbol()
@@ -872,7 +808,9 @@ class OwnedChildRuntimeImpl extends InvocationGenerations implements OwnedChildR
       if (this.has(options.key) || this.registry.children.has(options.id)) {
         return Effect.fail(new ChildAlreadyExistsError({ id: options.duplicateId }))
       }
-      const logic = makeLogic()
+      const logic = typeof source === "function"
+        ? source()
+        : this.runtime.makeChildLogic(source.child.machine, source.input?.())
       const scope = this.registry.scope ??= Scope.makeUnsafe("parallel")
       this.registry.children.set(options.id, {
         _tag: "Starting",
@@ -905,7 +843,13 @@ class OwnedChildRuntimeImpl extends InvocationGenerations implements OwnedChildR
           : { onSnapshot: (snapshot) => options.onSnapshot!(isCurrent, snapshot) }),
         onReadySync: (child) => {
           startedChild = child
-          return registerChild(this.registry, options.id, token, child, options.descriptor)
+          return registerChild(
+            this.registry,
+            options.id,
+            token,
+            child,
+            typeof source === "function" ? undefined : source.child
+          )
         },
         onStopSync: () => unregisterChild(this.registry, options.id, token),
         skipStoppedOutcome: true,
@@ -1249,15 +1193,13 @@ export const makeChildRuntimeSync = (
       ) => Effect.Effect<void>
     } | { readonly input?: unknown }
   ): Effect.Effect<MachineRef<any, any, any, any>, any, any> {
-    const descriptor = typeof logicOrChild === "object" && logicOrChild !== null &&
-        ChildMachineLogicTypeId in logicOrChild
-      ? logicOrChild as unknown as ChildMachine.Any & ChildMachineLogicSlot
-      : undefined
+    const descriptor = isChildMachine(logicOrChild) ? logicOrChild : undefined
     const logic = descriptor === undefined
       ? logicOrChild as ProcessLogic<any, any, any, any, any, any>
-      : descriptor[ChildMachineLogicTypeId](
+      : runtime.makeChildLogic(
+        descriptor.machine,
         (options as { readonly input?: unknown } | undefined)?.input
-      ) as unknown as ProcessLogic<any, any, any, any, any, any>
+      )
     const spawnOptions = descriptor === undefined
       ? options as {
         readonly id: string

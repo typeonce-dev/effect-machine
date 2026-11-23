@@ -1,6 +1,6 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Effect, Exit, Scope, Stream } from "effect"
-import { Machine } from "../../../src/index.js"
+import { LocalMachine, Machine } from "../../../src/index.js"
 
 const Events = Machine.events({ Finish: {} })
 const machine = Machine.make({
@@ -22,9 +22,9 @@ describe("Machine scoped ownership", () => {
   it.effect("an owning scope holds one finalizer and releases terminated machines", () =>
     Effect.gen(function*() {
       const owner = yield* Scope.make()
-      const stopped = yield* Machine.start(machine).pipe(Scope.provide(owner))
-      const completed = yield* Machine.start(machine).pipe(Scope.provide(owner))
-      const running = yield* Machine.start(machine).pipe(Scope.provide(owner))
+      const stopped = yield* LocalMachine.start(machine).pipe(Scope.provide(owner))
+      const completed = yield* LocalMachine.start(machine).pipe(Scope.provide(owner))
+      const running = yield* LocalMachine.start(machine).pipe(Scope.provide(owner))
       assert.strictEqual(finalizerCount(owner), 1)
       yield* stopped.stop
       yield* completed.send(Events.Finish())
@@ -41,7 +41,7 @@ describe("Machine scoped ownership", () => {
       const order: Array<string> = []
       const refs = yield* Effect.forEach(["first", "second", "third"], (name) =>
         Effect.gen(function*() {
-          const ref = yield* Machine.start(machine).pipe(Scope.provide(owner))
+          const ref = yield* LocalMachine.start(machine).pipe(Scope.provide(owner))
           yield* Machine.watch(ref).pipe(
             Stream.runForEach(() => Effect.sync(() => order.push(name))),
             Effect.forkChild({ startImmediately: true })
@@ -57,9 +57,9 @@ describe("Machine scoped ownership", () => {
     Effect.gen(function*() {
       const owner = yield* Scope.make()
       yield* Scope.close(owner, Exit.void)
-      const ref = yield* Machine.start(machine).pipe(Scope.provide(owner))
+      const ref = yield* LocalMachine.start(machine).pipe(Scope.provide(owner))
       assert.strictEqual((yield* ref.snapshot).status, "stopped")
-      const again = yield* Machine.start(machine).pipe(Scope.provide(owner))
+      const again = yield* LocalMachine.start(machine).pipe(Scope.provide(owner))
       assert.strictEqual((yield* again.snapshot).status, "stopped")
     }))
 })

@@ -1,5 +1,5 @@
 import { Atom } from "effect/reactivity"
-import { Machine } from "../../dist/index.js"
+import { LocalMachine, Machine } from "../../dist/index.js"
 import { ClusterMachine } from "../../dist/unstable/cluster/index.js"
 import { AtomMachine } from "../../dist/unstable/reactivity/index.js"
 import { machine, snapshot } from "./adapter-readiness-control.js"
@@ -29,8 +29,8 @@ type BoundAtomEventIsExact = Expect<
 >
 
 void Machine.planInitial(machine)
-void Machine.start(machine)
-void Machine.resume(machine, snapshot)
+void LocalMachine.start(machine)
+void LocalMachine.resume(machine, snapshot)
 void child
 void resumedAtom
 void cluster

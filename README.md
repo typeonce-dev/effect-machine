@@ -9,7 +9,7 @@ Effect-native, schema-first, completely type-safe state machines and statecharts
 ## Quick look
 
 ```ts
-import { Machine } from "@typeonce/effect-machine"
+import { LocalMachine, Machine } from "@typeonce/effect-machine"
 import { Effect } from "effect"
 const Root = Machine.state({
   states: { Locked: {}, Unlocked: {} }
@@ -28,7 +28,7 @@ const Turnstile = Machine.make({
   }
 })
 const program = Effect.gen(function*() {
-  const ref = yield* Machine.start(Turnstile)
+  const ref = yield* LocalMachine.start(Turnstile)
   yield* ref.send(Events.Coin())
 })
 ```
@@ -39,7 +39,7 @@ State and event schemas define the protocol. The root defines the topology and t
 
 The workspace publishes four packages at the same version:
 
-- [`@typeonce/effect-machine`](./packages/effect-machine/README.md) contains the machine runtime, testing modules, and documentation.
+- [`@typeonce/effect-machine`](./packages/effect-machine/README.md) contains the machine model, its hosts, testing modules, and documentation.
 - [`@typeonce/effect-machine-react`](./packages/effect-machine-react/README.md) owns machine atoms in React without subscribing their owners to machine state.
 - [`@typeonce/effect-machine-devtools`](./packages/devtools/README.md) contains the publishable local machine visualizer and CLI.
 - [`@typeonce/oxlint-plugin-effect-machine`](./packages/oxlint-plugin/README.md) checks Effect Machine models for common structural mistakes.

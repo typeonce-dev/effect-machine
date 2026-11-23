@@ -1,6 +1,6 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Deferred, Effect, Option, Queue, Schema, Stream } from "effect"
-import { Machine } from "../../src/index.js"
+import { LocalMachine, Machine } from "../../src/index.js"
 
 class Squatting extends Schema.TaggedClass<Squatting>("InvocationIdsSquatting")("Squatting", {}) {}
 class Running extends Schema.TaggedClass<Running>("InvocationIdsRunning")("Running", {
@@ -99,7 +99,7 @@ describe("invocation ids", () => {
           Done: { output: () => "done" }
         }
       })
-      const actor = yield* Machine.start(machine)
+      const actor = yield* LocalMachine.start(machine)
       const running = yield* actor.changes.pipe(
         Stream.filter((snapshot) => snapshot.status === "active" && snapshot.state.state.path === "Running"),
         Stream.runHead
@@ -159,7 +159,7 @@ describe("invocation ids", () => {
           Done: { output: () => "done" }
         }
       })
-      const actor = yield* Machine.start(machine)
+      const actor = yield* LocalMachine.start(machine)
       // Both regions run the same source under the same lifecycle id at once.
       assert.deepStrictEqual([yield* Queue.take(started), yield* Queue.take(started)], ["work", "work"])
       // Reentering restarts the invocation under the same runtime-owned id.
@@ -198,7 +198,7 @@ describe("invocation ids", () => {
           Done: { output: () => "done" }
         }
       })
-      const actor = yield* Machine.start(machine)
+      const actor = yield* LocalMachine.start(machine)
       const error = yield* Effect.flip(actor.join)
       assert.instanceOf(error, Machine.ChildAlreadyExistsError)
       assert.strictEqual(error.id, "worker")
@@ -237,7 +237,7 @@ describe("invocation ids", () => {
           Done: { output: () => "done" }
         }
       })
-      const actor = yield* Machine.start(machine)
+      const actor = yield* LocalMachine.start(machine)
       const error = yield* Effect.flip(actor.join)
       assert.instanceOf(error, Machine.ChildAlreadyExistsError)
       assert.strictEqual(error.id, "right")

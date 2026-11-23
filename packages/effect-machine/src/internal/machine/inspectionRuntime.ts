@@ -7,7 +7,7 @@
 import * as Effect from "effect/Effect"
 import * as PubSub from "effect/PubSub"
 import * as Stream from "effect/Stream"
-import type { Inspection } from "../../Machine.js"
+import type { Inspection } from "../../LocalMachine.js"
 
 export type Draft<Event extends Inspection.Event = Inspection.Event> = Event extends Inspection.Event
   ? Omit<Event, "sequence" | "rootSessionId">

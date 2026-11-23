@@ -1,7 +1,7 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Cause, Effect, Exit, Option, Schema } from "effect"
 import * as Arbitrary from "effect/Arbitrary"
-import { Machine } from "../../src/index.js"
+import { LocalMachine, Machine } from "../../src/index.js"
 class Root extends Schema.TaggedClass<Root>("CodecRoot")("CodecRoot", {
   id: Schema.NonEmptyString
 }) {}
@@ -501,7 +501,7 @@ describe("snapshot codec adversarial boundaries", () => {
       assert.strictEqual(stable.state.path, "Boundary")
       const transported = JSON.parse(JSON.stringify(yield* Machine.encodeSnapshot(original, stable)))
       const decoded = yield* Machine.decodeSnapshot(changed, transported)
-      const resumed = yield* Machine.resume(changed, decoded)
+      const resumed = yield* LocalMachine.resume(changed, decoded)
       assert.strictEqual((yield* resumed.state).state.path, "Boundary")
       yield* Effect.yieldNow
       assert.strictEqual((yield* resumed.state).state.path, "Boundary")

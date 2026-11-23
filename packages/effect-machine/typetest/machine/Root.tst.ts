@@ -1,6 +1,6 @@
 import { Schema } from "effect"
 import { describe, expect, test } from "tstyche"
-import { Machine } from "../../src/index.js"
+import { LocalMachine, Machine } from "../../src/index.js"
 const root = Machine.state({
   fields: { count: Schema.Number },
   states: {
@@ -25,7 +25,7 @@ describe("root contracts", () => {
   })
   test("constructs root data and initial children at the handler boundary", () => {
     const definition = Machine.make({ root, events, input: Schema.Number })
-    expect(Machine.start).type.not.toBeCallableWith(definition, 1)
+    expect(LocalMachine.start).type.not.toBeCallableWith(definition, 1)
     expect(definition).type.not.toHaveProperty("initial")
     expect(definition.handle).type.not.toBeCallableWith({ initial: { target: "Saving" } })
     expect(definition.handle).type.not.toBeCallableWith({
@@ -46,7 +46,7 @@ describe("root contracts", () => {
         }
       }
     })
-    expect(Machine.start).type.toBeCallableWith(machine, 1)
+    expect(LocalMachine.start).type.toBeCallableWith(machine, 1)
   })
   test("keeps a reusable root independent from machine initialization", () => {
     const definition = Machine.make({ root, events })
@@ -55,8 +55,8 @@ describe("root contracts", () => {
       initial: { target: "Editing", data: { draft: "" } }
     })
     const saving = definition.handle({ root: { count: 1 }, initial: { target: "Saving" } })
-    expect(Machine.start).type.toBeCallableWith(editing)
-    expect(Machine.start).type.toBeCallableWith(saving)
+    expect(LocalMachine.start).type.toBeCallableWith(editing)
+    expect(LocalMachine.start).type.toBeCallableWith(saving)
     expect(root.node).type.not.toHaveProperty("initial")
   })
   test("rejects conflicting schemas and invalid root values", () => {

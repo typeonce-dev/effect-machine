@@ -1,6 +1,6 @@
 import { Context, Effect, Option, Schema, Stream } from "effect"
 import { describe, expect, it } from "tstyche"
-import { Machine } from "../../src/index.js"
+import { LocalMachine, Machine } from "../../src/index.js"
 describe("Machine", () => {
   class Up extends Schema.TaggedClass<Up>("Up")("Up", {
     id: Schema.String
@@ -2025,7 +2025,7 @@ describe("Machine", () => {
         }
       }
     })
-    const started = Machine.start(machine)
+    const started = LocalMachine.start(machine)
     type Ref = Effect.Success<typeof started>
     expect(machine).type.not.toHaveProperty("eventSchemas")
     const anyMachine: Machine.Machine.Any = machine
@@ -2643,7 +2643,7 @@ describe("Machine", () => {
         }
       }
     })
-    const started = Machine.start(machine)
+    const started = LocalMachine.start(machine)
     expect<Effect.Error<typeof started>>().type.toBe<
       Machine.MachineSchemaDecodeError | Machine.StartupError | Machine.InfiniteTransitionError | Machine.StoppedError
     >()
@@ -3651,7 +3651,7 @@ describe("Machine", () => {
       states: { signedIn: { output: ({ state }) => state.userId } }
     })
     const planned = Machine.planInitial(machine)
-    const started = Machine.start(machine)
+    const started = LocalMachine.start(machine)
     expect<Effect.Success<typeof planned>["output"]>().type.toBe<string | undefined>()
     expect<Effect.Success<Effect.Success<typeof started>["join"]>>().type.toBe<string>()
     const result = null as unknown as Effect.Success<typeof planned>
@@ -3721,7 +3721,7 @@ describe("Machine", () => {
       }
     })
     expect(Machine.planInitial).type.not.toBeCallableWith(machine)
-    expect(Machine.start).type.not.toBeCallableWith(machine)
+    expect(LocalMachine.start).type.not.toBeCallableWith(machine)
     const parent = Machine.make({
       root: UpStates,
       events: Machine.eventsFromSchemas(SignIn),
@@ -3819,7 +3819,7 @@ describe("Machine", () => {
       states: { signedIn: { output: ({ state }) => state.userId } }
     })
     expect(Machine.planInitial).type.toBeCallableWith(complete)
-    expect(Machine.start).type.toBeCallableWith(complete)
+    expect(LocalMachine.start).type.toBeCallableWith(complete)
   })
   it("keeps only legitimate undefined values in terminal output", () => {
     const States = Machine.state({
@@ -3847,7 +3847,7 @@ describe("Machine", () => {
       },
       states: { active: {}, succeeded: { output: ({ state }) => state.userId }, cancelled: {} }
     })
-    const started = Machine.start(machine)
+    const started = LocalMachine.start(machine)
     expect<Effect.Success<Effect.Success<typeof started>["join"]>>().type.toBe<string | undefined>()
     const InitialRoot2 = Machine.state({ states: { active: Down } })
     const activeOnly = Machine.make({
@@ -3861,7 +3861,7 @@ describe("Machine", () => {
       },
       states: { active: {} }
     })
-    const activeRef = Machine.start(activeOnly)
+    const activeRef = LocalMachine.start(activeOnly)
     expect<Effect.Success<Effect.Success<typeof activeRef>["join"]>>().type.toBe<never>()
   })
   it("compound onDone receives the declared child final output type", () => {
@@ -4139,7 +4139,7 @@ describe("Machine", () => {
         }
       }
     })
-    const started = Machine.start(complete)
+    const started = LocalMachine.start(complete)
     expect<Effect.Success<Effect.Success<typeof started>["join"]>>().type.toBe<
       Machine.Machine.OutputByIdentifier<{
         readonly "": typeof States.node

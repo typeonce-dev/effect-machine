@@ -524,7 +524,7 @@ export interface ClusterMachine<
 }
 
 type MachineServices<M extends Machine.Machine.Any> =
-  | Machine.ExecutionServices<Machine.Machine.Services<M>>
+  | Exclude<Machine.Machine.Services<M>, Machine.MachineRuntime>
   | Machine.Machine.SnapshotDecodingServices<Machine.Machine.States<M>>
   | Machine.Machine.SnapshotEncodingServices<Machine.Machine.States<M>>
 
@@ -635,7 +635,7 @@ export const layerMemory: Layer.Layer<Storage> = internal.layerMemory
  *
  * An entity that comes up starts the work of its stored state again. Input
  * mappers run again against that state, with `Machine.InitialEvent` as their
- * event, as they do for `Machine.resume`. An invocation that ended while its
+ * event, as they do for `LocalMachine.resume`. An invocation that ended while its
  * state stayed active is not started again until its state is entered again.
  *
  * A timer is stored as the time at which it is due, in the same checkpoint as the
@@ -643,7 +643,7 @@ export const layerMemory: Layer.Layer<Storage> = internal.layerMemory
  * applies the completion as a step of its own. An entity that comes up again,
  * here or on another runner, waits only for the time that remains, and completes
  * a timer whose time has passed at once. Leaving the state cancels the timer, and
- * entering it again stores a new due time. `Machine.resume` differs: it starts the
+ * entering it again stores a new due time. `LocalMachine.resume` differs: it starts the
  * full duration again.
  *
  * The duration of a timer is evaluated after the step that enters its state is
@@ -872,7 +872,7 @@ export const make: <
     InputEvents,
     ParentEvents
   >,
-  | Machine.ExecutionServices<R>
+  | Exclude<R, Machine.MachineRuntime>
   | Machine.Machine.SnapshotDecodingServices<States>
   | Machine.Machine.SnapshotEncodingServices<States>
 > = internal.make

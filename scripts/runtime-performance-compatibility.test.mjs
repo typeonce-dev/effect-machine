@@ -1,6 +1,10 @@
 import { strict as assert } from "node:assert"
 import { test } from "node:test"
-import { makeEffectMachineBenchmarkApi } from "../packages/effect-machine/perf/runtime/effect-machine-compatibility.mjs"
+import {
+  effectMachineBenchmarkHost,
+  effectMachineBenchmarkProcessRuntime,
+  makeEffectMachineBenchmarkApi
+} from "../packages/effect-machine/perf/runtime/effect-machine-compatibility.mjs"
 
 test("passes value constructors directly to both native transition APIs", () => {
   const from = ({ state }) => ({ value: state.value + 1 })
@@ -327,4 +331,26 @@ test("adapts handler-owned initial edges to declared path strings", () => {
   assert.deepEqual(machine.handlers.states.Active.initial, { target: "Active.Count", data: { value: 0 } })
   assert.equal(machine.handlers.states.Active.states.Count.on.Increment.target, "Active.Count")
   assert.equal(machine.handlers.states.Active.states.Count.on.Increment.data, from)
+})
+
+test("starts machines through the module that hosts them in memory", () => {
+  const Machine = { start: () => "model" }
+  const LocalMachine = { start: () => "local" }
+  assert.equal(effectMachineBenchmarkHost({ Machine }).start(), "model")
+  assert.equal(effectMachineBenchmarkHost({ LocalMachine, Machine: {} }).start(), "local")
+})
+
+test("adapts the raw process runtime across its binding to child machine logic", () => {
+  const functions = { startProcess: () => "process" }
+  assert.equal(effectMachineBenchmarkProcessRuntime(functions), functions)
+
+  let makeChildLogic
+  const bound = effectMachineBenchmarkProcessRuntime({
+    make: (make) => {
+      makeChildLogic = make
+      return functions
+    }
+  })
+  assert.equal(bound, functions)
+  assert.throws(() => makeChildLogic(), /start no child machines/)
 })

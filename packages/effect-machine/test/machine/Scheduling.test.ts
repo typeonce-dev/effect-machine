@@ -1,6 +1,6 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Effect, Schema } from "effect"
-import { Machine } from "../../src/index.js"
+import { LocalMachine, Machine } from "../../src/index.js"
 class SchedulingActive
   extends Schema.TaggedClass<SchedulingActive>("SchedulingActive")("SchedulingActive", { count: Schema.Number })
 {
@@ -46,7 +46,7 @@ describe("machine scheduling", () => {
           }
         }
       })
-      const actor = yield* Machine.start(machine)
+      const actor = yield* LocalMachine.start(machine)
       yield* actor.send(new StartBurst({}))
       yield* Effect.yieldNow
       assert.strictEqual((yield* actor.state).state.value.count, burstSize)

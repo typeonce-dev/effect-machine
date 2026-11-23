@@ -2,7 +2,7 @@
 "@typeonce/effect-machine": minor
 ---
 
-The types of `Machine.start`, `Machine.prepare`, `Machine.resume`, `AtomMachine`, and `ClusterMachine` now say only what can happen. Transitions, actions, and initial states are synchronous, so the types that described effects inside them are removed. Runtime behavior does not change.
+The types of `LocalMachine`, `AtomMachine`, and `ClusterMachine` now say only what can happen. Transitions, actions, and initial states are synchronous, so the types that described effects inside them are removed. Runtime behavior does not change.
 
 Most were always `never`, so delete the mention:
 
@@ -17,4 +17,4 @@ The others described values that no API produces or accepts:
 - `Machine.Machine.InvokeOwned` and `InvokeSource`. Use `Machine.Machine.Invocation`.
 - `Machine.Machine.EventTransitionReturn`, `EventHandlerReturn`, `AlwaysReturn`, `DoneReturn`, `ChoiceReturn`, and `InvokeOutcomeReturn`. They have no replacement.
 
-`Machine.ExecutionServices<R>` is now `Exclude<R, Machine.MachineRuntime>`. The errors of a machine whose requirements are `any` are listed exactly instead of as `unknown`.
+`LocalMachine.RequiredServices<R>`, which replaces `Machine.ExecutionServices<R>`, is `Exclude<R, Machine.MachineRuntime>`. The errors of a machine whose requirements are `any` are listed exactly instead of as `unknown`.

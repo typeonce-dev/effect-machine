@@ -1,6 +1,6 @@
 import { Effect, Schema, Stream } from "effect"
 import { describe, expect, it } from "tstyche"
-import { Machine } from "../../src/index.js"
+import { LocalMachine, Machine } from "../../src/index.js"
 describe("Machine inspection", () => {
   class Root extends Schema.TaggedClass<Root>("Root")("Root", {}) {
   }
@@ -73,8 +73,8 @@ describe("Machine inspection", () => {
       }
     })
     Effect.gen(function*() {
-      const prepared = yield* Machine.prepare(executable)
-      expect(prepared.inspection).type.toBe<Stream.Stream<Machine.Inspection.Event>>()
+      const prepared = yield* LocalMachine.prepare(executable)
+      expect(prepared.inspection).type.toBe<Stream.Stream<LocalMachine.Inspection.Event>>()
       const event = yield* prepared.inspection.pipe(Stream.runHead)
       if (event._tag === "Some") {
         switch (event.value._tag) {
@@ -82,7 +82,7 @@ describe("Machine inspection", () => {
             expect(event.value.definition).type.toBe<Machine.Machine.Any | undefined>()
             break
           case "EventProcessed":
-            expect(event.value.microsteps).type.toBe<ReadonlyArray<Machine.Inspection.Microstep>>()
+            expect(event.value.microsteps).type.toBe<ReadonlyArray<LocalMachine.Inspection.Microstep>>()
             break
         }
       }

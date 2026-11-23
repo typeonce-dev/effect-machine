@@ -1,6 +1,6 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Cause, Effect, Exit, Fiber, Option, Schema, Stream } from "effect"
-import { Machine } from "../../src/index.js"
+import { LocalMachine, Machine } from "../../src/index.js"
 class Idle extends Schema.TaggedClass<Idle>("LiveInspectionIdle")("Idle", {}) {}
 class Increment extends Schema.TaggedClass<Increment>("LiveInspectionIncrement")("Increment", {
   by: Schema.Number
@@ -39,7 +39,7 @@ const machine = Machine.make({
 describe("Machine live inspection", () => {
   it.effect("observes a prepared root from creation through termination", () =>
     Effect.scoped(Effect.gen(function*() {
-      const prepared = yield* Machine.prepare(machine)
+      const prepared = yield* LocalMachine.prepare(machine)
       const collected = yield* prepared.inspection.pipe(
         Stream.runCollect,
         Effect.forkScoped({ startImmediately: true })
@@ -110,7 +110,7 @@ describe("Machine live inspection", () => {
         },
         states: { Idle: {} }
       })
-      const prepared = yield* Machine.prepare(invalid)
+      const prepared = yield* LocalMachine.prepare(invalid)
       const collected = yield* prepared.inspection.pipe(
         Stream.runCollect,
         Effect.forkScoped({ startImmediately: true })
@@ -142,7 +142,7 @@ describe("Machine live inspection", () => {
           }
         }
       })
-      const prepared = yield* Machine.prepare(active)
+      const prepared = yield* LocalMachine.prepare(active)
       const collected = yield* prepared.inspection.pipe(
         Stream.runCollect,
         Effect.forkScoped({ startImmediately: true })
@@ -198,7 +198,7 @@ describe("Machine live inspection", () => {
           }
         }
       })
-      const prepared = yield* Machine.prepare(active)
+      const prepared = yield* LocalMachine.prepare(active)
       const collected = yield* prepared.inspection.pipe(
         Stream.runCollect,
         Effect.forkScoped({ startImmediately: true })
@@ -284,7 +284,7 @@ describe("Machine live inspection", () => {
           ParentDone: {}
         }
       })
-      const prepared = yield* Machine.prepare(parentMachine)
+      const prepared = yield* LocalMachine.prepare(parentMachine)
       const collected = yield* prepared.inspection.pipe(
         Stream.runCollect,
         Effect.forkScoped({ startImmediately: true })

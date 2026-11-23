@@ -91,18 +91,20 @@ Start the implemented machine at the application boundary and send events
 through the exported descriptor:
 
 ```ts
+import { LocalMachine } from "@typeonce/effect-machine"
 import { Effect } from "effect"
 
 const program = Effect.scoped(Effect.gen(function*() {
-  const counter = yield* Machine.start(CounterMachine)
+  const counter = yield* LocalMachine.start(CounterMachine)
 
   yield* counter.send(CounterEvents.Start())
   yield* counter.send(CounterEvents.Increment())
 }))
 ```
 
-`Machine.start` requires a `Scope`. Closing it stops the machine and everything
-it owns; use `ref.stop` to stop earlier.
+`LocalMachine` runs a machine in memory. `LocalMachine.start` requires a `Scope`.
+Closing it stops the machine and everything it owns; use `ref.stop` to stop
+earlier.
 
 ### Make impossible states unrepresentable
 
@@ -361,11 +363,11 @@ through its own runtime, as described in
 Do not start a promise inside a transition callback. A transition has no
 lifetime in which to own that work. A state does.
 
-Invoked work starts while the event that entered its state is processed. It
-runs in the sender's turn until it first suspends, and its outcome is handled
-in a later turn, even when the work completes without suspending. A state that
-invokes work is therefore always observed before its outcome leaves it. Put a
-browser call that requires user activation, such as `window.open` or
+A local machine, including one hosted by `AtomMachine`, starts invoked work while
+the event that entered its state is processed. The work runs in the sender's turn
+until it first suspends, and its outcome is handled in a later turn, even when the
+work completes without suspending. A state that invokes work is therefore always
+observed before its outcome leaves it. Put a browser call that requires user activation, such as `window.open` or
 `navigator.clipboard.writeText`, in the first step of the invoked Effect:
 
 ```ts
@@ -624,7 +626,7 @@ Declare the topology, the protocol, and the behavior, then start the result
 inside a Scope.
 
 ```ts
-import { Machine } from "@typeonce/effect-machine"
+import { LocalMachine, Machine } from "@typeonce/effect-machine"
 import { Effect, Schema } from "effect"
 
 // The root declares the topology and the data each state owns.
@@ -661,10 +663,10 @@ export const CounterMachine = Machine.make({
   }
 })
 
-// `Machine.start` requires a Scope. Closing it stops the machine and everything
+// `LocalMachine.start` requires a Scope. Closing it stops the machine and everything
 // the machine owns.
 export const program = Effect.scoped(Effect.gen(function*() {
-  const counter = yield* Machine.start(CounterMachine)
+  const counter = yield* LocalMachine.start(CounterMachine)
 
   yield* counter.send(CounterEvents.Start())
   yield* counter.send(CounterEvents.Increment())
@@ -864,7 +866,7 @@ const Document = Machine.make({
 })
 ```
 
-Start with `Machine.start(Document, { locale: "en", documentId: "intro" })`.
+Start with `LocalMachine.start(Document, { locale: "en", documentId: "intro" })`.
 Root construction runs before its initial child construction. Both receive the
 same validated input. `documentId` belongs only to Loading; it need not be stored
 in root data. Input is not retained as a reset value on the machine or snapshot.
@@ -1004,7 +1006,7 @@ history: {
 
 A fallback must explicitly construct a complete tree containing its owner,
 including required ancestors and parallel siblings. Its root data is state data,
-not startup input. `Machine.resume` restores a validated snapshot without rerunning
+not startup input. `LocalMachine.resume` restores a validated snapshot without rerunning
 startup constructors.
 
 `guard` declines before construction. A resolver may return `select.decline()` only

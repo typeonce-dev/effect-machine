@@ -1,8 +1,13 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Cause, Deferred, Effect, Exit, Fiber, Option, Ref, Stream } from "effect"
 import { Machine } from "../../../src/index.js"
-import * as MachineRuntime from "../../../src/internal/machine/runtime.js"
+import * as ProcessRuntime from "../../../src/internal/machine/runtime.js"
 import * as MachineRuntimeProtocol from "../../../src/internal/machine/runtimeProtocol.js"
+
+// These processes run logic directly and start no child machines.
+const MachineRuntime = ProcessRuntime.make(() => {
+  throw new Error("Unexpected child machine")
+})
 
 describe("machine process lifecycle", () => {
   it.effect("reuses a settled active startup without running an empty compiled drain", () =>
