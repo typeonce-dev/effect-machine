@@ -13,6 +13,7 @@ import type * as Stream from "effect/Stream"
 import * as internal from "../../internal/machine/atom.js"
 import type { ChildNotActiveError } from "../../internal/machine/atom.js"
 import type { EnsureExecutable } from "../../internal/machine/readiness.js"
+import type * as LocalMachine from "../../LocalMachine.js"
 import type * as Machine from "../../Machine.js"
 
 /**
@@ -207,7 +208,7 @@ export const emissions: <State, Event, Error, Output, StartError, Emitted>(
  */
 export const inspection: <State, Event, Error, Output, StartError, Emitted>(
   self: MachineAtom<State, Event, Error, Output, StartError, Emitted>
-) => Stream.Stream<Machine.Inspection.Event, StartError, AtomRegistry.AtomRegistry> = internal.inspection
+) => Stream.Stream<LocalMachine.Inspection.Event, StartError, AtomRegistry.AtomRegistry> = internal.inspection
 
 /**
  * Observes emissions from each active instance selected by a child bridge.
@@ -869,7 +870,7 @@ export const matchesChild: {
 
 const BoundRequirementsTypeId = "~effect/reactivity/AtomMachine/BoundRequirements"
 
-type MachineRequirementsOf<M extends Machine.Machine.Any> = Machine.ExecutionServices<Machine.Machine.Services<M>>
+type MachineRequirementsOf<M extends Machine.Machine.Any> = LocalMachine.RequiredServices<Machine.Machine.Services<M>>
 
 type MissingBoundRequirements<Services, M extends Machine.Machine.Any> = Exclude<
   ExternalRequirements<MachineRequirementsOf<M>>,
@@ -1268,7 +1269,7 @@ export const make: {
         InputEvents,
         ParentEvents
       >
-      & EnsureNoExternalRequirements<Machine.ExecutionServices<R>>
+      & EnsureNoExternalRequirements<LocalMachine.RequiredServices<R>>
       & EnsureExecutable<States, UnhandledStates, OutputStates>
       & Machine.Machine.RootCompatible<ParentEvents>,
     ...args: [...Machine.Machine.InputArgs<Input>]

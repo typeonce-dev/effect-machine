@@ -4,7 +4,7 @@
  * Declare the topology, the protocol, and the behavior, then start the result
  * inside a Scope.
  */
-import { Machine } from "@typeonce/effect-machine"
+import { LocalMachine, Machine } from "@typeonce/effect-machine"
 import { Effect, Schema } from "effect"
 
 // The root declares the topology and the data each state owns.
@@ -41,10 +41,10 @@ export const CounterMachine = Machine.make({
   }
 })
 
-// `Machine.start` requires a Scope. Closing it stops the machine and everything
+// `LocalMachine.start` requires a Scope. Closing it stops the machine and everything
 // the machine owns.
 export const program = Effect.scoped(Effect.gen(function*() {
-  const counter = yield* Machine.start(CounterMachine)
+  const counter = yield* LocalMachine.start(CounterMachine)
 
   yield* counter.send(CounterEvents.Start())
   yield* counter.send(CounterEvents.Increment())

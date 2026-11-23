@@ -1,6 +1,6 @@
 import { assert, it } from "@effect/vitest"
 import { Effect, Fiber, Option, Schema, Stream } from "effect"
-import { Machine } from "../../src/index.js"
+import { LocalMachine, Machine } from "../../src/index.js"
 class NodeState extends Schema.TaggedClass<NodeState>("DeepNode")("DeepNode", { level: Schema.Number }) {}
 class DeepIdle extends Schema.TaggedClass<DeepIdle>("DeepIdle")("DeepIdle", { value: Schema.String }) {}
 class DeepDone extends Schema.TaggedClass<DeepDone>("DeepDone")("DeepDone", { value: Schema.String }) {}
@@ -194,7 +194,7 @@ const machine = Machine.make({
 })
 it.effect("runs handlers below the former depth ceiling", () =>
   Effect.gen(function*() {
-    const actor = yield* Machine.start(machine)
+    const actor = yield* LocalMachine.start(machine)
     assert.deepStrictEqual(
       States.get(yield* actor.state, "n0.n1.n2.n3.n4.n5.n6.n7.n8.n9.n10.n11.idle"),
       Option.some(new DeepIdle({ value: "initial" }))

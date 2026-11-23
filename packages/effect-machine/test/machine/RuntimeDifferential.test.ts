@@ -1,7 +1,7 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Effect, Fiber, Schema, Stream } from "effect"
 import * as Arbitrary from "effect/Arbitrary"
-import { Machine } from "../../src/index.js"
+import { LocalMachine, Machine } from "../../src/index.js"
 import { MachineTest } from "../../src/testing/index.js"
 import type { DifferentialStep } from "./support/runtimeDifferential.js"
 import { traceBoundary, traceSteps, verifyManagedExecution } from "./support/runtimeDifferential.js"
@@ -107,7 +107,7 @@ describe("pure planning and managed runtime differential", () => {
       assert.strictEqual(steps.at(-1)?.plan.output, 2)
       yield* verifyManagedExecution({
         machine,
-        open: Machine.start(machine) as Effect.Effect<Machine.MachineRef<any, any, any, any>, unknown, never>,
+        open: LocalMachine.start(machine) as Effect.Effect<Machine.MachineRef<any, any, any, any>, unknown, never>,
         initial: { state: initial.state, done: initial.done, output: initial.output },
         steps,
         label: "compiled flat state"
@@ -116,7 +116,7 @@ describe("pure planning and managed runtime differential", () => {
       const resumedState = resumed.next as typeof initial.state
       yield* verifyManagedExecution({
         machine,
-        open: Machine.resume(machine, resumedState) as Effect.Effect<
+        open: LocalMachine.resume(machine, resumedState) as Effect.Effect<
           Machine.MachineRef<any, any, any, any>,
           unknown,
           never
@@ -288,7 +288,7 @@ describe("pure planning and managed runtime differential", () => {
       observations.length = 0
       yield* verifyManagedExecution({
         machine,
-        open: Machine.start(machine),
+        open: LocalMachine.start(machine),
         initial: { state: initial.state, done: initial.done, output: initial.output },
         steps,
         label: "compiled hierarchical state"
@@ -305,7 +305,7 @@ describe("pure planning and managed runtime differential", () => {
       const resumedState = resumed.next as typeof initial.state
       yield* verifyManagedExecution({
         machine,
-        open: Machine.resume(machine, resumedState),
+        open: LocalMachine.resume(machine, resumedState),
         initial: { state: resumedState, done: resumed.done, output: resumed.output },
         steps: steps.slice(1),
         label: "resumed compiled hierarchical state"
@@ -379,7 +379,7 @@ describe("pure planning and managed runtime differential", () => {
         }
         yield* verifyManagedExecution({
           machine,
-          open: Machine.start(machine as any),
+          open: LocalMachine.start(machine as any),
           initial: traceBoundary(trace, 0),
           steps: traceSteps(trace),
           label: `generated start ${sampleIndex}`
@@ -390,7 +390,7 @@ describe("pure planning and managed runtime differential", () => {
         const decoded = yield* Machine.decodeSnapshot(machine as any, encoded)
         yield* verifyManagedExecution({
           machine,
-          open: Machine.resume(machine as any, decoded),
+          open: LocalMachine.resume(machine as any, decoded),
           initial: boundaryState,
           steps: traceSteps(trace, boundary),
           label: `generated resume ${sampleIndex}:${boundary}`
@@ -451,7 +451,7 @@ describe("pure planning and managed runtime differential", () => {
       assert.strictEqual(trace.steps[0]?.plan.output, "machine:done")
       yield* verifyManagedExecution({
         machine,
-        open: Machine.start(machine as any),
+        open: LocalMachine.start(machine as any),
         initial: traceBoundary(trace, 0),
         steps: traceSteps(trace),
         label: "automatic start"
@@ -460,7 +460,7 @@ describe("pure planning and managed runtime differential", () => {
       const decoded = yield* Machine.decodeSnapshot(machine as any, encoded)
       yield* verifyManagedExecution({
         machine,
-        open: Machine.resume(machine as any, decoded),
+        open: LocalMachine.resume(machine as any, decoded),
         initial: traceBoundary(trace, 0),
         steps: traceSteps(trace),
         label: "automatic resume"
@@ -577,7 +577,7 @@ describe("pure planning and managed runtime differential", () => {
         "entry:finished"
       ])
       actions.length = 0
-      const actor = yield* Machine.start(machine)
+      const actor = yield* LocalMachine.start(machine)
       assert.deepStrictEqual(actions, ["entry:idle"])
       yield* actor.send(new Begin({}))
       assert.strictEqual(yield* actor.join, "complete")
@@ -594,7 +594,7 @@ describe("pure planning and managed runtime differential", () => {
         yield* Machine.encodeSnapshot(machine, planned.next)
       )
       actions.length = 0
-      const resumed = yield* Machine.resume(machine, initial.state)
+      const resumed = yield* LocalMachine.resume(machine, initial.state)
       assert.deepStrictEqual(actions, [], "resume must not replay initial entry actions")
       yield* resumed.send(new Begin({}))
       assert.strictEqual(yield* resumed.join, "complete")
@@ -639,7 +639,7 @@ describe("pure planning and managed runtime differential", () => {
       const ignored = yield* Machine.plan(machine, initial.state, new Ignore({}))
       const handled = yield* Machine.plan(machine, ignored.next, new Go({}))
       assert.deepStrictEqual(ignored.microsteps, [])
-      const actor = yield* Machine.start(machine)
+      const actor = yield* LocalMachine.start(machine)
       const publications = yield* actor.changes.pipe(Stream.runCollect, Effect.forkChild({ startImmediately: true }))
       const active = yield* actor.changes.pipe(
         Stream.filter((snapshot) => snapshot.status === "active" && snapshot.state.state.path === "Active"),

@@ -1,6 +1,6 @@
 import { Effect, Schema } from "effect"
 import { describe, expect, it } from "tstyche"
-import { Machine } from "../../src/index.js"
+import { LocalMachine, Machine } from "../../src/index.js"
 import { MachineTest } from "../../src/testing/index.js"
 import { ClusterMachine } from "../../src/unstable/cluster/index.js"
 import { AtomMachine } from "../../src/unstable/reactivity/index.js"
@@ -114,8 +114,8 @@ describe("executable machine readiness", () => {
     expect(Machine.plan).type.not.toBeCallableWith(choiceIncomplete, choiceSnapshot, new Tick({}))
     expect(Machine.can).type.not.toBeCallableWith(choiceIncomplete)
     expect(Machine.can).type.not.toBeCallableWith(choiceIncomplete, choiceSnapshot, new Tick({}))
-    expect(Machine.start).type.not.toBeCallableWith(choiceIncomplete)
-    expect(Machine.resume).type.not.toBeCallableWith(choiceIncomplete, choiceSnapshot)
+    expect(LocalMachine.start).type.not.toBeCallableWith(choiceIncomplete)
+    expect(LocalMachine.resume).type.not.toBeCallableWith(choiceIncomplete, choiceSnapshot)
     expect(parent.handle).type.toBeCallableWith({
       initial: {
         target: "Ready",
@@ -147,8 +147,8 @@ describe("executable machine readiness", () => {
     expect(Machine.plan).type.not.toBeCallableWith(historyIncomplete, historySnapshot, new Tick({}))
     expect(Machine.can).type.not.toBeCallableWith(historyIncomplete)
     expect(Machine.can).type.not.toBeCallableWith(historyIncomplete, historySnapshot, new Tick({}))
-    expect(Machine.start).type.not.toBeCallableWith(historyIncomplete)
-    expect(Machine.resume).type.not.toBeCallableWith(historyIncomplete, historySnapshot)
+    expect(LocalMachine.start).type.not.toBeCallableWith(historyIncomplete)
+    expect(LocalMachine.resume).type.not.toBeCallableWith(historyIncomplete, historySnapshot)
     expect(parent.handle).type.not.toBeCallableWith({
       states: { Ready: { invoke: { src: "history", onDone: { stay: true } } } },
       initial: {
@@ -172,8 +172,8 @@ describe("executable machine readiness", () => {
     expect(Machine.plan).type.not.toBeCallableWith(outputIncomplete, outputSnapshot, new Tick({}))
     expect(Machine.can).type.not.toBeCallableWith(outputIncomplete)
     expect(Machine.can).type.not.toBeCallableWith(outputIncomplete, outputSnapshot, new Tick({}))
-    expect(Machine.start).type.not.toBeCallableWith(outputIncomplete)
-    expect(Machine.resume).type.not.toBeCallableWith(outputIncomplete, outputSnapshot)
+    expect(LocalMachine.start).type.not.toBeCallableWith(outputIncomplete)
+    expect(LocalMachine.resume).type.not.toBeCallableWith(outputIncomplete, outputSnapshot)
     expect(parent.handle).type.not.toBeCallableWith({
       states: { Ready: { invoke: { src: "output", onDone: { stay: true } } } },
       initial: {
@@ -253,8 +253,8 @@ describe("executable machine readiness", () => {
     const planned = Machine.plan(complete, completeSnapshot, new Tick({}))
     const can = Machine.can(complete, completeSnapshot, new Tick({}))
     const canComplete = Machine.can(complete)
-    const started = Machine.start(complete)
-    const resumed = Machine.resume(complete, completeSnapshot)
+    const started = LocalMachine.start(complete)
+    const resumed = LocalMachine.resume(complete, completeSnapshot)
     const trace = MachineTest.run(complete, { events: [new Tick({})] })
     const atom = AtomMachine.make(complete)
     const makeAtom = AtomMachine.factory(complete)

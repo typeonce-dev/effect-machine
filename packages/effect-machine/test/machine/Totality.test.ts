@@ -2,7 +2,7 @@ import { assert, describe, it } from "@effect/vitest"
 import { Cause, Effect, Exit, Fiber, Schema, Stream } from "effect"
 import * as Arbitrary from "effect/Arbitrary"
 import { isDeepStrictEqual } from "node:util"
-import { Machine } from "../../src/index.js"
+import { LocalMachine, Machine } from "../../src/index.js"
 import { MachineTest } from "../../src/testing/index.js"
 const generatedModels = MachineTest.finiteModels({
   maxRoots: 3,
@@ -194,7 +194,7 @@ describe("machine operation totality", () => {
       const suffix = fullTrace.steps.slice(generated.boundary)
       const encoded = yield* encodeWithoutDefect(machine, boundary, "resume boundary encode")
       const decoded = yield* decodeWithoutDefect(machine, encoded, "resume boundary decode")
-      const resumeExit = yield* Effect.exit(Machine.resume(machine, decoded))
+      const resumeExit = yield* Effect.exit(LocalMachine.resume(machine, decoded))
       assertNoUnexpectedDefect("resume", resumeExit)
       const ref = resumeExit.value
       const initialRuntime = yield* ref.snapshot

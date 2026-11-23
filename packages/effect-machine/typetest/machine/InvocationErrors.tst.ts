@@ -1,6 +1,6 @@
 import { Effect, Schema, Stream } from "effect"
 import { describe, expect, it } from "tstyche"
-import { Machine } from "../../src/index.js"
+import { LocalMachine, Machine } from "../../src/index.js"
 import { AtomMachine } from "../../src/unstable/reactivity/index.js"
 
 class Watching extends Schema.TaggedClass<Watching>("InvocationErrorsWatching")("Watching", {}) {}
@@ -54,7 +54,7 @@ describe("invocation error channels", () => {
     expect<Machine.Machine.Error<typeof watcher>>().type.toBe<never>()
     expect<Machine.Machine.Error<typeof loader>>().type.toBe<never>()
     Effect.gen(function*() {
-      const ref = yield* Machine.start(watcher)
+      const ref = yield* LocalMachine.start(watcher)
       expect<Effect.Error<typeof ref.join>>().type.toBe<FrameworkError>()
     })
   })
@@ -188,10 +188,10 @@ describe("root compatibility diagnostics", () => {
     expect(Machine.planInitial(requiredParent)).type.toRaiseError(
       "Machine declares a required parent and cannot run as a root"
     )
-    expect(Machine.start(requiredParent)).type.toRaiseError(
+    expect(LocalMachine.start(requiredParent)).type.toRaiseError(
       "Machine declares a required parent and cannot run as a root"
     )
-    expect(Machine.prepare(requiredParent)).type.toRaiseError(
+    expect(LocalMachine.prepare(requiredParent)).type.toRaiseError(
       "Machine declares a required parent and cannot run as a root"
     )
     expect(AtomMachine.make(requiredParent)).type.toRaiseError(

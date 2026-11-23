@@ -4,24 +4,22 @@ import * as Option from "effect/Option"
 import { Prototype as PipeablePrototype } from "effect/Pipeable"
 import { hasProperty } from "effect/Predicate"
 import * as Schema from "effect/Schema"
-import type * as Stream from "effect/Stream"
 import type {
   ChildAddress,
   ChildMachine,
   Definition,
   Logic,
   Machine,
-  MachineRef,
   MachineSchemaDecodeError,
   MachineSchemaEncodeError,
   Parent,
   ParentMode,
-  RuntimeOutcome,
   SpawnOptions,
   State,
   StoppedError
 } from "../../Machine.js"
 import * as Activities from "./activities.js"
+import { MachineRuntime } from "./capability.js"
 import * as Configuration from "./configuration.js"
 import * as Construction from "./construction.js"
 import * as Declaration from "./declaration.js"
@@ -31,14 +29,12 @@ import * as InitialDeclaration from "./initialDeclaration.js"
 import * as InvocationDefinition from "./invocationDefinition.js"
 import * as Observation from "./observation.js"
 import * as internalPlanner from "./planner.js"
-import * as internalProcess from "./process.js"
 import * as Protocol from "./protocol.js"
-import * as internalRuntime from "./runtimeProtocol.js"
 import * as Serialization from "./serialization.js"
 import * as StateDefinition from "./stateDefinition.js"
-import { type ChildMachineLogicSlot, ChildMachineLogicTypeId } from "./symbols.js"
 import * as Topology from "./topology.js"
 
+export { child, childAddress, childFamily } from "./child.js"
 export {
   ChildAlreadyExistsError,
   InfiniteTransitionError,
@@ -54,8 +50,6 @@ export { InitialEventTypeId } from "./symbols.js"
 
 const TypeId = "~effect/Machine"
 const ParentTypeId = "~effect/Machine/Parent"
-const ChildMachineTypeId = "~effect/Machine/ChildMachine"
-type MachineRuntimeRequirement = internalRuntime.MachineRuntime
 
 const Proto = {
   ...Inspectable.BaseProto,
@@ -1092,82 +1086,25 @@ export const logic = <
   run: options.run
 })
 
-export const child = <const Id extends string, M extends Machine.Any>(
-  id: Id,
-  machine: M
-): ChildMachine<Id, M> =>
-  makeChild(id, machine, (input) =>
-    machine.input === undefined
-      ? internalProcess.toProcessLogic(machine)
-      : internalProcess.toProcessLogic(machine, input))
-
-const makeChild = <const Id extends string, M extends Machine.Any>(
-  id: Id,
-  machine: M,
-  makeLogic: (input?: unknown) => Logic<any, any, any, any, any, any>
-): ChildMachine<Id, M> =>
-  ({
-    [ChildMachineTypeId]: ChildMachineTypeId,
-    id,
-    machine,
-    [ChildMachineLogicTypeId]: makeLogic
-  } satisfies
-    & Pick<ChildMachine<Id, M>, typeof ChildMachineTypeId | "id" | "machine">
-    & ChildMachineLogicSlot) as unknown as ChildMachine<Id, M>
-
-export const childFamily = <M extends Machine.Any>(machine: M): ChildMachine.Family<M> => {
-  const makeLogic = (input?: unknown): Logic<any, any, any, any, any, any> =>
-    machine.input === undefined
-      ? internalProcess.toProcessLogic(machine)
-      : internalProcess.toProcessLogic(machine, input)
-  return (id) => makeChild(id, machine, makeLogic)
-}
-
-export const childAddress = <Event = never>(id: string): ChildAddress<Event> => id as ChildAddress<Event>
-
 // The public `Machine` module declares the typed overloads and checks these
 // erased implementations against them structurally.
 export const spawn = (logic: Logic<any, any, any, any, any, any>, options?: SpawnOptions) =>
   Effect.flatMap(
-    internalRuntime.MachineRuntime,
+    MachineRuntime,
     // `SpawnOptions` declares only `id`; an absent id spawns an anonymous child.
     (runtime) => options?.id === undefined ? runtime.spawn(logic) : runtime.spawn(logic, { id: options.id })
   )
 
 export const sendTo = (
-  child: string | ChildMachine.Any,
+  child: ChildAddress<never> | ChildMachine.Any,
   event: unknown
-): Effect.Effect<void, StoppedError, MachineRuntimeRequirement> =>
-  Effect.flatMap(
-    internalRuntime.MachineRuntime,
-    (runtime) => runtime.sendTo(child, event)
-  )
+): Effect.Effect<void, StoppedError, MachineRuntime> =>
+  Effect.flatMap(MachineRuntime, (runtime) => runtime.sendTo(child, event))
 
 export const stopChild = (
-  child: string | ChildMachine.Any
-): Effect.Effect<void, never, MachineRuntimeRequirement> =>
-  Effect.flatMap(
-    internalRuntime.MachineRuntime,
-    (runtime) => runtime.stopChild(child)
-  )
+  child: ChildAddress<never> | ChildMachine.Any
+): Effect.Effect<void, never, MachineRuntime> => Effect.flatMap(MachineRuntime, (runtime) => runtime.stopChild(child))
 
-export const watch = <State, Event, Error = never, Output = never>(
-  ref: MachineRef<State, Event, Error, Output>
-): Stream.Stream<RuntimeOutcome<State, Error, Output>> => internalRuntime.watch(ref)
+export const watch = Observation.watch
 
 export const waitFor = Observation.waitFor
-
-export const prepare: (
-  machine: Machine.Any,
-  ...args: ReadonlyArray<any>
-) => Effect.Effect<internalRuntime.PreparedProcess<any, any, any, any, any, any, any>> = internalProcess.prepare
-
-export const start: (
-  machine: Machine.Any,
-  ...args: ReadonlyArray<any>
-) => Effect.Effect<MachineRef<any, any, any, any, any>, any, any> = internalProcess.start
-
-export const resume: (
-  machine: Machine.Any,
-  snapshot: any
-) => Effect.Effect<MachineRef<any, any, any, any, any>, MachineSchemaDecodeError, any> = internalProcess.resume

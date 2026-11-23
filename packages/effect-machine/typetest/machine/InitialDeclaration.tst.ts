@@ -1,6 +1,6 @@
 import { Effect, Schema } from "effect"
 import { describe, expect, test } from "tstyche"
-import { Machine } from "../../src/index.js"
+import { LocalMachine, Machine } from "../../src/index.js"
 
 describe("handler-owned initial declarations", () => {
   test("keeps input at root construction and narrows parent data", () => {
@@ -51,7 +51,7 @@ describe("handler-owned initial declarations", () => {
         }
       }
     })
-    expect(Machine.start).type.toBeCallableWith(machine, 1)
+    expect(LocalMachine.start).type.toBeCallableWith(machine, 1)
   })
 
   test("requires valued parallel regions without a regions wrapper", () => {
@@ -72,7 +72,7 @@ describe("handler-owned initial declarations", () => {
       initial: { data: { decoded: true, data: { _tag: "data", count: 0 }, extra: true } }
     })
     const machine = definition.handle({ initial: { data: { count: 0 } } })
-    expect(Machine.start).type.toBeCallableWith(machine)
+    expect(LocalMachine.start).type.toBeCallableWith(machine)
   })
 
   test("requires construction throughout inactive and history descendants", () => {
@@ -148,8 +148,8 @@ describe("handler-owned initial declarations", () => {
     const ordinary = definition.handle({ root: { decoded: false, data: "value" } })
     const callback = definition.handle({ root: () => ({ decoded: true, data: "value" }) })
     const decoded = definition.handle({ root: { decoded: true, data: { _tag: "", decoded: true, data: "value" } } })
-    expect(Machine.start).type.toBeCallableWith(ordinary)
-    expect(Machine.start).type.toBeCallableWith(callback)
-    expect(Machine.start).type.toBeCallableWith(decoded)
+    expect(LocalMachine.start).type.toBeCallableWith(ordinary)
+    expect(LocalMachine.start).type.toBeCallableWith(callback)
+    expect(LocalMachine.start).type.toBeCallableWith(decoded)
   })
 })

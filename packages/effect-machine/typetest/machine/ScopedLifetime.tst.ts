@@ -1,6 +1,6 @@
 import { Effect, Schema, Scope } from "effect"
 import { describe, expect, it } from "tstyche"
-import { Machine } from "../../src/index.js"
+import { LocalMachine, Machine } from "../../src/index.js"
 import { AtomMachine } from "../../src/unstable/reactivity/index.js"
 
 class Idle extends Schema.TaggedClass<Idle>("Idle")("Idle", {}) {}
@@ -14,15 +14,15 @@ const machine = Machine.make({
 
 describe("Machine scoped lifetime", () => {
   it("requires a Scope to start, resume, and prepare", () => {
-    const started = Machine.start(machine)
+    const started = LocalMachine.start(machine)
     expect<Effect.Services<typeof started>>().type.toBe<Scope.Scope>()
-    const resumed = Machine.resume(machine, {
+    const resumed = LocalMachine.resume(machine, {
       path: "" as const,
       value: undefined,
       state: { path: "Idle", value: new Idle({}) }
     })
     expect<Effect.Services<typeof resumed>>().type.toBe<Scope.Scope>()
-    const prepared = Machine.prepare(machine)
+    const prepared = LocalMachine.prepare(machine)
     expect<Effect.Services<typeof prepared>>().type.toBe<never>()
     expect<Effect.Services<Effect.Success<typeof prepared>["start"]>>().type.toBe<Scope.Scope>()
     expect(Effect.scoped(started)).type.toBe<

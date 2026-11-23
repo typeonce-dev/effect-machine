@@ -1,7 +1,7 @@
 import { Effect, Schema, Scope } from "effect"
 import { Atom } from "effect/reactivity"
 import { describe, expect, it } from "tstyche"
-import { Machine } from "../../src/index.js"
+import { LocalMachine, Machine } from "../../src/index.js"
 import { AtomMachine } from "../../src/unstable/reactivity/index.js"
 class Idle extends Schema.TaggedClass<Idle>("Idle")("Idle", { value: Schema.Number }) {}
 class Tick extends Schema.TaggedClass<Tick>("Tick")("Tick", {}) {}
@@ -38,7 +38,7 @@ const snapshot: Snapshot = {
 }
 describe("Machine logical resumption", () => {
   it("excludes input while preserving synchronous runtime inference", () => {
-    const resumed = Machine.resume(machine, snapshot)
+    const resumed = LocalMachine.resume(machine, snapshot)
     type Ref = Effect.Success<typeof resumed>
     expect<Effect.Error<typeof resumed>>().type.toBe<Machine.MachineSchemaDecodeError>()
     expect<Effect.Services<typeof resumed>>().type.toBe<Scope.Scope>()
@@ -46,8 +46,8 @@ describe("Machine logical resumption", () => {
       Machine.InfiniteTransitionError | Machine.MachineSchemaDecodeError | Machine.StoppedError
     >()
     expect<Effect.Success<Ref["state"]>>().type.toBe<Snapshot>()
-    expect(Machine.resume).type.not.toBeCallableWith(machine, snapshot, { seed: 1 })
-    expect(Machine.resume).type.not.toBeCallableWith(machine, {
+    expect(LocalMachine.resume).type.not.toBeCallableWith(machine, snapshot, { seed: 1 })
+    expect(LocalMachine.resume).type.not.toBeCallableWith(machine, {
       version: 2,
       _tag: "MachineSnapshot",
       active: [{ path: "" }, { path: "Idle", value: { _tag: "Idle", value: 3 } }]

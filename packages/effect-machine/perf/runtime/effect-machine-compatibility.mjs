@@ -245,3 +245,20 @@ export const makeEffectMachineBenchmarkApi = (Machine) => {
       : (config) => Machine.invoke(config)
   }
 }
+
+/**
+ * Selects the module that starts machines in memory: `LocalMachine`, or `Machine`
+ * in revisions where the model module also hosted machines.
+ */
+export const effectMachineBenchmarkHost = ({ LocalMachine, Machine }) => LocalMachine ?? Machine
+
+/**
+ * Selects the raw process runtime. Revisions that bind the runtime to the way it
+ * builds the logic of child machines export a constructor instead of functions.
+ */
+export const effectMachineBenchmarkProcessRuntime = (runtime) =>
+  typeof runtime.startProcess === "function"
+    ? runtime
+    : runtime.make(() => {
+      throw new Error("Raw process benchmarks start no child machines")
+    })

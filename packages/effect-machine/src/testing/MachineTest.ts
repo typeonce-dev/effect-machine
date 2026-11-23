@@ -481,7 +481,7 @@ export { ProbeUnavailableError } from "../internal/testing/machine/probe.js"
  * **Example** (Acknowledging commands at runtime)
  *
  * ```ts import.meta.vitest
- * import { Machine } from "@typeonce/effect-machine"
+ * import { LocalMachine, Machine } from "@typeonce/effect-machine"
  * import { MachineTest } from "@typeonce/effect-machine/testing"
  * import { Effect } from "effect"
  *
@@ -491,7 +491,7 @@ export { ProbeUnavailableError } from "../internal/testing/machine/probe.js"
  * })
  *
  * const probed = Effect.scoped(Effect.gen(function*() {
- *   const ref = yield* Machine.start(machine)
+ *   const ref = yield* LocalMachine.start(machine)
  *   const probe = yield* MachineTest.probe(machine, ref)
  *   return typeof probe
  * }))

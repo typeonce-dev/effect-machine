@@ -1,6 +1,6 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Effect, Fiber, Schema } from "effect"
-import { Machine } from "../../src/index.js"
+import { LocalMachine, Machine } from "../../src/index.js"
 class Root extends Schema.TaggedClass<Root>("Root")("Root", {}) {}
 class Idle extends Schema.TaggedClass<Idle>("Idle")("Idle", {}) {}
 class Done extends Schema.TaggedClass<Done>("Done")("Done", {}) {}
@@ -430,7 +430,7 @@ describe("exact state-definition runtime validation", () => {
       const decoded = yield* Machine.decodeSnapshot(machine, JSON.parse(JSON.stringify(encoded)))
       assert.deepStrictEqual(decoded, split.next)
 
-      const ref = yield* Machine.resume(machine, decoded)
+      const ref = yield* LocalMachine.resume(machine, decoded)
       const observer = yield* Machine.waitFor(ref, (snapshot) =>
         Machine.configuration(machine, snapshot.state).some((node) =>
           node.path === "regions.initial.second"

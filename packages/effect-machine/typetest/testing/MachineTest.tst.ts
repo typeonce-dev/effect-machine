@@ -1,7 +1,7 @@
 import { Cause, Context, Data, Effect, Schema } from "effect"
 import * as Arbitrary from "effect/Arbitrary"
 import { describe, expect, it } from "tstyche"
-import { Machine } from "../../src/index.js"
+import { LocalMachine, Machine } from "../../src/index.js"
 import { MachineTest } from "../../src/testing/index.js"
 describe("MachineTest", () => {
   class Input extends Schema.Class<Input>("Input")({ id: Schema.String }) {
@@ -146,7 +146,7 @@ describe("MachineTest", () => {
     }
     class AssertionRequirement extends Context.Service<AssertionRequirement, string>()("AssertionRequirement") {
     }
-    const started = Machine.start(machine, new Input({ id: "test" }))
+    const started = LocalMachine.start(machine, new Input({ id: "test" }))
     type Ref = Effect.Success<typeof started>
     const ref = null as unknown as Ref
     const executed = MachineTest.runEnqueuedCommands(ref, [

@@ -1,7 +1,7 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Cause, Context, Data, Deferred, Effect, Fiber, Option, Ref, Schema, Stream } from "effect"
 import { TestClock } from "effect/testing"
-import { Machine } from "../../src/index.js"
+import { LocalMachine, Machine } from "../../src/index.js"
 class InitialRequirement extends Context.Service<InitialRequirement, {
   readonly initialMessage: string
 }>()("test/Machine/InitialRequirement") {
@@ -1057,7 +1057,7 @@ describe("Machine", () => {
         assert.strictEqual(accessorError.boundary, "event")
         assert.strictEqual(accessorError.event, "Submit")
         assert.isTrue(Cause.isCause(accessorError.cause))
-        const actor = yield* Machine.start(machine)
+        const actor = yield* LocalMachine.start(machine)
         const snapshot = yield* sendAndWaitForSnapshot(actor, construction!, (snapshot) => snapshot.status === "error")
         const error = yield* Effect.flip(actor.join)
         assertMachineSchemaDecodeError(error, "event", { event: "Submit" })
@@ -1089,7 +1089,7 @@ describe("Machine", () => {
             Done: {}
           }
         })
-        const actor = yield* Machine.start(machine)
+        const actor = yield* LocalMachine.start(machine)
         const waiting = yield* waitForSnapshot(actor, (snapshot) =>
           snapshot.status === "active" && snapshot.state.state.path === "Waiting").pipe(Effect.forkChild)
         yield* Deferred.succeed(release, undefined)
@@ -1797,7 +1797,7 @@ describe("Machine", () => {
             }
           }
         })
-        const actor = yield* Machine.start(machine)
+        const actor = yield* LocalMachine.start(machine)
         const snapshot = yield* sendAndWaitForSnapshot(
           actor,
           unsafeTagged({ _tag: "NonEmptySubmit", value: "" }),
@@ -1871,7 +1871,7 @@ describe("Machine", () => {
             }
           }
         })
-        const actor = yield* Machine.start(machine)
+        const actor = yield* LocalMachine.start(machine)
         const snapshot = yield* sendAndWaitForSnapshot(actor, new NonEmptySubmit({ value: "request-1" }), (snapshot) =>
           snapshot.status === "error")
         const error = yield* Effect.flip(actor.join)
@@ -2498,7 +2498,7 @@ describe("Machine", () => {
           b: {}
         }
       })
-      const actor = yield* Machine.start(machine)
+      const actor = yield* LocalMachine.start(machine)
       assertStateSnapshot((yield* actor.state).state, "a", new Duplicate({ value: "a" }))
       const snapshot = yield* sendAndWaitForSnapshot(actor, new Submit({ value: "b" }), (snapshot) =>
         snapshot.status === "active" && snapshot.state.state.path === "b")
@@ -4194,7 +4194,7 @@ describe("Machine", () => {
           }
         }
       })
-      const actor = yield* Machine.start(machine)
+      const actor = yield* LocalMachine.start(machine)
       yield* actor.send(new Authorize({ code: "auth-1" }))
       assert.strictEqual(yield* actor.join, "auth-1")
       assert.instanceOf(yield* Effect.flip(actor.send(new Reset({}))), Machine.StoppedError)
@@ -4548,7 +4548,7 @@ describe("Machine", () => {
         inventory: "res-1",
         shipping: "res-1"
       })
-      const actor = yield* Machine.start(machine)
+      const actor = yield* LocalMachine.start(machine)
       yield* actor.send(new ReserveInventory({ reservationId: "res-2" }))
       assert.deepStrictEqual(yield* actor.join, {
         inventory: "res-2",
@@ -4669,7 +4669,7 @@ describe("Machine", () => {
         inventory: "res-1:ReserveInventory",
         shipping: "quote-1:Resolve"
       })
-      const actor = yield* Machine.start(machine)
+      const actor = yield* LocalMachine.start(machine)
       yield* sendAndWaitForSnapshot(actor, new ReserveInventory({ reservationId: "res-2" }), (snapshot) =>
         snapshot.status === "active" &&
         snapshot.state.state.path === "fulfillment" &&
@@ -4918,7 +4918,7 @@ describe("Machine", () => {
           Idle: {}
         }
       })
-      const actor = yield* Machine.start(machine)
+      const actor = yield* LocalMachine.start(machine)
       assert.deepStrictEqual((yield* actor.state).state.value, new Idle({ userId: "user-1" }))
     }))
   it.effect("handlers can return snapshots directly", () =>
@@ -4953,7 +4953,7 @@ describe("Machine", () => {
           Loading: {}
         }
       })
-      const actor = yield* Machine.start(machine, { userId: "user-1" })
+      const actor = yield* LocalMachine.start(machine, { userId: "user-1" })
       const snapshot = yield* sendAndWaitForSnapshot(actor, new Submit({ value: "hello" }), (snapshot) =>
         snapshot.state.state.value._tag === "Loading")
       assert.deepStrictEqual(snapshot, {
@@ -5094,7 +5094,7 @@ describe("Machine", () => {
           }
         }
       })
-      const actor = yield* Machine.start(machine, { userId: "user-1" })
+      const actor = yield* LocalMachine.start(machine, { userId: "user-1" })
       assert.deepStrictEqual(yield* actor.snapshot, {
         status: "active",
         state: {
@@ -5170,7 +5170,7 @@ describe("Machine", () => {
         }
       })
       const planned = yield* Machine.planInitial(machine)
-      const actor = yield* Machine.start(machine)
+      const actor = yield* LocalMachine.start(machine)
       assert.strictEqual(planned.done, true)
       assert.strictEqual(planned.output, "request-1")
       assert.strictEqual(yield* actor.join, "request-1")
@@ -5258,7 +5258,7 @@ describe("Machine", () => {
           Success: {}
         }
       })
-      const actor = yield* Machine.start(machine, { userId: "user-1" })
+      const actor = yield* LocalMachine.start(machine, { userId: "user-1" })
       yield* actor.send(new Submit({ value: "hello" }))
       assert.strictEqual(yield* actor.join, undefined)
       assert.deepStrictEqual(yield* actor.snapshot, {
@@ -5311,7 +5311,7 @@ describe("Machine", () => {
           Success: {}
         }
       })
-      const actor = yield* Machine.start(machine, { userId: "user-1" })
+      const actor = yield* LocalMachine.start(machine, { userId: "user-1" })
       yield* actor.send(new Submit({ value: "hello" }))
       yield* actor.join
       assert.instanceOf(yield* Effect.flip(actor.send(new Reset({}))), Machine.StoppedError)
@@ -5354,7 +5354,7 @@ describe("Machine", () => {
           Loading: {}
         }
       })
-      const startingFiber = yield* Machine.start(machine).pipe(Effect.forkChild)
+      const startingFiber = yield* LocalMachine.start(machine).pipe(Effect.forkChild)
       const ref = yield* Fiber.join(startingFiber)
       const snapshot = yield* sendAndWaitForSnapshot(ref, new Submit({ value: "hello" }), (snapshot) =>
         snapshot.status === "active" && snapshot.state.state.path === "Loading")
@@ -5394,7 +5394,7 @@ describe("Machine", () => {
           Loading: {}
         }
       })
-      const actor = yield* Machine.start(machine, { userId: "user-1" })
+      const actor = yield* LocalMachine.start(machine, { userId: "user-1" })
       yield* actor.stop
       assert.instanceOf(yield* Effect.flip(actor.send(new Submit({ value: "hello" }))), Machine.StoppedError)
       assert.deepStrictEqual(yield* actor.snapshot, {
@@ -5471,7 +5471,7 @@ describe("Machine", () => {
           Loading: {}
         }
       })
-      const actor = yield* Machine.start(machine, { userId: "user-1" })
+      const actor = yield* LocalMachine.start(machine, { userId: "user-1" })
       yield* actor.send(new Submit({ value: "hello" }))
       yield* Effect.yieldNow
       assert.deepStrictEqual((yield* actor.state).state.value, new Idle({ userId: "user-1" }))
@@ -5508,7 +5508,7 @@ describe("Machine", () => {
           Loading: {}
         }
       })
-      const actor = yield* Machine.start(machine, { userId: "user-1" })
+      const actor = yield* LocalMachine.start(machine, { userId: "user-1" })
       const observer = yield* actor.changes.pipe(
         Stream.filter((snapshot) => snapshot.state.state.value._tag === "Loading"),
         Stream.take(1),
@@ -5578,7 +5578,7 @@ describe("Machine", () => {
           }
         }
       })
-      const actor = yield* Machine.start(machine, { userId: "user-1" })
+      const actor = yield* LocalMachine.start(machine, { userId: "user-1" })
       yield* actor.send(new Submit({ value: "hello" }))
       assert.strictEqual(yield* actor.join, "request-1")
       assert.deepStrictEqual(yield* actor.snapshot, {
@@ -5686,7 +5686,7 @@ describe("Machine", () => {
           }
         }
       })
-      const actor = yield* Machine.start(machine, { userId: "user-1" })
+      const actor = yield* LocalMachine.start(machine, { userId: "user-1" })
       yield* actor.send(new Submit({ value: "hello" }))
       assert.strictEqual(yield* actor.join, "done:request-1")
       assert.deepStrictEqual(yield* actor.snapshot, {
@@ -5753,7 +5753,7 @@ describe("Machine", () => {
           }
         }
       })
-      const actor = yield* Machine.start(machine, { userId: "user-1" })
+      const actor = yield* LocalMachine.start(machine, { userId: "user-1" })
       yield* actor.send(new Submit({ value: "hello" }))
       assert.strictEqual(yield* actor.join, "done:request-1")
       assert.deepStrictEqual(yield* actor.snapshot, {
@@ -5807,9 +5807,12 @@ describe("Machine", () => {
           }
         }
       })
-      const [first, second] = yield* Effect.all([Machine.start(parentMachine), Machine.start(parentMachine)], {
-        concurrency: "unbounded"
-      })
+      const [first, second] = yield* Effect.all(
+        [LocalMachine.start(parentMachine), LocalMachine.start(parentMachine)],
+        {
+          concurrency: "unbounded"
+        }
+      )
       const firstChild = yield* first.childChanges(Child).pipe(
         Stream.filter(Option.isSome),
         Stream.runHead,
@@ -5874,7 +5877,7 @@ describe("Machine", () => {
           Loading: { invoke: { src: "source1" } }
         }
       })
-      const parent = yield* Machine.start(parentMachine)
+      const parent = yield* LocalMachine.start(parentMachine)
       const child = yield* parent.child(Child)
       assert(Option.isSome(child))
       yield* parent.stop
@@ -5934,9 +5937,12 @@ describe("Machine", () => {
           }
         }
       })
-      const [first, second] = yield* Effect.all([Machine.start(parentMachine), Machine.start(parentMachine)], {
-        concurrency: "unbounded"
-      })
+      const [first, second] = yield* Effect.all(
+        [LocalMachine.start(parentMachine), LocalMachine.start(parentMachine)],
+        {
+          concurrency: "unbounded"
+        }
+      )
       const [firstChild, secondChild] = yield* Effect.all([first.child(Child), second.child(Child)])
       assert.strictEqual(starts, 2)
       assert(Option.isSome(firstChild))
@@ -6003,7 +6009,7 @@ describe("Machine", () => {
           Success: { output: ({ state }) => state.requestId }
         }
       })
-      const parent = yield* Machine.start(parentMachine)
+      const parent = yield* LocalMachine.start(parentMachine)
       assert.strictEqual(yield* parent.join, "child-output")
     }))
   it.effect("keeps input-bearing process descriptors instance-specific", () =>
@@ -6030,8 +6036,8 @@ describe("Machine", () => {
         }
       })
       const [first, second] = yield* Effect.all([
-        Machine.start(machine, { userId: "first" }),
-        Machine.start(machine, { userId: "second" })
+        LocalMachine.start(machine, { userId: "first" }),
+        LocalMachine.start(machine, { userId: "second" })
       ], { concurrency: "unbounded" })
       assert.deepStrictEqual((yield* first.state).state, {
         path: "Idle" as const,
@@ -6164,7 +6170,7 @@ describe("Machine", () => {
           }
         }
       })
-      const actor = yield* Machine.start(machine, { userId: "user-1" })
+      const actor = yield* LocalMachine.start(machine, { userId: "user-1" })
       yield* actor.send(new Submit({ value: "hello" }))
       assert.strictEqual(yield* actor.join, "boom")
       assert.deepStrictEqual(yield* actor.snapshot, {
@@ -6221,7 +6227,7 @@ describe("Machine", () => {
           }
         }
       })
-      const actor = yield* Machine.start(machine)
+      const actor = yield* LocalMachine.start(machine)
       yield* actor.send(new Submit({ value: "start" }))
       assert.strictEqual(yield* actor.join, "loaded")
     }))
@@ -6271,7 +6277,7 @@ describe("Machine", () => {
           }
         }
       })
-      const actor = yield* Machine.start(machine)
+      const actor = yield* LocalMachine.start(machine)
       yield* Deferred.await(childStarted)
       assert.strictEqual(yield* actor.join, "child")
     }))
@@ -6326,7 +6332,7 @@ describe("Machine", () => {
           }
         }
       })
-      const actor = yield* Machine.start(machine)
+      const actor = yield* LocalMachine.start(machine)
       yield* Deferred.await(childStarted)
       yield* sendAndWaitForSnapshot(actor, new Resolve({}), (snapshot) =>
         snapshot.status === "active" && snapshot.state.state.path === "Idle")
@@ -6373,7 +6379,7 @@ describe("Machine", () => {
           }
         }
       })
-      const actor = yield* Machine.start(machine)
+      const actor = yield* LocalMachine.start(machine)
       assert.strictEqual(yield* actor.join, "unavailable")
     }))
   it.effect("preserves services for an invoke started by compiled initialization", () =>
@@ -6410,7 +6416,7 @@ describe("Machine", () => {
           }
         }
       })
-      const actor = yield* Machine.start(machine).pipe(
+      const actor = yield* LocalMachine.start(machine).pipe(
         Effect.provideService(InitialRequirement, InitialRequirement.of({ initialMessage: "from-service" }))
       )
       assert.strictEqual(yield* actor.join, "from-service")
@@ -6446,7 +6452,7 @@ describe("Machine", () => {
           }
         }
       })
-      const actor = yield* Machine.start(machine)
+      const actor = yield* LocalMachine.start(machine)
       const joined = yield* actor.join.pipe(Effect.forkChild)
       yield* TestClock.adjust("1 hour")
       assert.strictEqual(yield* Fiber.join(joined), "timeout")
@@ -6499,7 +6505,7 @@ describe("Machine", () => {
           }
         }
       })
-      const actor = yield* Machine.start(machine, { userId: "user-1" })
+      const actor = yield* LocalMachine.start(machine, { userId: "user-1" })
       yield* actor.send(new Submit({ value: "hello" }))
       assert.strictEqual(yield* actor.join, "request:pending")
       assert.deepStrictEqual(yield* actor.snapshot, {
@@ -6555,7 +6561,7 @@ describe("Machine", () => {
           }
         }
       })
-      const ref = yield* Machine.start(machine, { userId: "user-1" })
+      const ref = yield* LocalMachine.start(machine, { userId: "user-1" })
       const snapshot = yield* sendAndWaitForSnapshot(ref, new Submit({ value: "hello" }), (snapshot) =>
         snapshot.status === "error")
       assert.strictEqual(snapshot.status, "error")
@@ -6630,7 +6636,7 @@ describe("Machine", () => {
           }
         }
       })
-      const actor = yield* Machine.start(machine, { userId: "user-1" })
+      const actor = yield* LocalMachine.start(machine, { userId: "user-1" })
       yield* actor.send(new Submit({ value: "hello" }))
       yield* Deferred.await(started)
       yield* Effect.yieldNow
@@ -6703,7 +6709,7 @@ describe("Machine", () => {
           }
         }
       })
-      const actor = yield* Machine.start(machine, { userId: "user-1" })
+      const actor = yield* LocalMachine.start(machine, { userId: "user-1" })
       yield* actor.send(new Submit({ value: "hello" }))
       yield* Effect.yieldNow
       assert.deepStrictEqual(yield* actor.snapshot, {
@@ -6780,7 +6786,7 @@ describe("Machine", () => {
           }
         }
       })
-      const actor = yield* Machine.start(machine, { userId: "user-1" })
+      const actor = yield* LocalMachine.start(machine, { userId: "user-1" })
       const joinFiber = yield* actor.join.pipe(Effect.tap(() => Ref.set(joinDone, true)), Effect.forkChild)
       yield* actor.send(new Submit({ value: "hello" }))
       yield* Deferred.await(childStarted)
@@ -6883,7 +6889,7 @@ describe("Machine", () => {
           }
         }
       })
-      const actor = yield* Machine.start(machine)
+      const actor = yield* LocalMachine.start(machine)
       yield* Deferred.await(parentStarted)
       yield* Deferred.await(enteringStarted)
       yield* sendAndWaitForSnapshot(actor, new Authorize({ code: "auth-1" }), (snapshot) =>
@@ -7003,7 +7009,7 @@ describe("Machine", () => {
           }
         }
       })
-      const actor = yield* Machine.start(machine)
+      const actor = yield* LocalMachine.start(machine)
       const joinFiber = yield* actor.join.pipe(Effect.tap(() => Ref.set(joinDone, true)), Effect.forkChild)
       yield* Deferred.await(parentStarted)
       yield* Deferred.await(inventoryStarted)
@@ -7036,7 +7042,7 @@ describe("Machine", () => {
         }
       })
       const planningError = yield* Effect.flip(Machine.planInitial(machine))
-      const startupError = yield* Effect.flip(Machine.start(machine))
+      const startupError = yield* Effect.flip(LocalMachine.start(machine))
       assert.instanceOf(planningError, Machine.StartupError)
       assert(Cause.hasDies(planningError.cause))
       assert.instanceOf(startupError, Machine.StartupError)
@@ -7127,7 +7133,7 @@ describe("Machine", () => {
         }
       })
       const planningError = yield* Effect.flip(Machine.planInitial(machine))
-      const startupError = yield* Effect.flip(Machine.start(machine))
+      const startupError = yield* Effect.flip(LocalMachine.start(machine))
       assert.instanceOf(planningError, Machine.InfiniteTransitionError)
       assert.strictEqual(planningError.machineId, "InitialLoopMachine")
       assert.strictEqual(planningError.maxIterations, 1000)
@@ -7326,7 +7332,7 @@ describe("Machine", () => {
     }))
   it.effect("leaves a machine stopped when it is stopped concurrently", () =>
     Effect.gen(function*() {
-      const ref = yield* Machine.start(makeConcurrentMachine())
+      const ref = yield* LocalMachine.start(makeConcurrentMachine())
       yield* Effect.all([ref.stop, ref.stop, ref.stop], { concurrency: "unbounded" })
       assert.deepStrictEqual(yield* ref.snapshot, {
         status: "stopped",
@@ -7340,7 +7346,7 @@ describe("Machine", () => {
   it.effect("keeps a machine stopped when sending an event races with stopping it", () =>
     Effect.gen(function*() {
       for (let iteration = 0; iteration < 32; iteration++) {
-        const ref = yield* Machine.start(makeConcurrentMachine())
+        const ref = yield* LocalMachine.start(makeConcurrentMachine())
         const send = ref.send(new ConcurrentPing({})).pipe(
           Effect.as("accepted" as const),
           Effect.catchTag("StoppedError", () => Effect.succeed("stopped" as const))

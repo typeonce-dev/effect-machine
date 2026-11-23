@@ -41,7 +41,8 @@ export const probe = <M extends AnyMachine, Error, Output>(
   if (acknowledged === undefined) {
     return Effect.fail(
       new ProbeUnavailableError({
-        message: "MachineTest.probe requires a managed statechart reference created by Machine.start or Machine.resume"
+        message:
+          "MachineTest.probe requires a managed statechart reference created by LocalMachine.start or LocalMachine.resume"
       })
     )
   }

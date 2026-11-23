@@ -1,7 +1,7 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Cause, Clock, Effect, Exit, Option, Schema, Stream } from "effect"
 import * as Arbitrary from "effect/Arbitrary"
-import { Machine } from "../../src/index.js"
+import { LocalMachine, Machine } from "../../src/index.js"
 import { MachineTest } from "../../src/testing/index.js"
 class Counter extends Schema.TaggedClass<Counter>("Counter")("Counter", {
   count: Schema.Int
@@ -166,7 +166,7 @@ describe("MachineTest runtime commands", () => {
     commands: generatedRuntimeCommands.arbitrary
   }, ({ commands }) =>
     Effect.gen(function*() {
-      const ref = yield* Machine.start(propertyMachine)
+      const ref = yield* LocalMachine.start(propertyMachine)
       const transcript = yield* MachineTest.runEnqueuedCommands(ref, commands, {
         initialModel: { count: 0, stopped: false },
         transition: (model, command) => {
@@ -230,7 +230,7 @@ describe("MachineTest runtime commands", () => {
   it.effect("buffers public changes so a checkpoint can verify multiple queued sends in order", () =>
     Effect.gen(function*() {
       const machine = makeCounterMachine()
-      const ref = yield* Machine.start(machine)
+      const ref = yield* LocalMachine.start(machine)
       const commands = [
         MachineTest.sendCommand(new Add({ amount: 2 })),
         MachineTest.sendCommand(new Add({ amount: 5 })),
@@ -299,7 +299,7 @@ describe("MachineTest runtime commands", () => {
           TimedOut: {}
         }
       })
-      const ref = yield* Machine.start(machine)
+      const ref = yield* LocalMachine.start(machine)
       const commands = [
         MachineTest.advanceCommand(999),
         MachineTest.checkpointCommand("before timeout"),
@@ -337,7 +337,7 @@ describe("MachineTest runtime commands", () => {
     }))
   it.effect("models idempotent stop and rejected sends after stop explicitly", () =>
     Effect.gen(function*() {
-      const ref = yield* Machine.start(makeCounterMachine())
+      const ref = yield* LocalMachine.start(makeCounterMachine())
       const transcript = yield* MachineTest.runEnqueuedCommands(ref, [
         MachineTest.stopCommand(),
         MachineTest.stopCommand(),
@@ -373,7 +373,7 @@ describe("MachineTest runtime commands", () => {
     }))
   it.effect("retains a replayable prefix and attempted command in typed failures", () =>
     Effect.gen(function*() {
-      const ref = yield* Machine.start(makeCounterMachine())
+      const ref = yield* LocalMachine.start(makeCounterMachine())
       const commands = [
         MachineTest.sendCommand(new Add({ amount: 1 })),
         MachineTest.sendCommand(new Add({ amount: 2 }))
@@ -410,7 +410,7 @@ describe("MachineTest runtime commands", () => {
     }))
   it.effect("fails with structured evidence when an expected publication never arrives", () =>
     Effect.gen(function*() {
-      const ref = yield* Machine.start(makeCounterMachine())
+      const ref = yield* LocalMachine.start(makeCounterMachine())
       const virtualTimeBefore = yield* Clock.currentTimeMillis
       const failure = yield* MachineTest.runEnqueuedCommands(ref, [
         MachineTest.checkpointCommand("incorrectly expect a publication")
@@ -439,7 +439,7 @@ describe("MachineTest runtime commands", () => {
     }))
   it.effect("keeps trailing enqueue-only work explicit instead of sampling a racy final state", () =>
     Effect.gen(function*() {
-      const ref = yield* Machine.start(makeCounterMachine())
+      const ref = yield* LocalMachine.start(makeCounterMachine())
       const transcript = yield* MachineTest.runEnqueuedCommands(ref, [
         MachineTest.sendCommand(new Add({ amount: 5 })),
         MachineTest.checkpointCommand("racy current sample")
@@ -497,7 +497,7 @@ describe("MachineTest runtime commands", () => {
     }))
   it.effect("captures command execution defects without losing replay evidence", () =>
     Effect.gen(function*() {
-      const ref = yield* Machine.start(makeCounterMachine())
+      const ref = yield* LocalMachine.start(makeCounterMachine())
       const invalid = MachineTest.advanceCommand("not a duration" as any)
       const failure = yield* MachineTest.runEnqueuedCommands(ref, [invalid], {
         initialModel: undefined,
@@ -518,7 +518,7 @@ describe("MachineTest runtime commands", () => {
     }))
   it.effect("captures synchronous throws while constructing model and inspection effects", () =>
     Effect.gen(function*() {
-      const ref = yield* Machine.start(makeCounterMachine())
+      const ref = yield* LocalMachine.start(makeCounterMachine())
       const command = MachineTest.checkpointCommand<Add>("synchronous callback")
       const modelFailure = yield* MachineTest.runEnqueuedCommands(ref, [command], {
         initialModel: undefined,
@@ -550,7 +550,7 @@ describe("MachineTest runtime commands", () => {
     }))
   it.effect("propagates pure interruption instead of reporting a counterexample", () =>
     Effect.gen(function*() {
-      const ref = yield* Machine.start(makeCounterMachine())
+      const ref = yield* LocalMachine.start(makeCounterMachine())
       const command = MachineTest.checkpointCommand<Add>("interrupt")
       const exit = yield* MachineTest.runEnqueuedCommands(ref, [command], {
         initialModel: undefined,
@@ -570,7 +570,7 @@ describe("MachineTest runtime commands", () => {
     }))
   it.effect("marks unobserved stop and one-of-possibly-many send publications as outstanding", () =>
     Effect.gen(function*() {
-      const stoppedRef = yield* Machine.start(makeCounterMachine())
+      const stoppedRef = yield* LocalMachine.start(makeCounterMachine())
       const stopped = yield* MachineTest.runEnqueuedCommands(stoppedRef, [MachineTest.stopCommand()], {
         initialModel: undefined,
         transition: (model) =>
@@ -583,7 +583,7 @@ describe("MachineTest runtime commands", () => {
       })
       assert.strictEqual(stopped.final.status, "active")
       assert.strictEqual(stopped.synchronized, false)
-      const sentRef = yield* Machine.start(makeCounterMachine())
+      const sentRef = yield* LocalMachine.start(makeCounterMachine())
       const sent = yield* MachineTest.runEnqueuedCommands(sentRef, [
         MachineTest.sendCommand(new Add({ amount: 1 }))
       ], {
@@ -612,7 +612,7 @@ describe("MachineTest causal runtime commands", () => {
   })
   it.effect("attributes ignored, targetless, raised, and changing macrosteps to their exact sends", () =>
     Effect.gen(function*() {
-      const ref = yield* Machine.start(causalMachine)
+      const ref = yield* LocalMachine.start(causalMachine)
       const probe = yield* MachineTest.probe(causalMachine, ref)
       const commands = [
         MachineTest.sendCommand(new Ignored({})),
@@ -686,7 +686,7 @@ describe("MachineTest causal runtime commands", () => {
     }).arbitrary
   }, ({ commands }) =>
     Effect.gen(function*() {
-      const ref = yield* Machine.start(causalMachine)
+      const ref = yield* LocalMachine.start(causalMachine)
       const probe = yield* MachineTest.probe(causalMachine, ref)
       const transcript = yield* MachineTest.runCausalCommands(probe, commands, {
         initialModel: 0,
@@ -709,7 +709,7 @@ describe("MachineTest causal runtime commands", () => {
     }), { arbitrary: { runs: 100, seed: 31590 } })
   it.effect("represents stopped sends without turning an expected rejection into a failed property", () =>
     Effect.gen(function*() {
-      const ref = yield* Machine.start(causalMachine)
+      const ref = yield* LocalMachine.start(causalMachine)
       const probe = yield* MachineTest.probe(causalMachine, ref)
       const transcript = yield* MachineTest.runCausalCommands(probe, [
         MachineTest.stopCommand(),
@@ -760,7 +760,7 @@ describe("MachineTest causal runtime commands", () => {
           TimedOut: {}
         }
       })
-      const ref = yield* Machine.start(timerMachine)
+      const ref = yield* LocalMachine.start(timerMachine)
       const probe = yield* MachineTest.probe(timerMachine, ref)
       const transcript = yield* MachineTest.runCausalCommands(probe, [MachineTest.advanceCommand(1000)], {
         initialModel: "Waiting",
@@ -778,7 +778,7 @@ describe("MachineTest causal runtime commands", () => {
       })
       assert.strictEqual(transcript.final.state.state.path, "TimedOut")
       yield* ref.stop
-      const verifiedRef = yield* Machine.start(timerMachine)
+      const verifiedRef = yield* LocalMachine.start(timerMachine)
       const verifiedProbe = yield* MachineTest.probe(timerMachine, verifiedRef)
       const invariant = MachineTest.runtimeInvariants(timerMachine)
       const verified = yield* MachineTest.verifyCausalCommands(verifiedProbe, [MachineTest.advanceCommand(1000)], {
@@ -800,7 +800,7 @@ describe("MachineTest causal runtime commands", () => {
     }))
   it.effect("attributes processing failures to the exact causal command and prefix", () =>
     Effect.gen(function*() {
-      const ref = yield* Machine.start(causalMachine)
+      const ref = yield* LocalMachine.start(causalMachine)
       const probe = yield* MachineTest.probe(causalMachine, ref)
       const commands = [
         MachineTest.sendCommand(new Add({ amount: 1 })),
@@ -834,7 +834,7 @@ describe("MachineTest causal runtime commands", () => {
     }))
   it.effect("does not confuse a processing StoppedError with mailbox rejection", () =>
     Effect.gen(function*() {
-      const ref = yield* Machine.start(causalMachine)
+      const ref = yield* LocalMachine.start(causalMachine)
       const attached = yield* MachineTest.probe(causalMachine, ref)
       const stopped = new Machine.StoppedError()
       const snapshot = yield* ref.snapshot
@@ -860,7 +860,7 @@ describe("MachineTest causal runtime commands", () => {
     }))
   it.effect("checks reusable snapshot, command, and transcript laws over causal evidence", () =>
     Effect.gen(function*() {
-      const ref = yield* Machine.start(causalMachine)
+      const ref = yield* LocalMachine.start(causalMachine)
       const probe = yield* MachineTest.probe(causalMachine, ref)
       const transcript = yield* MachineTest.runCausalCommands(probe, [
         MachineTest.sendCommand(new Add({ amount: 2 })),
@@ -915,7 +915,7 @@ describe("MachineTest causal runtime commands", () => {
     }))
   it.effect("retains every runtime law violation and detects vacuous conditional laws", () =>
     Effect.gen(function*() {
-      const ref = yield* Machine.start(causalMachine)
+      const ref = yield* LocalMachine.start(causalMachine)
       const probe = yield* MachineTest.probe(causalMachine, ref)
       const transcript = yield* MachineTest.verifyCausalCommands(probe, [
         MachineTest.sendCommand(new Add({ amount: -2 }))
@@ -950,7 +950,7 @@ describe("MachineTest causal runtime commands", () => {
     }))
   it.effect("verifies causal laws without requiring dummy model callbacks", () =>
     Effect.gen(function*() {
-      const ref = yield* Machine.start(causalMachine)
+      const ref = yield* LocalMachine.start(causalMachine)
       const probe = yield* MachineTest.probe(causalMachine, ref)
       const invariant = MachineTest.runtimeInvariants(causalMachine)
       const transcript = yield* MachineTest.verifyCausalCommands(probe, [
@@ -988,7 +988,7 @@ describe("MachineTest causal runtime commands", () => {
     }).arbitrary
   }, ({ commands }) =>
     Effect.gen(function*() {
-      const ref = yield* Machine.start(causalMachine)
+      const ref = yield* LocalMachine.start(causalMachine)
       const probe = yield* MachineTest.probe(causalMachine, ref)
       const invariant = MachineTest.runtimeInvariants(causalMachine)
       const transcript = yield* MachineTest.verifyCausalCommands(probe, commands, {
@@ -1009,7 +1009,7 @@ describe("MachineTest causal runtime commands", () => {
     }), { arbitrary: { runs: 100, seed: 81440 } })
   it.effect("reports the exact field when causal evidence disagrees with fresh planning", () =>
     Effect.gen(function*() {
-      const ref = yield* Machine.start(causalMachine)
+      const ref = yield* LocalMachine.start(causalMachine)
       const probe = yield* MachineTest.probe(causalMachine, ref)
       const transcript = yield* MachineTest.verifyCausalCommands(probe, [
         MachineTest.sendCommand(new Ignored({}))

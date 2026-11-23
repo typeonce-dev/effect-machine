@@ -1,7 +1,7 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Cause, Effect, Fiber, Option, Ref, Schema, Stream } from "effect"
 import { TestClock } from "effect/testing"
-import { Machine } from "../../src/index.js"
+import { LocalMachine, Machine } from "../../src/index.js"
 const waitFor = <State, Event, Error, Output>(
   ref: Machine.MachineRef<State, Event, Error, Output>,
   predicate: (snapshot: Machine.RuntimeSnapshot<State, Error, Output>) => boolean
@@ -29,7 +29,7 @@ class Finish extends Schema.TaggedClass<Finish>("Finish")("Finish", {}) {}
 class Ping extends Schema.TaggedClass<Ping>("Ping")("Ping", {}) {}
 class Cancel extends Schema.TaggedClass<Cancel>("Cancel")("Cancel", {}) {}
 class Timeout extends Schema.TaggedClass<Timeout>("Timeout")("Timeout", {}) {}
-describe("Machine.resume", () => {
+describe("LocalMachine.resume", () => {
   it.effect("starts only active compound and parallel invokes in deterministic order", () =>
     Effect.gen(function*() {
       class Root extends Schema.TaggedClass<Root>("Root")("Root", {}) {
@@ -141,7 +141,7 @@ describe("Machine.resume", () => {
           }
         }
       }
-      const ref = yield* Machine.resume(machine, snapshot)
+      const ref = yield* LocalMachine.resume(machine, snapshot)
       yield* Effect.forEach(Array.from({ length: 20 }), () => Effect.yieldNow, { discard: true })
       assert.deepStrictEqual(yield* ref.state, snapshot)
       assert.deepStrictEqual(yield* Ref.get(starts), ["root", "left", "right", "left-leaf", "right-leaf"])
@@ -245,7 +245,7 @@ describe("Machine.resume", () => {
             }
           }
         })
-      const ref = yield* Machine.resume(machine, initial)
+      const ref = yield* LocalMachine.resume(machine, initial)
       yield* sendAndWait(ref, new Advance({}), (snapshot) =>
         snapshot.state.state.path === "Root" &&
         snapshot.state.state.states.left.state.path === "Root.left.B" &&
@@ -299,7 +299,7 @@ describe("Machine.resume", () => {
         machine,
         yield* Machine.encodeSnapshot(machine, { path: "" as const, value: undefined, state: logical })
       )
-      const ref = yield* Machine.resume(machine, decoded)
+      const ref = yield* LocalMachine.resume(machine, decoded)
       assert.strictEqual(yield* ref.join, 9)
       assert.deepStrictEqual(yield* ref.snapshot, { status: "done", state: decoded, output: 9 })
       assert.instanceOf(yield* Effect.flip(ref.send(new Finish({}))), Machine.StoppedError)
@@ -360,7 +360,7 @@ describe("Machine.resume", () => {
           }
         })
       const decoded = yield* Machine.decodeSnapshot(machine, yield* Machine.encodeSnapshot(machine, logical))
-      const ref = yield* Machine.resume(machine, decoded)
+      const ref = yield* LocalMachine.resume(machine, decoded)
       assert.deepStrictEqual(yield* ref.state, decoded)
       yield* ref.send(new Ping({}))
       yield* Effect.yieldNow
@@ -390,7 +390,7 @@ describe("Machine.resume", () => {
           B: {}
         }
       })
-      const ref = yield* Machine.resume(machine, {
+      const ref = yield* LocalMachine.resume(machine, {
         path: "" as const,
         value: undefined,
         state: { path: "A" as const, value: new A({}) }
@@ -436,7 +436,7 @@ describe("Machine.resume", () => {
           TimedOut: {}
         }
       })
-      const first = yield* Machine.resume(machine, {
+      const first = yield* LocalMachine.resume(machine, {
         path: "" as const,
         value: undefined,
         state: { path: "Waiting" as const, value: new Waiting({}) }
@@ -446,7 +446,7 @@ describe("Machine.resume", () => {
       yield* TestClock.adjust("1 millis")
       yield* waitFor(first, (snapshot) => snapshot.state.state.path === "TimedOut")
       yield* first.stop
-      const second = yield* Machine.resume(machine, {
+      const second = yield* LocalMachine.resume(machine, {
         path: "" as const,
         value: undefined,
         state: { path: "Waiting" as const, value: new Waiting({}) }
@@ -494,7 +494,7 @@ describe("Machine.resume", () => {
           Loaded: {}
         }
       })
-      const ref = yield* Machine.resume(machine, {
+      const ref = yield* LocalMachine.resume(machine, {
         path: "" as const,
         value: undefined,
         state: { path: "Loading" as const, value: new Loading({}) }
@@ -553,7 +553,7 @@ describe("Machine.resume", () => {
           Failed: {}
         }
       })
-      const ref = yield* Machine.resume(machine, {
+      const ref = yield* LocalMachine.resume(machine, {
         path: "" as const,
         value: undefined,
         state: { path: "Loading" as const, value: new Loading({}) }
@@ -634,7 +634,7 @@ describe("Machine.resume", () => {
           ChildOutput: {}
         }
       })
-      const ref = yield* Machine.resume(machine, {
+      const ref = yield* LocalMachine.resume(machine, {
         path: "" as const,
         value: undefined,
         state: { path: "Parent" as const, value: new Parent({}) }
@@ -761,7 +761,7 @@ describe("Machine.resume", () => {
       ]
       for (const snapshot of forged) {
         const exit = yield* Effect.exit(
-          Machine.resume(machine, { path: "" as const, value: undefined, state: snapshot as typeof valid.state })
+          LocalMachine.resume(machine, { path: "" as const, value: undefined, state: snapshot as typeof valid.state })
         )
         assert(exit._tag === "Failure")
         const error = Cause.findErrorOption(exit.cause)
@@ -800,7 +800,7 @@ describe("Machine.resume", () => {
         [3, 0, -2]
       ] as const
       for (const suffix of suffixes) {
-        const uninterrupted = yield* Machine.start(machine)
+        const uninterrupted = yield* LocalMachine.start(machine)
         yield* sendAndWait(uninterrupted, new Add({ value: 5 }), (snapshot) => snapshot.state.state.value.value === 5)
         const boundary = yield* uninterrupted.state
         for (let index = 0; index < suffix.length; index++) {
@@ -811,7 +811,7 @@ describe("Machine.resume", () => {
         const expected = yield* uninterrupted.state
         const encoded = yield* Machine.encodeSnapshot(machine, boundary)
         const decoded = yield* Machine.decodeSnapshot(machine, JSON.parse(JSON.stringify(encoded)))
-        const resumed = yield* Machine.resume(machine, decoded)
+        const resumed = yield* LocalMachine.resume(machine, decoded)
         for (let index = 0; index < suffix.length; index++) {
           const next = 5 + suffix.slice(0, index + 1).reduce<number>((sum, value) =>
             sum + value, 0)

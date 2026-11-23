@@ -10,16 +10,16 @@ import * as PubSub from "effect/PubSub"
 import * as Stream from "effect/Stream"
 import * as SynchronizedRef from "effect/SynchronizedRef"
 import type * as Take from "effect/Take"
-import type { Inspection } from "../../Machine.js"
+import type { Inspection } from "../../LocalMachine.js"
 import { type ChildSelector } from "./childRegistry.js"
 import { StoppedError } from "./errors.js"
 import * as InspectionRuntime from "./inspectionRuntime.js"
+import { classifyOutcome } from "./observation.js"
 import {
   type AcknowledgedDelivery,
   AcknowledgedMessageTypeId,
   acknowledgedSend,
   childlessRuntime,
-  classifyOutcome,
   closeProcessMailbox,
   executionIsChildless,
   failAcknowledgedMessage,

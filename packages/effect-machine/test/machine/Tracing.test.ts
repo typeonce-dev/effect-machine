@@ -1,6 +1,6 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Cause, Deferred, Effect, Exit, Option, Stream } from "effect"
-import { Machine } from "../../src/index.js"
+import { LocalMachine } from "../../src/index.js"
 import { Events, observedMachine, recordingTracer } from "../fixtures/observability.js"
 
 describe("Invocation tracing", () => {
@@ -12,7 +12,7 @@ describe("Invocation tracing", () => {
         Deferred.succeed(entered, undefined).pipe(Effect.andThen(Effect.never)),
         "Application.work"
       )
-      const ref = yield* Machine.start(observedMachine(work)).pipe(Effect.withTracer(tracer))
+      const ref = yield* LocalMachine.start(observedMachine(work)).pipe(Effect.withTracer(tracer))
       yield* ref.send(Events.Start())
       yield* Deferred.await(entered)
       yield* ref.send(Events.Finish())
@@ -48,7 +48,7 @@ describe("Invocation tracing", () => {
         assert.strictEqual(span.status._tag, "Started")
         finalized = true
       })))
-      const ref = yield* Machine.start(observedMachine(work)).pipe(Effect.withTracer(tracer))
+      const ref = yield* LocalMachine.start(observedMachine(work)).pipe(Effect.withTracer(tracer))
       yield* ref.send(Events.Start())
       yield* ref.join
       assert.strictEqual(finalized, true)
@@ -75,7 +75,7 @@ describe("Invocation tracing", () => {
         ),
         Stream.ensuring(Deferred.succeed(consumed, undefined))
       )
-      const ref = yield* Machine.start(observedMachine(Effect.never, stream)).pipe(
+      const ref = yield* LocalMachine.start(observedMachine(Effect.never, stream)).pipe(
         Effect.withTracer(tracer),
         Effect.withTracerEnabled(false)
       )

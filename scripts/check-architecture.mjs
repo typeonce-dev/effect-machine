@@ -5,7 +5,7 @@ import ts from "typescript"
 const ruleDescriptions = {
   ARCH001: "Public entrypoints may only expose public modules",
   ARCH002: "Public modules may only reach internals through their designated implementation seam",
-  ARCH003: "Core internals may only refer back to Machine through type-only imports",
+  ARCH003: "Core internals may only refer back to Machine and LocalMachine through type-only imports",
   ARCH004: "The planner may not depend on process or runtime execution",
   ARCH005: "Machine semantic layers may only depend inward",
   ARCH006: "The runtime may not depend on machine semantics or process orchestration",
@@ -15,7 +15,7 @@ const ruleDescriptions = {
   ARCH011: "Internal directories may not use barrel modules",
   ARCH012: "Internal filenames must describe their responsibility without a machine prefix",
   ARCH013: "Public implementation bindings must declare their API signature",
-  ARCH014: "Host-neutral modules may not depend on the local runtime, directly or transitively"
+  ARCH014: "The model and the Cluster host may not depend on the local runtime, directly or transitively"
 }
 
 const normalizePath = (path) => path.split(sep).join("/")
@@ -94,6 +94,12 @@ const collectEdges = (program, rootDirectory) => {
         ts.isStringLiteral(node.arguments[0])
       ) {
         addEdge(node.arguments[0], false, node)
+      } else if (
+        ts.isImportTypeNode(node) &&
+        ts.isLiteralTypeNode(node.argument) &&
+        ts.isStringLiteral(node.argument.literal)
+      ) {
+        addEdge(node.argument.literal, true, node)
       }
       ts.forEachChild(node, visit)
     }
@@ -178,13 +184,13 @@ const collectCycleDiagnostics = (program, rootDirectory, runtimeEdges) => {
   return diagnostics
 }
 
-// Type-only edges count, because a host-neutral contract may not name a local
-// runtime type either. Public modules end the search: internals refer back to
-// them for types, and those types describe every host.
-const findInternalPath = (edges, source, targets) => {
+// Type-only edges count, because the model may not name a local runtime type
+// either. Independent modules end the search: each reports its own edges, so one
+// violation is reported once, where it enters.
+const findLocalRuntimePath = (edges, source, localRuntimeModules, isIndependent) => {
   const adjacency = new Map()
   for (const edge of edges) {
-    if (!edge.source.startsWith("src/internal/") || !edge.target.startsWith("src/internal/")) continue
+    if (!edge.source.startsWith("src/") || !edge.target.startsWith("src/")) continue
     const next = adjacency.get(edge.source) ?? []
     next.push(edge.target)
     adjacency.set(edge.source, next)
@@ -194,7 +200,8 @@ const findInternalPath = (edges, source, targets) => {
   while (queue.length > 0) {
     const path = queue.shift()
     const last = path[path.length - 1]
-    if (targets.has(last)) return path
+    if (localRuntimeModules.has(last)) return path
+    if (isIndependent(last)) continue
     for (const next of adjacency.get(last) ?? []) {
       if (visited.has(next)) continue
       visited.add(next)
@@ -248,12 +255,27 @@ export const checkArchitecture = ({
   ])
   const localRuntimeModules = new Set([
     ...runtimeModules,
+    "src/LocalMachine.ts",
     "src/internal/machine/childRegistry.ts",
     "src/internal/machine/commandRuntime.ts",
     "src/internal/machine/inspectionRuntime.ts",
     "src/internal/machine/invocation.ts",
     "src/internal/machine/process.ts"
   ])
+  // Hosts a local machine, so it depends on the local runtime by design.
+  const atomHostModules = new Set(["src/internal/machine/atom.ts"])
+  // Every other machine internal is independent of the local runtime, so a new
+  // module is checked unless it is declared to belong to a host above.
+  const isIndependent = (path) =>
+    path === "src/Machine.ts" ||
+    path.startsWith("src/unstable/cluster/") ||
+    (path.startsWith("src/internal/machine/") && !localRuntimeModules.has(path) && !atomHostModules.has(path))
+  const independentKind = (path) =>
+    path.startsWith("src/unstable/cluster/") || basename(path).startsWith("cluster")
+      ? "Cluster host module"
+      : hostNeutralModules.has(path)
+      ? "Host-neutral module"
+      : "Model module"
   const diagnostics = []
   const entrypoints = new Set([
     "src/index.ts",
@@ -263,6 +285,7 @@ export const checkArchitecture = ({
   ])
   const implementationSeams = new Map([
     ["src/Machine.ts", new Set(["src/internal/machine/machine.ts"])],
+    ["src/LocalMachine.ts", new Set(["src/internal/machine/process.ts"])],
     ["src/testing/MachineTest.ts", new Set([
       "check", "verification", "runtime", "arbitrary", "finiteModel", "referenceModel", "invariant",
       "runtimeInvariant", "exploration", "probe", "trace", "format"
@@ -350,15 +373,15 @@ export const checkArchitecture = ({
   }
 
   for (const edge of edges) {
-    if (hostNeutralModules.has(edge.source)) {
-      const path = findInternalPath(edges, edge.target, localRuntimeModules)
+    if (isIndependent(edge.source)) {
+      const path = findLocalRuntimePath(edges, edge.target, localRuntimeModules, isIndependent)
       if (path !== undefined) {
         diagnostics.push(diagnostic(
           "ARCH014",
           edge.sourceFile,
           edge.node,
           edge.source,
-          `Host-neutral module depends on the local runtime through ${path.join(" -> ")}`
+          `${independentKind(edge.source)} depends on the local runtime through ${path.join(" -> ")}`
         ))
       }
     }
@@ -388,7 +411,7 @@ export const checkArchitecture = ({
     }
     if (
       edge.source.startsWith("src/internal/machine/") &&
-      edge.target === "src/Machine.ts" &&
+      (edge.target === "src/Machine.ts" || edge.target === "src/LocalMachine.ts") &&
       !edge.typeOnly
     ) {
       diagnostics.push(diagnostic(
@@ -396,7 +419,7 @@ export const checkArchitecture = ({
         edge.sourceFile,
         edge.node,
         edge.source,
-        "Core internal back-reference to Machine must be type-only"
+        `Core internal back-reference to ${basename(edge.target, ".ts")} must be type-only`
       ))
     }
     if (

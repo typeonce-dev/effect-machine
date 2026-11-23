@@ -1,6 +1,6 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Effect, Schema } from "effect"
-import { Machine } from "../../src/index.js"
+import { LocalMachine, Machine } from "../../src/index.js"
 describe("compound target selection", () => {
   it.effect("selects a compound target with descendant values from the compound scope", () =>
     Effect.gen(function*() {
@@ -162,7 +162,7 @@ describe("compound target selection", () => {
           updates: []
         }]
       }])
-      const ref = yield* Machine.start(machine)
+      const ref = yield* LocalMachine.start(machine)
       for (let index = 0; index < 5; index += 1) {
         yield* Effect.yieldNow
       }

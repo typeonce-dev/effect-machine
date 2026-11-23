@@ -1,7 +1,7 @@
 import { strict as assert } from "node:assert"
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
-import { dirname, join } from "node:path"
+import { dirname, join, relative } from "node:path"
 import { afterEach, test } from "node:test"
 import { checkArchitecture } from "./check-architecture.mjs"
 
@@ -98,7 +98,7 @@ test("rejects value back-edges and execution-layer inversions", () => {
     "src/internal/testing/machine/arbitrary.ts": "export const arbitrary = 1",
     "src/consumer.ts": 'import { arbitrary } from "./internal/testing/machine/arbitrary.js"\nvoid arbitrary'
   })
-  assert.deepEqual(rules(root), ["ARCH007", "ARCH003", "ARCH004", "ARCH005", "ARCH006"])
+  assert.deepEqual(rules(root), ["ARCH007", "ARCH003", "ARCH004", "ARCH005", "ARCH014", "ARCH006"])
 })
 
 test("rejects outward machine semantic dependencies", () => {
@@ -107,7 +107,7 @@ test("rejects outward machine semantic dependencies", () => {
     "src/internal/machine/protocol.ts": "export const decode = 1",
     "src/internal/machine/invocation.ts": "export const invoke = 1"
   })
-  assert.deepEqual(rules(root), ["ARCH005", "ARCH005"])
+  assert.deepEqual(rules(root), ["ARCH005", "ARCH005", "ARCH014"])
 })
 
 test("enforces semantic boundaries for each runtime strategy and shared protocol", () => {
@@ -117,7 +117,7 @@ test("enforces semantic boundaries for each runtime strategy and shared protocol
       [`src/internal/machine/${module}.ts`]: 'import type { value } from "./process.js"\nexport const run: typeof value = 1',
       "src/internal/machine/process.ts": "export const value = 1"
     })
-    assert.deepEqual(new Set(rules(root)), new Set(["ARCH004", "ARCH005", "ARCH006"]))
+    assert.deepEqual(new Set(rules(root)), new Set(["ARCH004", "ARCH005", "ARCH006", "ARCH014"]))
   }
 })
 
@@ -145,25 +145,124 @@ test("keeps host-neutral invocation modules independent of the local runtime", (
   }
 })
 
-test("follows transitive dependencies of host-neutral modules and stops at public modules", () => {
-  const transitive = makeProject({
-    "src/internal/machine/invocationResolution.ts": 'import { helper } from "./helper.js"\nexport const resolve = helper',
-    "src/internal/machine/helper.ts": 'export { local as helper } from "./process.js"',
+const localRuntimeModules = [
+  "src/LocalMachine",
+  "src/internal/machine/childRegistry",
+  "src/internal/machine/commandRuntime",
+  "src/internal/machine/inspectionRuntime",
+  "src/internal/machine/invocation",
+  "src/internal/machine/process",
+  "src/internal/machine/runtime",
+  "src/internal/machine/runtimeCompiled",
+  "src/internal/machine/runtimeGeneric",
+  "src/internal/machine/runtimeProtocol"
+]
+
+const relativeModule = (from, to) => {
+  const path = relative(dirname(from), to)
+  return path.startsWith(".") ? path : `./${path}`
+}
+
+test("keeps the model and the Cluster host independent of every local runtime module", () => {
+  const sources = [
+    "src/Machine",
+    "src/internal/machine/machine",
+    "src/internal/machine/planner",
+    "src/internal/machine/configuration",
+    "src/internal/machine/topology",
+    "src/internal/machine/serialization",
+    "src/internal/machine/protocol",
+    "src/internal/machine/executionPlan",
+    "src/internal/machine/addedLater",
+    "src/unstable/cluster/ClusterMachine",
+    "src/internal/machine/cluster",
+    "src/internal/machine/clusterAddedLater"
+  ]
+  const root = makeProject({
+    ...Object.fromEntries(localRuntimeModules.map((local) => [`${local}.ts`, "export type Local = 1"])),
+    ...Object.fromEntries(sources.map((source) => [
+      `${source}.ts`,
+      localRuntimeModules.map((local, index) =>
+        `import type { Local as Local${index} } from "${relativeModule(source, local)}.js"\nexport type Independent${index} = Local${index}`
+      ).join("\n")
+    ]))
+  })
+  const reported = checkArchitecture({ rootDirectory: root }).filter((diagnostic) => diagnostic.rule === "ARCH014")
+  assert.deepEqual(
+    new Set(reported.map(({ message, path }) => `${path} ${message.split(" through ")[1]}`)),
+    new Set(sources.flatMap((source) => localRuntimeModules.map((local) => `${source}.ts ${local}.ts`)))
+  )
+})
+
+test("counts import types as type-only dependencies", () => {
+  const root = makeProject({
+    "src/internal/machine/planner.ts": 'export type Plan = import("./process.js").Local',
+    "src/internal/machine/process.ts": "export type Local = 1"
+  })
+  assert.deepEqual(rules(root), ["ARCH005", "ARCH014"])
+})
+
+test("reports a dependency of the model on the local runtime once, where it enters", () => {
+  const messages = (root) =>
+    checkArchitecture({ rootDirectory: root }).map(({ message, path, rule }) => ({ message, path, rule }))
+
+  const throughAnotherModule = makeProject({
+    "src/internal/machine/invocationResolution.ts": 'import { helper } from "../helper.js"\nexport const resolve = helper',
+    "src/internal/helper.ts": 'export { local as helper } from "./machine/process.js"',
     "src/internal/machine/process.ts": "export const local = 1"
   })
-  assert.deepEqual(checkArchitecture({ rootDirectory: transitive }).map(({ message, rule }) => ({ message, rule })), [{
+  assert.deepEqual(messages(throughAnotherModule), [{
     rule: "ARCH014",
+    path: "src/internal/machine/invocationResolution.ts",
     message: "Host-neutral module depends on the local runtime through " +
-      "src/internal/machine/helper.ts -> src/internal/machine/process.ts"
+      "src/internal/helper.ts -> src/internal/machine/process.ts"
   }])
 
-  const throughPublicTypes = makeProject({
+  const throughAnotherHost = makeProject({
+    "src/Machine.ts": 'import type { Bridge } from "./unstable/reactivity/AtomMachine.js"\nexport interface Machine { readonly bridge: Bridge }',
+    "src/unstable/reactivity/AtomMachine.ts": 'export type { Bridge } from "../../internal/machine/atom.js"',
+    "src/internal/machine/atom.ts": 'import type { Local } from "./process.js"\nexport type Bridge = Local',
+    "src/internal/machine/process.ts": "export type Local = 1"
+  })
+  assert.deepEqual(messages(throughAnotherHost), [{
+    rule: "ARCH014",
+    path: "src/Machine.ts",
+    message: "Model module depends on the local runtime through src/unstable/reactivity/AtomMachine.ts -> " +
+      "src/internal/machine/atom.ts -> src/internal/machine/process.ts"
+  }])
+
+  const throughTheModel = makeProject({
     "src/Machine.ts": 'import * as internal from "./internal/machine/machine.js"\nexport interface Machine {}\nexport const make: () => Machine = internal.make',
     "src/internal/machine/machine.ts": 'export { make } from "./process.js"',
     "src/internal/machine/process.ts": "export const make = () => ({})",
-    "src/internal/machine/invocationResolution.ts": 'import type { Machine } from "../../Machine.js"\nexport type Resolve = (machine: Machine) => void'
+    "src/internal/machine/planner.ts": 'import type { Machine } from "../../Machine.js"\nexport type Plan = (machine: Machine) => void',
+    "src/internal/machine/clusterInstance.ts": 'import type { Machine } from "../../Machine.js"\nexport type Make = (machine: Machine) => void'
   })
-  assert.deepEqual(rules(throughPublicTypes), [])
+  assert.deepEqual(messages(throughTheModel), [{
+    rule: "ARCH014",
+    path: "src/internal/machine/machine.ts",
+    message: "Model module depends on the local runtime through src/internal/machine/process.ts"
+  }])
+})
+
+test("lets the local host and the Atom host depend on the local runtime and the model", () => {
+  const root = makeProject({
+    "src/Machine.ts": "export interface Machine {}",
+    "src/LocalMachine.ts": 'import * as internal from "./internal/machine/process.js"\nimport type { Machine } from "./Machine.js"\nexport const start: (machine: Machine) => void = internal.start',
+    "src/internal/machine/process.ts": 'import type { Machine } from "../../Machine.js"\nexport const start = (_machine: Machine) => {}',
+    "src/internal/machine/atom.ts": 'import type * as LocalMachine from "../../LocalMachine.js"\nimport { start } from "./process.js"\nexport const make: typeof LocalMachine.start = start',
+    "src/unstable/reactivity/AtomMachine.ts": 'import * as internal from "../../internal/machine/atom.js"\nimport type * as LocalMachine from "../../LocalMachine.js"\nexport const make: typeof LocalMachine.start = internal.make'
+  })
+  assert.deepEqual(rules(root), [])
+})
+
+test("keeps the public local host behind its implementation seam", () => {
+  const root = makeProject({
+    "src/LocalMachine.ts": 'import * as internal from "./internal/machine/process.js"\nimport { run } from "./internal/machine/runtime.js"\nexport const start = internal.start\nexport const direct: number = run',
+    "src/internal/machine/process.ts": 'import { direct } from "../../LocalMachine.js"\nexport const start = () => direct',
+    "src/internal/machine/runtime.ts": "export const run = 1"
+  })
+  assert.deepEqual(new Set(rules(root)), new Set(["ARCH002", "ARCH003", "ARCH009", "ARCH013"]))
 })
 
 test("keeps the halves split out of the invocation host outside inner layers", () => {

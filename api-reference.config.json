@@ -86,14 +86,11 @@
           ]
         },
         {
-          "title": "Run and observe",
-          "description": "Start or resume an executable machine and subscribe to its state over time.",
+          "title": "Observe a running machine",
+          "description": "Follow the snapshots and outcomes of a machine through a reference from any host.",
           "entries": [
             {
-              "declaration": "start"
-            },
-            {
-              "declaration": "resume"
+              "declaration": "waitFor"
             },
             {
               "declaration": "watch"
@@ -271,8 +268,34 @@
         "make",
         "plan",
         "planInitial",
-        "resume",
         "state",
+        "waitFor"
+      ]
+    },
+    {
+      "export": "./LocalMachine",
+      "source": "src/LocalMachine.ts",
+      "barrel": ".",
+      "referenceSections": [
+        {
+          "title": "Run a machine in memory",
+          "description": "Start, resume, or prepare an executable machine owned by a Scope.",
+          "entries": [
+            {
+              "declaration": "start"
+            },
+            {
+              "declaration": "resume"
+            },
+            {
+              "declaration": "prepare"
+            }
+          ]
+        }
+      ],
+      "examples": [
+        "prepare",
+        "resume",
         "start"
       ]
     },

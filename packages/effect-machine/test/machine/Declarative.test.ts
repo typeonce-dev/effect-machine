@@ -1,6 +1,6 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Context, Effect, Schema } from "effect"
-import { Machine } from "../../src/index.js"
+import { LocalMachine, Machine } from "../../src/index.js"
 const Root = Machine.state({
   states: {
     Idle: {},
@@ -39,7 +39,7 @@ describe("declarative transitions", () => {
         }
       })
       const count = yield* Effect.gen(function*() {
-        const ref = yield* Machine.start(machine)
+        const ref = yield* LocalMachine.start(machine)
         return yield* ref.join
       }).pipe(Effect.provideService(Value, { count: 7 }))
       assert.strictEqual(count, 7)
@@ -72,7 +72,7 @@ describe("declarative transitions", () => {
           Done: { output: ({ state }) => state.value }
         }
       })
-      const ref = yield* Machine.start(machine)
+      const ref = yield* LocalMachine.start(machine)
       assert.strictEqual(yield* ref.join, 1)
     }))
   it.effect("allows inline entry into a choice with inspectable destinations", () =>
@@ -233,7 +233,7 @@ describe("declarative transitions", () => {
         }
       })
       const value = yield* Effect.gen(function*() {
-        const ref = yield* Machine.start(machine)
+        const ref = yield* LocalMachine.start(machine)
         return yield* ref.join
       }).pipe(Effect.provideService(Database, { count: 5 }))
       assert.strictEqual(value, 7)

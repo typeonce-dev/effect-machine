@@ -1,7 +1,7 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Deferred, Effect, Option, Schema, Stream } from "effect"
 import { TestClock } from "effect/testing"
-import { Machine } from "../../src/index.js"
+import { LocalMachine, Machine } from "../../src/index.js"
 import {
   prepareResumedWithRuntimeStrategy,
   prepareWithRuntimeStrategy
@@ -172,8 +172,8 @@ describe("queued invocation generations", () => {
             Effect.gen(function*() {
               const holdEntered = yield* Deferred.make<void>()
               const releaseHold = yield* Deferred.make<void>()
-              const oldSent = yield* Deferred.make<Machine.Inspection.EventSent>()
-              const oldProcessed = yield* Deferred.make<Machine.Inspection.EventProcessed>()
+              const oldSent = yield* Deferred.make<LocalMachine.Inspection.EventSent>()
+              const oldProcessed = yield* Deferred.make<LocalMachine.Inspection.EventProcessed>()
               const fenceProcessed = yield* Deferred.make<void>()
               const barrier: Machine.MachineTarget<void> = {
                 id: "barrier",
@@ -293,11 +293,11 @@ const makeGate = Effect.fn(function*() {
   return { target, entered: Deferred.await(entered), release: Deferred.succeed(released, undefined) }
 })
 
-const makeRecorder = Effect.fn(function*(inspection: Stream.Stream<Machine.Inspection.Event>) {
-  const seen: Array<Machine.Inspection.Event> = []
+const makeRecorder = Effect.fn(function*(inspection: Stream.Stream<LocalMachine.Inspection.Event>) {
+  const seen: Array<LocalMachine.Inspection.Event> = []
   const waiters: Array<{
-    readonly predicate: (event: Machine.Inspection.Event) => boolean
-    readonly deferred: Deferred.Deferred<Machine.Inspection.Event>
+    readonly predicate: (event: LocalMachine.Inspection.Event) => boolean
+    readonly deferred: Deferred.Deferred<LocalMachine.Inspection.Event>
   }> = []
   yield* inspection.pipe(
     Stream.runForEach((record) => {
@@ -310,23 +310,25 @@ const makeRecorder = Effect.fn(function*(inspection: Stream.Stream<Machine.Inspe
     }),
     Effect.forkScoped({ startImmediately: true })
   )
-  const next = <A extends Machine.Inspection.Event>(predicate: (event: Machine.Inspection.Event) => event is A) =>
+  const next = <A extends LocalMachine.Inspection.Event>(
+    predicate: (event: LocalMachine.Inspection.Event) => event is A
+  ) =>
     Effect.suspend(() => {
       const found = seen.find(predicate)
       if (found !== undefined) return Effect.succeed(found)
-      const deferred = Deferred.makeUnsafe<Machine.Inspection.Event>()
+      const deferred = Deferred.makeUnsafe<LocalMachine.Inspection.Event>()
       waiters.push({ predicate, deferred })
       return Deferred.await(deferred) as Effect.Effect<A>
     })
   // The first invocation outcome of `type` from `path` queued after this call.
   const queuedOutcome = (path: string, type: string) => {
     const from = seen.length
-    return next((record): record is Machine.Inspection.EventSent =>
+    return next((record): record is LocalMachine.Inspection.EventSent =>
       record._tag === "EventSent" && seen.indexOf(record) >= from && isOutcome(record.event, path, type)
     )
   }
-  const processed = (sent: Machine.Inspection.EventSent) =>
-    next((record): record is Machine.Inspection.EventProcessed =>
+  const processed = (sent: LocalMachine.Inspection.EventSent) =>
+    next((record): record is LocalMachine.Inspection.EventProcessed =>
       record._tag === "EventProcessed" && record.deliveryId === sent.deliveryId
     )
   return { queuedOutcome, processed }

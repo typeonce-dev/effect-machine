@@ -28,7 +28,7 @@ import {
   Snowflake
 } from "effect/cluster"
 import { TestClock } from "effect/testing"
-import { Machine } from "../../../src/index.js"
+import { LocalMachine, Machine } from "../../../src/index.js"
 import { ClusterMachine } from "../../../src/unstable/cluster/index.js"
 class Count extends Schema.TaggedClass<Count>("Count")("Count", {
   value: Schema.NumberFromString
@@ -3449,7 +3449,7 @@ describe("ClusterMachine", () => {
             const localWork = makeWork()
             const localMachine = machine(localWork) as Machine.Machine<any, any, any, never, never, never>
             const localStates: Array<readonly [string, unknown]> = []
-            const ref = yield* Machine.start(localMachine as any) as Effect.Effect<
+            const ref = yield* LocalMachine.start(localMachine as any) as Effect.Effect<
               Machine.MachineRef<any, any, any, any>
             >
             const observer = yield* Effect.forkChild(

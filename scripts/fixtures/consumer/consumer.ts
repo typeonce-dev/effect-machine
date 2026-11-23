@@ -1,4 +1,4 @@
-import { Machine } from "@typeonce/effect-machine"
+import { LocalMachine, Machine } from "@typeonce/effect-machine"
 import { ClusterMachine } from "@typeonce/effect-machine/cluster"
 import { AtomMachine } from "@typeonce/effect-machine/reactivity"
 import { MachineTest } from "@typeonce/effect-machine/testing"
@@ -52,6 +52,7 @@ const machine = Machine.make({
     Done: {}
   }
 })
+const started = LocalMachine.start(machine)
 const atoms = AtomMachine.make(machine)
 const idleAtom = AtomMachine.select(atoms, "Idle")
 const loadingAtom = AtomMachine.matches(atoms, "Loading")
@@ -70,6 +71,7 @@ const loaded: HandledEvent = { _tag: "Loaded", value: "ready" }
 // @ts-expect-error Internal events cannot cross the public input boundary.
 const invalidInput: InputEvent = loaded
 void [
+  started,
   atoms,
   idleAtom,
   loadingAtom,

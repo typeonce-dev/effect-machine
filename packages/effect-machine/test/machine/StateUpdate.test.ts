@@ -1,6 +1,6 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Effect, Schema } from "effect"
-import { Machine } from "../../src/index.js"
+import { LocalMachine, Machine } from "../../src/index.js"
 import { MachineTest } from "../../src/testing/index.js"
 describe("state value updates", () => {
   it.effect("changes topology and one retained owner atomically", () =>
@@ -161,7 +161,7 @@ describe("state value updates", () => {
           }
         }
       })
-      const ref = yield* Machine.start(machine)
+      const ref = yield* LocalMachine.start(machine)
       for (let index = 0; index < 5; index += 1) {
         yield* Effect.yieldNow
       }
@@ -679,7 +679,7 @@ describe("state value updates", () => {
           }
         }
       })
-      const ref = yield* Machine.start(machine)
+      const ref = yield* LocalMachine.start(machine)
       for (let index = 0; index < 5; index += 1) {
         yield* Effect.yieldNow
       }

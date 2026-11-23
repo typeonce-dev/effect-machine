@@ -1,6 +1,6 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Effect, Fiber, Schema } from "effect"
-import { Machine } from "../../src/index.js"
+import { LocalMachine, Machine } from "../../src/index.js"
 import { MachineTest } from "../../src/testing/index.js"
 class Counter extends Schema.TaggedClass<Counter>("ProbeCounter")("Counter", {
   count: Schema.Number
@@ -60,7 +60,7 @@ const machine = Machine.make({
 describe("MachineTest probe", () => {
   it.effect("fails closed when a reference has no acknowledged statechart capability", () =>
     Effect.gen(function*() {
-      const ref = yield* Machine.start(machine)
+      const ref = yield* LocalMachine.start(machine)
       const publicOnlyRef: typeof ref = {
         id: ref.id,
         sessionId: ref.sessionId,
@@ -80,7 +80,7 @@ describe("MachineTest probe", () => {
     }))
   it.effect("acknowledges ignored, targetless, and changing macrosteps without sampling snapshots", () =>
     Effect.gen(function*() {
-      const ref = yield* Machine.start(machine)
+      const ref = yield* LocalMachine.start(machine)
       const probe = yield* MachineTest.probe(machine, ref)
       const ignored = yield* probe.sendAndAwait(new Ignored({}))
       assert.strictEqual(ignored.handled, false)
@@ -117,7 +117,7 @@ describe("MachineTest probe", () => {
     }))
   it.effect("fails acknowledged sends after termination instead of leaving a waiter suspended", () =>
     Effect.gen(function*() {
-      const ref = yield* Machine.start(machine)
+      const ref = yield* LocalMachine.start(machine)
       const probe = yield* MachineTest.probe(machine, ref)
       yield* ref.stop
       const error = yield* Effect.flip(probe.sendAndAwait(new Ignored({})))
@@ -125,7 +125,7 @@ describe("MachineTest probe", () => {
     }))
   it.effect("does not retract an accepted event when its waiting fiber is interrupted", () =>
     Effect.gen(function*() {
-      const ref = yield* Machine.start(machine)
+      const ref = yield* LocalMachine.start(machine)
       const probe = yield* MachineTest.probe(machine, ref)
       const sending = yield* probe.sendAndAwait(new Increment({ amount: 3 })).pipe(
         Effect.forkChild({ startImmediately: true })
@@ -172,7 +172,7 @@ describe("MachineTest probe", () => {
           }
         }
       })
-      const ref = yield* Machine.start(invokeMachine)
+      const ref = yield* LocalMachine.start(invokeMachine)
       const probe = yield* MachineTest.probe(invokeMachine, ref)
       const loaded = yield* probe.sendAndAwait(new Load({}))
       assert.strictEqual(loaded.after.state.path, "Loading")
@@ -181,7 +181,7 @@ describe("MachineTest probe", () => {
     }))
   it.effect("reports a processing failure to the exact acknowledged send", () =>
     Effect.gen(function*() {
-      const ref = yield* Machine.start(machine)
+      const ref = yield* LocalMachine.start(machine)
       const probe = yield* MachineTest.probe(machine, ref)
       const error = yield* Effect.flip(
         probe.sendAndAwait({ _tag: "Increment", amount: "invalid" } as unknown as Increment)

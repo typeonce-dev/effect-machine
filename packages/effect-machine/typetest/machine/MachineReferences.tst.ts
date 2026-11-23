@@ -1,7 +1,7 @@
 import { Effect, Schema, Stream } from "effect"
 import { AtomRegistry } from "effect/reactivity"
 import { describe, expect, it } from "tstyche"
-import { Machine } from "../../src/index.js"
+import { LocalMachine, Machine } from "../../src/index.js"
 import { MachineTest } from "../../src/testing/index.js"
 import { ClusterMachine } from "../../src/unstable/cluster/index.js"
 import { AtomMachine } from "../../src/unstable/reactivity/index.js"
@@ -202,7 +202,7 @@ describe("machine reference event channels", () => {
     })
   })
   it("infers emitted streams through MachineRef and AtomMachine", () => {
-    const preparedEffect = Machine.prepare(childMachine)
+    const preparedEffect = LocalMachine.prepare(childMachine)
     type Prepared = Effect.Success<typeof preparedEffect>
     expect<Prepared["emissions"]>().type.toBe<Stream.Stream<Published | ValuedPublished>>()
     expect<Prepared["changes"]>().type.toBe<
@@ -214,7 +214,7 @@ describe("machine reference event channels", () => {
         Machine.InfiniteTransitionError | Machine.MachineSchemaDecodeError | Machine.StartupError | Machine.StoppedError
       >
     >()
-    const started = Machine.start(childMachine)
+    const started = LocalMachine.start(childMachine)
     type Ref = Effect.Success<typeof started>
     expect<Ref["emissions"]>().type.toBe<Stream.Stream<Published | ValuedPublished>>()
     const atom = AtomMachine.make(childMachine)
@@ -323,8 +323,8 @@ describe("machine reference event channels", () => {
         }
       }
     })
-    expect(Machine.start).type.not.toBeCallableWith(requiredParentMachine)
-    expect(Machine.prepare).type.not.toBeCallableWith(requiredParentMachine)
+    expect(LocalMachine.start).type.not.toBeCallableWith(requiredParentMachine)
+    expect(LocalMachine.prepare).type.not.toBeCallableWith(requiredParentMachine)
     expect(Machine.planInitial).type.not.toBeCallableWith(requiredParentMachine)
     expect(Machine.plan).type.not.toBeCallableWith(
       requiredParentMachine,
@@ -337,7 +337,7 @@ describe("machine reference event channels", () => {
       null as unknown as Machine.Snapshot<typeof states>,
       Events.Ping()
     )
-    expect(Machine.resume).type.not.toBeCallableWith(
+    expect(LocalMachine.resume).type.not.toBeCallableWith(
       requiredParentMachine,
       null as unknown as Machine.Snapshot<typeof states>
     )

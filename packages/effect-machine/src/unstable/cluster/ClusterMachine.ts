@@ -438,7 +438,7 @@ export interface ClusterMachine<
 }
 
 type MachineServices<M extends Machine.Machine.Any> =
-  | Machine.ExecutionServices<Machine.Machine.Services<M>>
+  | Exclude<Machine.Machine.Services<M>, Machine.MachineRuntime>
   | Machine.Machine.SnapshotDecodingServices<Machine.Machine.States<M>>
   | Machine.Machine.SnapshotEncodingServices<Machine.Machine.States<M>>
 
@@ -549,7 +549,7 @@ export const layerMemory: Layer.Layer<Storage> = internal.layerMemory
  *
  * An entity that comes up starts the work of its stored state again. Input
  * mappers run again against that state, with `Machine.InitialEvent` as their
- * event, as they do for `Machine.resume`. An invocation that ended while its
+ * event, as they do for `LocalMachine.resume`. An invocation that ended while its
  * state stayed active is not started again until its state is entered again.
  *
  * Work that ends in a way the model does not handle, an outcome that cannot be
@@ -725,7 +725,7 @@ export const make: <
     InputEvents,
     ParentEvents
   >,
-  | Machine.ExecutionServices<R>
+  | Exclude<R, Machine.MachineRuntime>
   | Machine.Machine.SnapshotDecodingServices<States>
   | Machine.Machine.SnapshotEncodingServices<States>
 > = internal.make

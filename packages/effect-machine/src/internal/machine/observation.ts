@@ -1,4 +1,4 @@
-/** Observation of current and subsequent published runtime snapshots. */
+/** Observation of the snapshots and outcomes published through the reference contract. */
 import * as Cause from "effect/Cause"
 import * as Effect from "effect/Effect"
 import { dual } from "effect/Function"
@@ -6,6 +6,71 @@ import * as Option from "effect/Option"
 import * as Stream from "effect/Stream"
 import type * as Machine from "../../Machine.js"
 import { StoppedError } from "./errors.js"
+
+export const classifyOutcome = <State, Error, Output>(
+  snapshot: Machine.RuntimeSnapshot<State, Error, Output>
+): Machine.RuntimeOutcome<State, Error, Output> | undefined => {
+  switch (snapshot.status) {
+    case "active": {
+      return undefined
+    }
+    case "done": {
+      return {
+        _tag: "Done",
+        output: snapshot.output,
+        snapshot
+      }
+    }
+    case "error": {
+      const failure = snapshot.cause.reasons.find(Cause.isFailReason)
+      if (failure !== undefined) {
+        return {
+          _tag: "Failure",
+          error: failure.error,
+          cause: snapshot.cause,
+          snapshot
+        }
+      }
+      const defect = snapshot.cause.reasons.find(Cause.isDieReason)
+      if (defect !== undefined) {
+        return {
+          _tag: "Defect",
+          defect: defect.defect,
+          cause: snapshot.cause,
+          snapshot
+        }
+      }
+      const interrupted = snapshot.cause.reasons.find(Cause.isInterruptReason)
+      if (interrupted !== undefined) {
+        return {
+          _tag: "Interrupted",
+          cause: snapshot.cause,
+          snapshot
+        }
+      }
+      return {
+        _tag: "Cause",
+        cause: snapshot.cause,
+        snapshot
+      }
+    }
+    case "stopped": {
+      return {
+        _tag: "Stopped",
+        snapshot
+      }
+    }
+  }
+}
+
+export const watch = <State, Event, Error = never, Output = never>(
+  ref: Machine.MachineRef<State, Event, Error, Output>
+): Stream.Stream<Machine.RuntimeOutcome<State, Error, Output>> =>
+  ref.changes.pipe(
+    Stream.filter((snapshot) => snapshot.status !== "active"),
+    Stream.map((snapshot) => classifyOutcome(snapshot)!),
+    Stream.take(1)
+  )
 
 export const waitFor: typeof Machine.waitFor = dual(2, <State, Event, Error, Output, Emitted>(
   ref: Machine.MachineRef<State, Event, Error, Output, Emitted>,

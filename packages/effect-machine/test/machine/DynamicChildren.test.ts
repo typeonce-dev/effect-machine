@@ -1,6 +1,6 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Effect, Fiber, Option, Schema, Stream } from "effect"
-import { Machine } from "../../src/index.js"
+import { LocalMachine, Machine } from "../../src/index.js"
 const waitForPath = <
   State extends Machine.Machine.CompoundSnapshot<string, unknown, Machine.Machine.AtomicSnapshot<string, unknown>>,
   Event,
@@ -155,7 +155,7 @@ describe("dynamic child machines", () => {
           }
         }
       })
-      const parent = yield* Machine.start(parentMachine, [
+      const parent = yield* LocalMachine.start(parentMachine, [
         { id: "p-1", production: 10 },
         { id: "p-2", production: 20 }
       ])
@@ -306,7 +306,7 @@ describe("dynamic child machines", () => {
           DuplicateRejected: {}
         }
       })
-      const parent = yield* Machine.start(parentMachine)
+      const parent = yield* LocalMachine.start(parentMachine)
       yield* waitForPath(parent, "DuplicateRejected").pipe(Effect.timeout("1 second"))
       assert(Option.isSome(yield* parent.child(Child("same"))))
       yield* parent.stop
@@ -378,7 +378,7 @@ describe("dynamic child machines", () => {
           }
         }
       })
-      const parent = yield* Machine.start(parentMachine)
+      const parent = yield* LocalMachine.start(parentMachine)
       assert(scoped !== undefined)
       assert(second !== undefined)
       assert.deepStrictEqual((yield* scoped.state).state, {
@@ -477,7 +477,7 @@ describe("dynamic child machines", () => {
           Ready: {}
         }
       })
-      const parent = yield* Machine.start(parentMachine)
+      const parent = yield* LocalMachine.start(parentMachine)
       yield* waitForPath(parent, "Ready").pipe(Effect.timeout("1 second"))
       const kept = yield* parent.child(Unit("kept"))
       assert(Option.isSome(kept))

@@ -69,7 +69,7 @@ Read [the first example](./ai-docs/src/10_modeling/01_create-a-machine.ts).
 \`\`\`ts
 const machine = Machine.make({}).handle({})
 \`\`\``,
-    guideModule: site.modules[0]
+    guideModules: [site.modules[0]]
   })
   assert.match(html, /class="navigation-agent-guide is-current"/)
   assert.match(html, /class="navigation-guide" href="\/docs\/guide">Machine API<\/a>/)
@@ -121,6 +121,7 @@ test("normalizes root, project, and custom-domain base paths", () => {
 })
 
 const site = {
+  guideModules: [],
   basePath: "/docs/",
   description: "Schema-first state machines",
   githubStars: 1_234,
@@ -314,7 +315,7 @@ test("renders declaration-owned usage sections and documented members in the gui
     label: "Machine",
     route: "Machine"
   }
-  const html = renderGuidePage({ ...site, modules: [module], guideModule: module })
+  const html = renderGuidePage({ ...site, modules: [module], guideModules: [module] })
   assert.doesNotMatch(html, />Machine configuration<\//)
   assert.match(html, /href="#make-usage-machine-configuration-configuration">Configuration<\/a>/)
   assert.match(html, /<h4 id="make-usage-machine-configuration-configuration">Configuration<\/h4>/)
@@ -327,6 +328,40 @@ test("renders declaration-owned usage sections and documented members in the gui
   assert.ok(html.indexOf("id-title") < html.indexOf("Copy id signature"))
   assert.ok(html.indexOf("Copy id signature") < html.indexOf("Stable definition identifier."))
   assert.ok(html.indexOf(">Source</") < html.indexOf("Copy id signature"))
+})
+
+test("renders the guide across every module with reference sections, in module order", () => {
+  const guideModule = (label, name) => {
+    const declaration = {
+      name,
+      kind: "variable",
+      description: `${label}.${name}`,
+      examples: [],
+      see: [],
+      usageSections: []
+    }
+    return {
+      api: {
+        description: label,
+        referenceSections: [{
+          title: `${label} section`,
+          description: "",
+          entries: [{ origin: { type: "declaration", name, kind: "variable" }, api: declaration }]
+        }],
+        groups: [{ category: "constructors", declarations: [declaration] }]
+      },
+      export: `./${label}`,
+      label,
+      route: label
+    }
+  }
+  const modules = [guideModule("Model", "make"), guideModule("Host", "make")]
+  const html = renderGuidePage({ ...site, modules, guideModules: modules })
+  assert.match(html, /<span>2 sections<\/span>/)
+  assert.match(html, /<code>\.\/Model<\/code>\s*<code>\.\/Host<\/code>/)
+  assert.ok(html.indexOf("Model section") < html.indexOf("Host section"))
+  assert.match(html, /<h3 id="make">make<\/h3>/)
+  assert.match(html, /<h3 id="make-2">make<\/h3>/)
 })
 
 test("renders the ordered workflow only in the standalone guide", () => {
@@ -403,7 +438,7 @@ test("renders the ordered workflow only in the standalone guide", () => {
     route: "Machine"
   }
 
-  const guideSite = { ...site, modules: [module], guideModule: module }
+  const guideSite = { ...site, modules: [module], guideModules: [module] }
   const guideHtml = renderGuidePage(guideSite)
   assert.ok(guideHtml.indexOf("Define state topology") < guideHtml.indexOf('id="states"'))
   assert.ok(guideHtml.indexOf('id="states"') < guideHtml.indexOf("Create the definition"))
@@ -492,7 +527,7 @@ test("keeps the internal Effect channel out of the homepage label", () => {
 
 test("generates manifest, robots, and sitemap URLs from the deployment base", () => {
   const manifest = siteManifest(site)
-  const siteWithGuide = { ...site, guideModule: site.modules[0] }
+  const siteWithGuide = { ...site, guideModules: [site.modules[0]] }
   assert.equal(manifest.start_url, "/docs/")
   assert.equal(manifest.icons[2].purpose, "maskable")
   assert.match(renderRobots(site), /Sitemap: https:\/\/docs\.example\.com\/docs\/sitemap\.xml/)

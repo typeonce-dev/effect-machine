@@ -1,6 +1,6 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Effect, Schema } from "effect"
-import { Machine } from "../../src/index.js"
+import { LocalMachine, Machine } from "../../src/index.js"
 import { MachineTest } from "../../src/testing/index.js"
 import { makeMermaidRenderer } from "./visualization/mermaid.js"
 import { makeTextRenderer } from "./visualization/text.js"
@@ -160,7 +160,7 @@ describe("Machine target and update into a choice", () => {
 
   it.effect("applies the update and the chosen target in a running machine", () =>
     Effect.gen(function*() {
-      const ref = yield* Machine.start(machine)
+      const ref = yield* LocalMachine.start(machine)
       yield* ref.send(Events.Bump())
       const { state } = yield* Machine.waitFor(ref, ({ state }) => state.state.path === "High")
       assert.strictEqual(state.value.count, 1)

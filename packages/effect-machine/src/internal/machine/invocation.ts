@@ -14,7 +14,6 @@ import type * as InvocationEvent from "./invocationEvent.js"
 import * as InvocationOutcome from "./invocationOutcome.js"
 import * as InvocationResolution from "./invocationResolution.js"
 import * as Runtime from "./runtimeProtocol.js"
-import { type ChildMachineLogicSlot, ChildMachineLogicTypeId } from "./symbols.js"
 
 type AnyProcessLogic = Runtime.ProcessLogic<any, any, any, any, any, any>
 
@@ -109,9 +108,6 @@ const isProgram = (invocation: InvocationResolution.ResolvedInvocation): invocat
   }
 }
 
-const childSource = (invocation: InvocationResolution.ChildInvocation): (input?: unknown) => AnyProcessLogic =>
-  (invocation.child as unknown as ChildMachineLogicSlot)[ChildMachineLogicTypeId]
-
 const traced = (
   scope: Runtime.ProcessScope<any>,
   invocation: ProgramInvocation,
@@ -182,18 +178,14 @@ const spawn = (
       ? () => programLogic(scope, invocation, generation)
       : invocation._tag === "Logic"
       ? invocation.logic
-      // A zero-input child has no entry-context dependency. Reuse the
-      // descriptor's source function so each running parent does not retain a
-      // redundant closure.
-      : invocation.input === undefined
-      ? childSource(invocation)
-      : () => childSource(invocation)(invocation.input?.()),
+      // The runtime builds the child's logic from this description, so a
+      // running parent retains no closure for it.
+      : invocation,
     {
       key: makeKey(invocation.path, invocation.id),
       path: invocation.path,
       id: childId(invocation),
       duplicateId: invocation.id,
-      ...(invocation._tag === "Child" ? { descriptor: invocation.child } : undefined),
       ...(isProgram(invocation) ? { activityKind: invocation._tag } : undefined),
       sendParent: (isCurrent, event) => isCurrent() ? scope.self.send(event) : Effect.void,
       // The work starts while the event that entered its state is processed,

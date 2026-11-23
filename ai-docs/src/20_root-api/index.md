@@ -43,7 +43,7 @@ const Document = Machine.make({
 })
 ```
 
-Start with `Machine.start(Document, { locale: "en", documentId: "intro" })`.
+Start with `LocalMachine.start(Document, { locale: "en", documentId: "intro" })`.
 Root construction runs before its initial child construction. Both receive the
 same validated input. `documentId` belongs only to Loading; it need not be stored
 in root data. Input is not retained as a reset value on the machine or snapshot.
@@ -183,7 +183,7 @@ history: {
 
 A fallback must explicitly construct a complete tree containing its owner,
 including required ancestors and parallel siblings. Its root data is state data,
-not startup input. `Machine.resume` restores a validated snapshot without rerunning
+not startup input. `LocalMachine.resume` restores a validated snapshot without rerunning
 startup constructors.
 
 `guard` declines before construction. A resolver may return `select.decline()` only

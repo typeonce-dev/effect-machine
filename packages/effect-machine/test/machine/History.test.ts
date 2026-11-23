@@ -1,6 +1,6 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Cause, Effect, Fiber, Schema, Stream } from "effect"
-import { Machine } from "../../src/index.js"
+import { LocalMachine, Machine } from "../../src/index.js"
 class Checkout extends Schema.TaggedClass<Checkout>("Checkout")("Checkout", {
   orderId: Schema.String
 }) {}
@@ -639,7 +639,7 @@ describe("Machine history states", () => {
       const expected = yield* Machine.plan(machine, left.next, new ResumeDeep({}))
       const encoded = yield* Machine.encodeSnapshot(machine, left.next)
       const decoded = yield* Machine.decodeSnapshot(machine, JSON.parse(JSON.stringify(encoded)))
-      const ref = yield* Machine.resume(machine, decoded)
+      const ref = yield* LocalMachine.resume(machine, decoded)
       assert.deepStrictEqual((yield* ref.state).history, left.next.history)
       yield* sendAndWaitForPath(ref, new ResumeDeep({}), "checkout")
       assert.deepStrictEqual(yield* ref.state, expected.next)
@@ -750,7 +750,7 @@ describe("Machine history states", () => {
         nestedHistoryMachine,
         JSON.parse(JSON.stringify(encodedFirstUse))
       )
-      const firstUseRef = yield* Machine.resume(nestedHistoryMachine, decodedFirstUse)
+      const firstUseRef = yield* LocalMachine.resume(nestedHistoryMachine, decodedFirstUse)
       yield* sendAndWaitForPath(firstUseRef, new DefaultEditor({}), "workspace.editor.writing")
       const firstUseState = yield* firstUseRef.state
       assert.deepStrictEqual((firstUseState as any).state.states.editor.value, new Editor({ documentId: "fallback" }))
@@ -766,7 +766,7 @@ describe("Machine history states", () => {
         nestedHistoryMachine,
         JSON.parse(JSON.stringify(encodedRecorded))
       )
-      const recordedRef = yield* Machine.resume(nestedHistoryMachine, decodedRecorded)
+      const recordedRef = yield* LocalMachine.resume(nestedHistoryMachine, decodedRecorded)
       yield* sendAndWaitForPath(recordedRef, new DefaultEditor({}), "workspace.editor.preview")
       const restored = yield* recordedRef.state
       assert.deepStrictEqual((restored as any).state.states.editor, nestedParallelSnapshot.state.states.editor)
@@ -801,7 +801,7 @@ describe("Machine history states", () => {
     Effect.gen(function*() {
       const lifecycle: Array<string> = []
       const machine = makeCheckoutMachine(checkoutShipping("order-1", "Main Street"), undefined, lifecycle)
-      const actor = yield* Machine.start(machine)
+      const actor = yield* LocalMachine.start(machine)
       yield* Effect.yieldNow
       yield* sendAndWaitForPath(actor, new EnterVerifying({}), "checkout.payment.verifying")
       yield* Effect.yieldNow

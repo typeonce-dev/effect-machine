@@ -83,18 +83,20 @@ Start the implemented machine at the application boundary and send events
 through the exported descriptor:
 
 ```ts
+import { LocalMachine } from "@typeonce/effect-machine"
 import { Effect } from "effect"
 
 const program = Effect.scoped(Effect.gen(function*() {
-  const counter = yield* Machine.start(CounterMachine)
+  const counter = yield* LocalMachine.start(CounterMachine)
 
   yield* counter.send(CounterEvents.Start())
   yield* counter.send(CounterEvents.Increment())
 }))
 ```
 
-`Machine.start` requires a `Scope`. Closing it stops the machine and everything
-it owns; use `ref.stop` to stop earlier.
+`LocalMachine` runs a machine in memory. `LocalMachine.start` requires a `Scope`.
+Closing it stops the machine and everything it owns; use `ref.stop` to stop
+earlier.
 
 ### Make impossible states unrepresentable
 
@@ -353,11 +355,11 @@ through its own runtime, as described in
 Do not start a promise inside a transition callback. A transition has no
 lifetime in which to own that work. A state does.
 
-Invoked work starts while the event that entered its state is processed. It
-runs in the sender's turn until it first suspends, and its outcome is handled
-in a later turn, even when the work completes without suspending. A state that
-invokes work is therefore always observed before its outcome leaves it. Put a
-browser call that requires user activation, such as `window.open` or
+A local machine, including one hosted by `AtomMachine`, starts invoked work while
+the event that entered its state is processed. The work runs in the sender's turn
+until it first suspends, and its outcome is handled in a later turn, even when the
+work completes without suspending. A state that invokes work is therefore always
+observed before its outcome leaves it. Put a browser call that requires user activation, such as `window.open` or
 `navigator.clipboard.writeText`, in the first step of the invoked Effect:
 
 ```ts

@@ -1,6 +1,6 @@
 import { assert } from "@effect/vitest"
 import { Effect } from "effect"
-import { Machine } from "../../../../src/index.js"
+import { LocalMachine, Machine } from "../../../../src/index.js"
 import * as Configuration from "../../../../src/internal/machine/configuration.js"
 import * as ExecutionPlan from "../../../../src/internal/machine/executionPlan.js"
 import * as Process from "../../../../src/internal/machine/process.js"
@@ -118,7 +118,7 @@ export const prepareWithRuntimeStrategy = (
 ): Effect.Effect<
   {
     readonly emissions: import("effect/Stream").Stream<unknown>
-    readonly inspection: import("effect/Stream").Stream<Machine.Inspection.Event>
+    readonly inspection: import("effect/Stream").Stream<LocalMachine.Inspection.Event>
     readonly start: Effect.Effect<Machine.MachineRef<any, any, any, any>, unknown>
   },
   unknown
@@ -137,7 +137,7 @@ export const prepareResumedWithRuntimeStrategy = (
   strategy: "generic" | "compiled"
 ): Effect.Effect<
   {
-    readonly inspection: import("effect/Stream").Stream<Machine.Inspection.Event>
+    readonly inspection: import("effect/Stream").Stream<LocalMachine.Inspection.Event>
     readonly start: Effect.Effect<Machine.MachineRef<any, any, any, any>, unknown>
   },
   unknown

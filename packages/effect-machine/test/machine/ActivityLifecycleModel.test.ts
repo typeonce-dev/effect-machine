@@ -1,7 +1,7 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Deferred, Effect, Exit, Fiber, Schema, Stream } from "effect"
 import { TestClock } from "effect/testing"
-import { Machine } from "../../src/index.js"
+import { LocalMachine, Machine } from "../../src/index.js"
 import {
   ActivityFailure,
   countRecords,
@@ -97,7 +97,7 @@ describe("machine activity lifecycle model", () => {
               }
             }
           })
-          const actor = yield* Machine.start(machine)
+          const actor = yield* LocalMachine.start(machine)
           let active = false
           for (const command of commands) {
             switch (command) {
@@ -173,7 +173,7 @@ describe("machine activity lifecycle model", () => {
           }
         }
       })
-      const actor = yield* Machine.start(machine)
+      const actor = yield* LocalMachine.start(machine)
       assert.strictEqual(yield* actor.join, 1)
       const records = yield* probe.records
       assert.strictEqual(countRecords(records, "starts", "immediate"), 1)
@@ -235,7 +235,7 @@ describe("machine activity lifecycle model", () => {
           Done: {}
         }
       })
-      const actor = yield* Machine.start(machine)
+      const actor = yield* LocalMachine.start(machine)
       yield* probe.takeStarted
       yield* actor.send(new Restart({}))
       yield* probe.takeStarted
@@ -365,7 +365,7 @@ describe("machine activity lifecycle model", () => {
           }
         }
       })
-      const actor = yield* Machine.start(machine)
+      const actor = yield* LocalMachine.start(machine)
       yield* probe.takeStarted
       yield* probe.takeStarted
       yield* sendAndWaitForActiveState(actor, new LeaveLeft({}), (state) =>
@@ -418,7 +418,7 @@ describe("machine activity lifecycle model", () => {
           Done: {}
         }
       })
-      const actor = yield* Machine.start(machine)
+      const actor = yield* LocalMachine.start(machine)
       yield* probe.takeStarted
       yield* sendAndWaitForActiveState(actor, new Leave({}), (state) => state.state.path === "Idle")
       yield* TestClock.adjust("2 hours")
@@ -472,7 +472,7 @@ describe("machine activity lifecycle model", () => {
           }
         }
       })
-      const actor = yield* Machine.start(machine)
+      const actor = yield* LocalMachine.start(machine)
       const first = yield* probe.takeStarted
       const second = yield* probe.takeStarted
       const failing = first.owner === "failing" ? first : second
@@ -522,7 +522,7 @@ describe("machine activity lifecycle model", () => {
           }
         }
       })
-      const actor = yield* Machine.start(machine)
+      const actor = yield* LocalMachine.start(machine)
       yield* probe.takeStarted
       yield* probe.takeStarted
       yield* actor.stop

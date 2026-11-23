@@ -1,6 +1,6 @@
 import { Effect, Schema } from "effect"
 import { describe, expect, it } from "vitest"
-import { Machine } from "../../src/index.js"
+import { LocalMachine, Machine } from "../../src/index.js"
 const CounterRoot = Machine.state({ fields: { count: Schema.Number } })
 const Events = Machine.events({ Increment: { by: Schema.Number } })
 const counter = Machine.make({
@@ -57,7 +57,7 @@ it("retains root data while moving among children", async () => {
 it("starts a root and acknowledges deferred inputs", async () => {
   const { MachineTest } = await import("../../src/testing/index.js")
   await Effect.runPromise(Effect.scoped(Effect.gen(function*() {
-    const ref = yield* Machine.start(counter)
+    const ref = yield* LocalMachine.start(counter)
     const probe = yield* MachineTest.probe(counter, ref)
     const step = yield* probe.sendAndAwait(Events.Increment({ by: 4 }))
     expect(step.event).toEqual({ _tag: "Increment", by: 4 })
