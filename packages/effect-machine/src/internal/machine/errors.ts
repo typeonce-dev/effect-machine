@@ -68,8 +68,15 @@ export class ChildAlreadyExistsError extends Data.TaggedError("ChildAlreadyExist
 }> {}
 
 /**
- * Error returned when standalone action execution attempts an operation that
- * requires a managed machine process.
+ * Error raised when invoked work uses an operation that requires a local
+ * machine process, on a host that does not provide one.
+ *
+ * **Details**
+ *
+ * `ClusterMachine` raises it when work reads `self.sessionId`, calls
+ * `self.send`, or calls an operation of `children`. It is a defect rather than a
+ * typed failure, because the same work runs correctly on a local machine.
+ * `operation` names the refused operation.
  *
  * @category errors
  * @since 0.4.0

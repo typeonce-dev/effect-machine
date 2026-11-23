@@ -147,9 +147,7 @@ describe("Machine", () => {
     ],
     [],
     "down",
-    "SignIn",
-    never,
-    never
+    "SignIn"
   >
   type SignedOutContext = Machine.Machine.HandlerContext<
     {
@@ -160,9 +158,7 @@ describe("Machine", () => {
     ],
     [],
     "up.auth.signedOut",
-    "SignIn",
-    never,
-    never
+    "SignIn"
   >
   type AuthContext = Machine.Machine.HandlerContext<
     {
@@ -173,9 +169,7 @@ describe("Machine", () => {
     ],
     [],
     "up.auth",
-    "SignIn",
-    never,
-    never
+    "SignIn"
   >
   type NestedIdleContext = Machine.Machine.HandlerContext<
     {
@@ -186,9 +180,7 @@ describe("Machine", () => {
     ],
     [],
     "root.idle",
-    "SignIn",
-    never,
-    never
+    "SignIn"
   >
   type NestedActiveContext = Machine.Machine.HandlerContext<
     {
@@ -199,9 +191,7 @@ describe("Machine", () => {
     ],
     [],
     "root.work.auth.signedOut",
-    "SignIn",
-    never,
-    never
+    "SignIn"
   >
   it("states preserves literal state paths", () => {
     expect<
@@ -3694,8 +3684,6 @@ describe("Machine", () => {
       ],
       typeof Schema.Void,
       "signedIn",
-      never,
-      never,
       never,
       never,
       "signedIn",

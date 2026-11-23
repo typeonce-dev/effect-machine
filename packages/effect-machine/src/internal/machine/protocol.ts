@@ -447,13 +447,6 @@ const decodeEventConstructionSync = (
   return event
 }
 
-export const decodeInput = <Input extends Schema.Top>(
-  machine: Machine.Any,
-  schema: Input,
-  value: unknown
-): Effect.Effect<Input["Type"], MachineSchemaDecodeError> =>
-  decodeBoundary<Input["Type"]>(machine, schema, value, { boundary: "input" })
-
 export const decodeEvent = <const Events extends ReadonlyArray<Machine.TaggedSchema>>(
   machine: Machine.Any,
   event: unknown

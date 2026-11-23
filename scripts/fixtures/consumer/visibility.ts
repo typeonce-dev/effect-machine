@@ -11,17 +11,15 @@ export type Documented = [
   Machine.Machine.Any,
   Machine.Machine.CompoundSnapshot<"", undefined, Machine.Machine.AtomicSnapshot<"Idle", undefined>>,
   Machine.Machine.EventProtocol.Any,
-  Machine.Machine.HistoryDefaultEntry<Schemas, readonly [], readonly [], "Idle">,
-  Machine.Machine.InvokeOwned<Schemas, readonly [], readonly [], "Idle">,
-  Machine.Machine.ChoiceStateConfig<Schemas, readonly [], readonly [], never>
+  Machine.Machine.HistoryDefaultEntry<Schemas, readonly [], readonly [], "Idle">
 ]
 
 // @ts-expect-error Handler evidence is private to `.handle`.
 export type HandlerTreeEvidence = Machine.Machine.HandlerTreeEvidence<Schemas, {}>
 // @ts-expect-error Configuration normalization is private to `.handle`.
 export type NormalizeObjectConfig = Machine.Machine.NormalizeObjectConfig<{}, {}>
-// @ts-expect-error Stored invocation configuration is private to `.handle`.
-export type StoredInvokeConfig = Machine.Machine.StoredInvokeConfig<Schemas, readonly [], readonly [], "Idle">
+// @ts-expect-error Resolved invocation sources are private to `.handle`.
+export type ResolvedInvoke = Machine.Machine.ResolvedInvoke<{}, "load">
 // @ts-expect-error Handler error inference is private to `.handle`.
 export type HandlerConfigError = Machine.Machine.HandlerConfigError<{}>
 // @ts-expect-error Compile-error messages are private to `.handle`.

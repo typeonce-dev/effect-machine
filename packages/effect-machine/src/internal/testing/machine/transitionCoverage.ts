@@ -52,7 +52,7 @@ export const sameTransitionTrigger = (
 }
 
 export interface TransitionCoverageCollector<M extends AnyMachine> {
-  readonly observeMicrostep: (microstep: Microstep<M, unknown>) => void
+  readonly observeMicrostep: (microstep: Microstep<M>) => void
   readonly summary: () => MachineTransitionCoverage<M>
 }
 

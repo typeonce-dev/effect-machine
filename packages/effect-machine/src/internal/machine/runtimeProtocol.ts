@@ -65,9 +65,6 @@ export const isSnapshotObservable = (value: unknown): value is SnapshotObservabl
   typeof value === "object" && value !== null && snapshotObserver in value
 
 /** @internal */
-const sendParentOverride: unique symbol = Symbol.for("effect/Machine/sendParentOverride")
-
-/** @internal */
 export const acknowledgedSend: unique symbol = Symbol.for("effect/Machine/acknowledgedSend")
 
 /** @internal */
@@ -512,7 +509,6 @@ interface ProcessSpawn<OwnerEvent = unknown> {
       readonly [activeSnapshotObserver]?: (
         snapshot: Extract<RuntimeSnapshot<ChildState, ChildError, ChildOutput>, { readonly status: "active" }>
       ) => Effect.Effect<void>
-      readonly [sendParentOverride]?: (event: unknown) => Effect.Effect<void, StoppedError>
     }
   ): Effect.Effect<
     MachineRef<ChildState, ChildEvent, ChildError, ChildOutput>,
@@ -1234,7 +1230,6 @@ export const makeChildRuntimeSync = (
       readonly [activeSnapshotObserver]?: (
         snapshot: Extract<RuntimeSnapshot<ChildState, ChildError, ChildOutput>, { readonly status: "active" }>
       ) => Effect.Effect<void>
-      readonly [sendParentOverride]?: (event: unknown) => Effect.Effect<void, StoppedError>
     }
   ): Effect.Effect<
     MachineRef<ChildState, ChildEvent, ChildError, ChildOutput>,
@@ -1252,7 +1247,6 @@ export const makeChildRuntimeSync = (
       readonly [activeSnapshotObserver]?: (
         snapshot: Extract<RuntimeSnapshot<any, any, any>, { readonly status: "active" }>
       ) => Effect.Effect<void>
-      readonly [sendParentOverride]?: (event: unknown) => Effect.Effect<void, StoppedError>
     } | { readonly input?: unknown }
   ): Effect.Effect<MachineRef<any, any, any, any>, any, any> {
     const descriptor = typeof logicOrChild === "object" && logicOrChild !== null &&
@@ -1272,7 +1266,6 @@ export const makeChildRuntimeSync = (
         readonly [activeSnapshotObserver]?: (
           snapshot: Extract<RuntimeSnapshot<any, any, any>, { readonly status: "active" }>
         ) => Effect.Effect<void>
-        readonly [sendParentOverride]?: (event: unknown) => Effect.Effect<void, StoppedError>
       } | undefined
       : { id: descriptor.id, descriptor }
     const token = Symbol()
@@ -1294,9 +1287,6 @@ export const makeChildRuntimeSync = (
         ...(spawnOptions?.[activeSnapshotObserver] === undefined
           ? undefined
           : { onSnapshot: spawnOptions[activeSnapshotObserver] }),
-        ...(spawnOptions?.[sendParentOverride] === undefined
-          ? undefined
-          : { sendParent: spawnOptions[sendParentOverride] }),
         onReady: (child, requestChildStop) =>
           Effect.sync(() => {
             startedChild = child

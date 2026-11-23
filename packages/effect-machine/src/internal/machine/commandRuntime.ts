@@ -5,19 +5,17 @@
  */
 
 import * as Effect from "effect/Effect"
-import type { Machine, Runtime } from "../../Machine.js"
+import type { Machine, MachineSchemaDecodeError, StoppedError } from "../../Machine.js"
 import type { RuntimeCommand } from "./command.js"
-import { decodeEmit, decodeEvent } from "./protocol.js"
+import { decodeEmit } from "./protocol.js"
 import type { ProcessScope } from "./runtimeProtocol.js"
 
-export const makeLiveRuntime = <Events, Emits>(
-  machine: Machine.Any,
-  scope: ProcessScope<Events>
-): Runtime<Events, Emits> => ({
-  raise: (event) =>
-    decodeEvent(machine, event).pipe(
-      Effect.flatMap((event) => scope.sendTo(scope.self, event as Events))
-    ),
+/** Publishes emissions planned by a machine to its process observers. */
+export interface LiveRuntime {
+  readonly emit: (event: unknown) => Effect.Effect<void, MachineSchemaDecodeError | StoppedError>
+}
+
+export const makeLiveRuntime = <Events>(machine: Machine.Any, scope: ProcessScope<Events>): LiveRuntime => ({
   emit: (event) =>
     decodeEmit(machine, event).pipe(
       Effect.flatMap((event) => scope.emit(event))
@@ -33,9 +31,9 @@ export const runCommands = <Event>(
       ? scope.sendTo(command.target as never, command.event)
       : scope.stopChild(command.child as never), { discard: true })
 
-export const runEmittedEvents = <Events, Emits>(
-  events: Iterable<Emits>,
-  runtime: Runtime<Events, Emits>
+export const runEmittedEvents = (
+  events: Iterable<unknown>,
+  runtime: LiveRuntime
 ) =>
   Effect.all(
     Array.from(events, (event) => runtime.emit(event)),

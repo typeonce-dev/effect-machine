@@ -76,7 +76,7 @@ interface IndexedExecutionDescriptor {
     number,
     ReadonlyMap<PropertyKey, {
       readonly sourceIndex: number
-      readonly transition: MicrostepTransition<any, any, any, any>
+      readonly transition: MicrostepTransition<any, any>
     }>
   >
 }
@@ -137,7 +137,7 @@ const compileIndexedExecutionDescriptor = (
   const finalPaths: Array<string> = []
   const transitionsByPath = new Map<
     PropertyKey,
-    ReadonlyMap<PropertyKey, MicrostepTransition<any, any, any, any>>
+    ReadonlyMap<PropertyKey, MicrostepTransition<any, any>>
   >()
 
   for (const node of machine.stateNodes.byPath.values() as Iterable<Machine.StateNode>) {
@@ -159,7 +159,7 @@ const compileIndexedExecutionDescriptor = (
     if (config?.on === undefined) {
       continue
     }
-    const byEvent = new Map<PropertyKey, MicrostepTransition<any, any, any, any>>()
+    const byEvent = new Map<PropertyKey, MicrostepTransition<any, any>>()
     for (const tag of Reflect.ownKeys(config.on)) {
       const transition = normalizeTransition(config.on[tag] as Parameters<typeof normalizeTransition>[0])
       if (transition !== undefined) {
@@ -192,13 +192,13 @@ const compileIndexedExecutionDescriptor = (
     number,
     ReadonlyMap<PropertyKey, {
       readonly sourceIndex: number
-      readonly transition: MicrostepTransition<any, any, any, any>
+      readonly transition: MicrostepTransition<any, any>
     }>
   >()
   for (const leafIndex of leafIndices) {
     const dispatch = new Map<PropertyKey, {
       readonly sourceIndex: number
-      readonly transition: MicrostepTransition<any, any, any, any>
+      readonly transition: MicrostepTransition<any, any>
     }>()
     const candidates = [leafIndex, ...ancestorIndices[leafIndex]!.slice().reverse()]
     for (const sourceIndex of candidates) {
@@ -432,14 +432,14 @@ const makeIndexedTransitionContext = (
   }
 }
 
-type IndexedSelectedTransition = SelectedTransition<any, any, any, IndexedTransitionContext> & {
+type IndexedSelectedTransition = SelectedTransition<any, IndexedTransitionContext> & {
   readonly sourceIndex: number
   readonly leafIndex: number
 }
 
 type IndexedEvaluatedTransition =
   & Omit<
-    EvaluatedTransition<any, IndexedEvent, any, any, IndexedTransitionContext>,
+    EvaluatedTransition<any, IndexedEvent, IndexedTransitionContext>,
     "selection"
   >
   & {
@@ -473,9 +473,9 @@ export interface ExecutionMacrostep<State = unknown> {
 
 const collectIndexedTransition = <Context>(
   machine: Machine.Any,
-  transition: TransitionHandler<any, any, any, Context>,
+  transition: TransitionHandler<any, Context>,
   context: Context,
-  evaluate?: NonNullable<MicrostepTransition<any, any, any, Context>["evaluate"]>
+  evaluate?: NonNullable<MicrostepTransition<any, Context>["evaluate"]>
 ) => {
   let commands: Array<RuntimeCommand> | undefined
   let raisedEvents: Array<IndexedEvent> | undefined

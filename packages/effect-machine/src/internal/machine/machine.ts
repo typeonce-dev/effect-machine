@@ -1092,19 +1092,6 @@ export const logic = <
   run: options.run
 })
 
-export const transition = <State, Event, Error = never, Requirements = never>(
-  initial: State,
-  transition: (state: State, event: Event) => Effect.Effect<State, Error, Requirements>
-): Logic<State, Event, Error, Requirements, never> =>
-  logic<State, Event, never, Error, Requirements>({
-    initial,
-    run: ({ receive, updateState }) =>
-      receive.pipe(
-        Effect.flatMap((event) => updateState((state) => transition(state, event))),
-        Effect.forever
-      )
-  })
-
 export const child = <const Id extends string, M extends Machine.Any>(
   id: Id,
   machine: M

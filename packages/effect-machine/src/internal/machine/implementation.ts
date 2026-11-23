@@ -5,7 +5,7 @@ import type { EventTransition } from "./transition.js"
 // Callback contexts are erased after the public builder checks their dependent
 // state/event types. Stored transitions are evaluated callbacks, not the public
 // selector factories accepted by Definition.handle.
-type Transition = EventTransition<any, any, any, any>
+type Transition = EventTransition<any, any>
 type Action = (context: any, enqueue: Enqueue<any, any>) => undefined
 
 export interface CapturedStateConfig {
@@ -20,7 +20,7 @@ export interface CapturedStateConfig {
   readonly output?: (context: any) => unknown
   readonly history?: Readonly<
     Record<string, {
-      readonly default: (context: any, enqueue: Enqueue<any, any>) => Machine.HandlerResult<any, any, any>
+      readonly default: (context: any, enqueue: Enqueue<any, any>) => Machine.HandlerResult<any>
     }>
   >
 }
