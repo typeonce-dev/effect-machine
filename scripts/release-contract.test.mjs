@@ -33,7 +33,11 @@ test("all Effect Machine packages release with the same version", async () => {
   )
 })
 
-test("Effect consumers accept stable 4.x while development versions stay synchronized", async () => {
+// `ClusterMachine` needs the fix to `Entity.keepAlive` that Effect released in
+// 4.1.5: on an older version, a machine silently loses crash recovery.
+const effectRange = "^4.1.5"
+
+test("Effect consumers accept stable 4.x from 4.1.5 while development versions stay synchronized", async () => {
   const [root, core, react, devtools] = await Promise.all([
     readJson("package.json"),
     readJson("packages/effect-machine/package.json"),
@@ -43,17 +47,17 @@ test("Effect consumers accept stable 4.x while development versions stay synchro
   const effect = root.devDependencies.effect
   assert.match(effect, /^4\.\d+\.\d+$/)
   for (const manifest of [core, react, devtools]) {
-    assert.equal(manifest.peerDependencies.effect, "^4.0.0")
+    assert.equal(manifest.peerDependencies.effect, effectRange)
     assert.equal(manifest.devDependencies.effect, effect)
   }
   assert.equal(root.devDependencies["@effect/vitest"], effect)
   assert.equal(core.devDependencies["@effect/vitest"], effect)
-  assert.equal(react.peerDependencies["@effect/atom-react"], "^4.0.0")
+  assert.equal(react.peerDependencies["@effect/atom-react"], effectRange)
   assert.equal(react.devDependencies["@effect/atom-react"], effect)
   for (const name of ["@effect/platform-browser", "@effect/platform-node", "@effect/platform-node-shared"]) {
     assert.equal(
       devtools.dependencies[name],
-      "^4.0.0",
+      effectRange,
       `${name} must accept the same stable Effect major as its peer`
     )
   }
