@@ -18,7 +18,6 @@ import * as internal from "../../internal/machine/cluster.js"
 import * as Protocol from "../../internal/machine/clusterProtocol.js"
 import { Accepted, Rejected, Storage } from "../../internal/machine/clusterProtocol.js"
 import type { EnsureExecutable } from "../../internal/machine/readiness.js"
-import type { ExcludeCompatibleRuntime } from "../../internal/machine/requirements.js"
 import type * as Machine from "../../Machine.js"
 
 type Snowflake = Snowflake.Snowflake
@@ -525,11 +524,7 @@ export interface ClusterMachine<
 }
 
 type MachineServices<M extends Machine.Machine.Any> =
-  | ExcludeCompatibleRuntime<
-    Machine.ExecutionServices<Machine.Machine.Services<M> | Machine.Machine.InitialServices<M>>,
-    Machine.Machine.Event<M>,
-    Machine.Machine.EmittedEvent<M>
-  >
+  | Machine.ExecutionServices<Machine.Machine.Services<M>>
   | Machine.Machine.SnapshotDecodingServices<Machine.Machine.States<M>>
   | Machine.Machine.SnapshotEncodingServices<Machine.Machine.States<M>>
 
@@ -831,8 +826,6 @@ export const make: <
   UnhandledStates extends Machine.Machine.StateIdentifier<States>,
   E,
   R,
-  InitialE,
-  InitialR,
   FinalStates extends Machine.Machine.StateIdentifier<States>,
   Output,
   Emits extends ReadonlyArray<Machine.Machine.TaggedSchema>,
@@ -849,8 +842,6 @@ export const make: <
       UnhandledStates,
       E,
       R,
-      InitialE,
-      InitialR,
       FinalStates,
       Output,
       Emits,
@@ -874,8 +865,6 @@ export const make: <
     UnhandledStates,
     E,
     R,
-    InitialE,
-    InitialR,
     FinalStates,
     Output,
     Emits,
@@ -883,11 +872,7 @@ export const make: <
     InputEvents,
     ParentEvents
   >,
-  | ExcludeCompatibleRuntime<
-    Machine.ExecutionServices<R | InitialR>,
-    Machine.Machine.EventOf<Events>,
-    Machine.Machine.EmittedEventOf<Emits>
-  >
+  | Machine.ExecutionServices<R>
   | Machine.Machine.SnapshotDecodingServices<States>
   | Machine.Machine.SnapshotEncodingServices<States>
 > = internal.make

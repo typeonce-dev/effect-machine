@@ -27,7 +27,6 @@ import type {
 import * as internal from "./internal/machine/machine.js"
 import { InitialEventTypeId } from "./internal/machine/machine.js"
 import type { EnsureExecutable } from "./internal/machine/readiness.js"
-import type { ExcludeCompatibleRuntime } from "./internal/machine/requirements.js"
 import type { MachineRuntime } from "./internal/machine/runtimeProtocol.js"
 import type * as StateDefinition from "./internal/machine/stateDefinition.js"
 import type * as Topology from "./internal/machine/topology.js"
@@ -171,8 +170,6 @@ export interface Machine<
   UnhandledStates extends Machine.StateIdentifier<States> = Machine.StateIdentifier<States>,
   E = never,
   R = never,
-  InitialE = never,
-  InitialR = never,
   FinalStates extends Machine.StateIdentifier<States> = never,
   Output = never,
   Emits extends ReadonlyArray<Machine.TaggedSchema> = readonly [],
@@ -189,8 +186,6 @@ export interface Machine<
     UnhandledStates,
     E,
     R,
-    InitialE,
-    InitialR,
     FinalStates,
     Output,
     Emits,
@@ -269,7 +264,7 @@ export interface Machine<
   readonly handlers: Readonly<Record<string, unknown>>
 
   /** @internal */
-  readonly initial: (...args: [...Machine.InputArgs<Input>]) => Machine.InitialResult<States, InitialE, InitialR>
+  readonly initial: (...args: [...Machine.InputArgs<Input>]) => Machine.InitialResult<States>
   /** @internal */
   readonly initialDefinition: Machine.InitialDefinition
 }
@@ -292,8 +287,6 @@ export interface Definition<
   States extends Machine.StateSchemas,
   Events extends ReadonlyArray<Machine.TaggedSchema>,
   Input extends Schema.Top = typeof Schema.Void,
-  InitialE = never,
-  InitialR = never,
   FinalStates extends Machine.StateIdentifier<States> = never,
   Output = never,
   Emits extends ReadonlyArray<Machine.TaggedSchema> = readonly [],
@@ -309,8 +302,6 @@ export interface Definition<
       Machine.StateIdentifier<States>,
       never,
       never,
-      InitialE,
-      InitialR,
       FinalStates,
       Output,
       Emits,
@@ -357,8 +348,6 @@ export interface Definition<
     Events,
     Emits,
     Input,
-    InitialE,
-    InitialR,
     FinalStates,
     Output,
     InputEvents,
@@ -419,8 +408,15 @@ export {
    */
   MachineSchemaEncodeError,
   /**
-   * Error returned when standalone action execution attempts an operation that
-   * requires a managed machine process.
+   * Error raised when invoked work uses an operation that requires a local
+   * machine process, on a host that does not provide one.
+   *
+   * **Details**
+   *
+   * `ClusterMachine` raises it when work reads `self.sessionId`, calls
+   * `self.send`, or calls an operation of `children`. It is a defect rather than
+   * a typed failure, because the same work runs correctly on a local machine.
+   * `operation` names the refused operation.
    *
    * @category errors
    * @since 0.4.0
@@ -467,82 +463,23 @@ export type {
   MachineRuntime
 } from "./internal/machine/runtimeProtocol.js"
 
-const RuntimeRequirementTypeId = "~effect/Machine/RuntimeRequirement"
-const ActionRequirementTypeId = "~effect/Machine/ActionRequirement"
-
 /**
- * Opaque marker used to keep staged action errors and services separate from
- * the Effect that plans a machine step.
+ * Resolves the services a host must provide to execute a machine.
  *
- * @category services
- * @since 0.4.0
- */
-export interface ActionRequirement<Error, Requirements> {
-  readonly [ActionRequirementTypeId]: {
-    readonly error: Types.Covariant<Error>
-    readonly requirements: Types.Covariant<Requirements>
-  }
-}
-
-/**
- * Extracts the typed error channel of staged machine actions.
+ * **When to use**
+ *
+ * Use when writing a generic host over a machine, to name the services that host
+ * requires from its environment.
+ *
+ * **Details**
+ *
+ * Removes {@link MachineRuntime} from the machine's requirements, because the
+ * running machine provides it.
  *
  * @category utility types
  * @since 0.4.0
  */
-export type ActionError<Requirements> = Requirements extends ActionRequirement<infer Error, any> ? Error : never
-
-/**
- * Extracts the service requirements of staged machine actions.
- *
- * @category utility types
- * @since 0.4.0
- */
-export type ActionServices<Requirements> = Requirements extends ActionRequirement<any, infer Services> ? Services
-  : never
-
-/**
- * Removes staged action requirements from machine planning services.
- *
- * @category utility types
- * @since 0.4.0
- */
-export type PlanningServices<Requirements> = Exclude<Requirements, ActionRequirement<any, any>>
-
-/**
- * Resolves all services needed to execute a machine at runtime.
- *
- * @category utility types
- * @since 0.4.0
- */
-export type ExecutionServices<Requirements> =
-  | Exclude<PlanningServices<Requirements>, MachineRuntime>
-  | Exclude<ActionServices<Requirements>, MachineRuntime>
-
-/**
- * Managed runtime capability used to deliver raised events and publish
- * emitted notifications.
- *
- * @category models
- * @since 0.4.0
- */
-export interface Runtime<in Events, in Emits> {
-  /**
-   * Queues an event for the current machine macrostep.
-   *
-   * @since 0.4.0
-   */
-  readonly raise: (event: Machine.EventInput<Events>) => Effect.Effect<void, MachineSchemaDecodeError | StoppedError>
-
-  /**
-   * Publishes an ephemeral notification to the running machine's observers.
-   *
-   * @since 0.4.0
-   */
-  readonly emit: (
-    event: Machine.EmittedEventInput<Emits>
-  ) => Effect.Effect<void, MachineSchemaDecodeError | StoppedError>
-}
+export type ExecutionServices<Requirements> = Exclude<Requirements, MachineRuntime>
 
 /**
  * Minimal typed target accepted by inter-machine send commands.
@@ -663,35 +600,6 @@ export type Command =
     readonly _tag: "Stop"
     readonly child: ChildMachine.Any | ChildAddress<never>
   }
-
-/**
- * Namespace containing type-level members associated with `Runtime`.
- *
- * @category models
- * @since 0.4.0
- */
-export declare namespace Runtime {
-  /**
-   * Opaque service requirement for a machine runtime capability.
-   *
-   * @category services
-   * @since 0.4.0
-   */
-  export interface Requirement<Events, Emits> {
-    readonly [RuntimeRequirementTypeId]: {
-      readonly events: Events
-      readonly emits: Emits
-    }
-  }
-}
-
-type IncompatibleRuntime<Requirements, Events, Emits> = Requirements extends Runtime.Requirement<
-  infer RequiredEvents,
-  infer RequiredEmits
-> ? IsAny<Requirements> extends true ? never
-  : [RequiredEvents] extends [Events] ? [RequiredEmits] extends [Emits] ? never : Requirements
-  : Requirements
-  : never
 
 type StateDefinitionError<
   Message extends string,
@@ -1773,9 +1681,7 @@ export declare namespace ChildMachine {
    * @since 0.20.0
    */
   export type StartError<Child extends Any> = Child extends ChildMachine<string, infer M> ?
-      | Machine.InitialError<M>
       | Machine.Error<M>
-      | ActionError<Machine.InitialServices<M> | Machine.Services<M>>
       | InfiniteTransitionError
       | MachineSchemaDecodeError
       | StartupError
@@ -1788,14 +1694,8 @@ export declare namespace ChildMachine {
    * @category utility types
    * @since 0.20.0
    */
-  export type StartRequirements<Child extends Any> = Child extends ChildMachine<string, infer M> ? Exclude<
-      ExcludeCompatibleRuntime<
-        Exclude<ExecutionServices<Machine.InitialServices<M> | Machine.Services<M>>, MachineRuntime>,
-        Machine.Event<M>,
-        Machine.EmittedEvent<M>
-      >,
-      Scope.Scope
-    >
+  export type StartRequirements<Child extends Any> = Child extends ChildMachine<string, infer M> ?
+    Exclude<ExecutionServices<Machine.Services<M>>, Scope.Scope>
     : never
 
   /**
@@ -1808,7 +1708,6 @@ export declare namespace ChildMachine {
       Machine.Snapshot<Machine.States<M>>,
       Machine.EventInput<Machine.InputEvent<M>>,
       | Machine.Error<M>
-      | ActionError<Machine.Services<M>>
       | InfiniteTransitionError
       | MachineSchemaDecodeError
       | StoppedError,
@@ -1949,8 +1848,6 @@ export declare namespace Machine {
     UnhandledStates extends StateIdentifier<States>,
     E,
     R,
-    InitialE,
-    InitialR,
     FinalStates extends StateIdentifier<States>,
     Output,
     Emits extends ReadonlyArray<TaggedSchema>,
@@ -1964,8 +1861,6 @@ export declare namespace Machine {
     readonly unhandledStates: UnhandledStates
     readonly error: E
     readonly services: R
-    readonly initialError: InitialE
-    readonly initialServices: InitialR
     readonly finalStates: FinalStates
     readonly output: Output
     readonly emittedEvents: Emits
@@ -2032,7 +1927,7 @@ export declare namespace Machine {
   export interface Any extends Pipeable {
     readonly [TypeId]: TypeId
     /** @internal */
-    readonly [MachineTypeId]: TypeCarrier<any, any, any, any, any, any, any, any, any, any, any, any, any, any>
+    readonly [MachineTypeId]: TypeCarrier<any, any, any, any, any, any, any, any, any, any, any, any>
     readonly states: StateSchemas
     readonly root: Pick<State<Machine.StateNodeConfig>, typeof StateTypeId | "node">
     readonly events: EventProtocol.Any<"public">
@@ -2112,22 +2007,6 @@ export declare namespace Machine {
    * @since 0.4.0
    */
   export type Services<M extends Any> = M[typeof MachineTypeId]["services"]
-
-  /**
-   * Extracts the startup error channel carried by a machine definition.
-   *
-   * @category utility types
-   * @since 0.4.0
-   */
-  export type InitialError<M extends Any> = M[typeof MachineTypeId]["initialError"]
-
-  /**
-   * Extracts startup service requirements carried by a machine definition.
-   *
-   * @category utility types
-   * @since 0.4.0
-   */
-  export type InitialServices<M extends Any> = M[typeof MachineTypeId]["initialServices"]
 
   /**
    * Extracts final state paths carried by a machine definition.
@@ -3955,8 +3834,6 @@ export declare namespace Machine {
     Emits extends ReadonlyArray<TaggedSchema>,
     StateId extends StateIdentifier<States>,
     EventTag extends TagOf<Events[number]>,
-    E,
-    R,
     InputEvents extends ReadonlyArray<TaggedSchema> = Events,
     ParentEvents extends ReadonlyArray<TaggedSchema> = readonly []
   > = MachineReferences<InputEvents, ParentEvents> & {
@@ -4296,7 +4173,7 @@ export declare namespace Machine {
    * @category utility types
    * @since 0.4.0
    */
-  export type StateActionResult<E, R> = undefined
+  export type StateActionResult = undefined
 
   /**
    * Initial target that a machine resolves at startup.
@@ -4304,7 +4181,7 @@ export declare namespace Machine {
    * @category utility types
    * @since 0.4.0
    */
-  export type InitialResult<States extends StateSchemas, E, R> = InitialTarget<StateIdentifier<States>>
+  export type InitialResult<States extends StateSchemas> = InitialTarget<StateIdentifier<States>>
 
   /**
    * Result that a transition declaration resolves to.
@@ -4319,7 +4196,7 @@ export declare namespace Machine {
    * @category utility types
    * @since 0.4.0
    */
-  export type HandlerResult<States extends StateSchemas, E, R> =
+  export type HandlerResult<States extends StateSchemas> =
     | Snapshot<States>
     | Target<States, StateIdentifier<States>>
     | HistoryTarget<States, HistoryIdentifier<States>>
@@ -4356,29 +4233,6 @@ export declare namespace Machine {
         never
     }[keyof NonNullable<History>]
     : never
-  /** Extracts the return value from a choice resolver. */
-  export type ChoiceReturn<Config> = Config extends { readonly choice: infer Choice } ? EventTransitionReturn<Choice>
-    : never
-  /**
-   * Extracts the return value from an event transition config.
-   *
-   * @category utility types
-   * @since 0.4.0
-   */
-  export type EventTransitionReturn<Transition> = Transition extends { readonly resolve?: infer Resolve } ?
-    NonNullable<Resolve> extends (...args: any) => infer Ret ? Ret : never
-    : never
-  /**
-   * Extracts the return value from a state's event handlers.
-   *
-   * @category utility types
-   * @since 0.4.0
-   */
-  export type EventHandlerReturn<Config> = Config extends { readonly on?: infer On }
-    ? { readonly [EventTag in keyof On]: EventTransitionReturn<NonNullable<On[EventTag]>> }[
-      keyof On
-    ]
-    : never
   /**
    * Extracts the invoke config or configs from a state config.
    *
@@ -4387,10 +4241,7 @@ export declare namespace Machine {
    */
   export type InvokeReturn<Config> = "invoke" extends keyof Config
     ? Config extends { readonly invoke?: infer Invoke }
-      ? NonNullable<Invoke> extends (...args: any) => infer Resolved
-        ? NonNullable<Resolved> extends ReadonlyArray<infer One> ? One : NonNullable<Resolved>
-      : NonNullable<Invoke> extends ReadonlyArray<infer One> ? One
-      : NonNullable<Invoke>
+      ? NonNullable<Invoke> extends ReadonlyArray<infer One> ? One : NonNullable<Invoke>
     : never
     : never
   /**
@@ -4408,16 +4259,10 @@ export declare namespace Machine {
   type ChildMachineLogic<Child> = Child extends ChildMachine<string, infer M> ? Logic<
       Snapshot<States<M>>,
       EventInput<InputEvent<M>>,
-      Error<M> | ActionError<Services<M>> | InfiniteTransitionError | MachineSchemaDecodeError | StoppedError,
-      ExcludeCompatibleRuntime<
-        Exclude<ExecutionServices<InitialServices<M> | Services<M>>, MachineRuntime>,
-        Event<M>,
-        EmittedEvent<M>
-      >,
+      Error<M> | InfiniteTransitionError | MachineSchemaDecodeError | StoppedError,
+      ExecutionServices<Services<M>>,
       Output<M>,
-      | InitialError<M>
       | Error<M>
-      | ActionError<InitialServices<M> | Services<M>>
       | InfiniteTransitionError
       | MachineSchemaDecodeError
       | StartupError
@@ -4450,12 +4295,15 @@ export declare namespace Machine {
   /**
    * Extracts the startup error from an invoke source child process logic.
    *
+   * **Details**
+   *
+   * Invoked logic contributes its startup error. A child machine declares none.
+   *
    * @category utility types
    * @since 0.4.0
    */
-  export type InvokeInitialError<Invoke> = Invoke extends {
-    readonly [InvokeTypeId]: { readonly initialError: Types.Covariant<infer InitialError> }
-  } ? InitialError
+  export type InvokeInitialError<Invoke> = IsAny<Invoke> extends true ? unknown
+    : Invoke extends { readonly child: unknown } ? never
     : LogicInitialErrorOf<InvokeLogic<Invoke>>
   /**
    * Extracts the runtime error from an invoked child process.
@@ -4473,10 +4321,7 @@ export declare namespace Machine {
    * @category utility types
    * @since 0.4.0
    */
-  export type InvokeOutput<Invoke> = Invoke extends {
-    readonly [InvokeTypeId]: { readonly output: Types.Covariant<infer Output> }
-  } ? Output
-    : LogicOutputOf<InvokeLogic<Invoke>>
+  export type InvokeOutput<Invoke> = LogicOutputOf<InvokeLogic<Invoke>>
   /**
    * Extracts the service requirements from an invoke source child process logic.
    *
@@ -4489,27 +4334,9 @@ export declare namespace Machine {
     : LogicServicesOf<InvokeLogic<Invoke>>
 
   /** Public parent inputs required by an invoked child machine. */
-  export type InvokeParentEvents<Invoke> = Invoke extends {
-    readonly [InvokeTypeId]: { readonly parentEvents: Types.Covariant<infer ParentEvent> }
-  } ? ParentEvent
-    : IsAny<Invoke> extends true ? never
+  export type InvokeParentEvents<Invoke> = IsAny<Invoke> extends true ? never
     : Invoke extends { readonly child: ChildMachine<string, infer M> } ? EventOf<ParentEvents<M>>
     : never
-  /** Extracts transition results returned by invocation lifecycle handlers. */
-  export type InvokeOutcomeReturn<Invoke> = Invoke extends unknown ?
-      | (Invoke extends {
-        readonly [InvokeTypeId]: { readonly outcomes: Types.Covariant<infer Outcomes> }
-      } ? EventTransitionReturn<Outcomes> :
-        never)
-      | (Invoke extends { readonly onDone?: infer Handler } ? EventTransitionReturn<NonNullable<Handler>> : never)
-      | (Invoke extends { readonly onFailure?: infer Handler } ? EventTransitionReturn<NonNullable<Handler>> : never)
-      | (Invoke extends { readonly onElement?: infer Handler } ? EventTransitionReturn<NonNullable<Handler>> : never)
-      | (Invoke extends { readonly onSnapshot?: infer Handler } ? EventTransitionReturn<NonNullable<Handler>> : never)
-    : never
-  type InvokeOutcomeError<Invoke> = IsAny<InvokeOutcomeReturn<Invoke>> extends true ? never
-    : Effect.Error<InvokeOutcomeReturn<Invoke>>
-  type InvokeOutcomeServices<Invoke> = IsAny<InvokeOutcomeReturn<Invoke>> extends true ? never
-    : Effect.Services<InvokeOutcomeReturn<Invoke>>
   // Effect, Stream, and timer invocations run under a runtime-reserved child id
   // derived from their state path and distinct lifecycle id. Only caller-chosen
   // child ids (logic addresses and child descriptor ids) can collide.
@@ -4535,7 +4362,6 @@ export declare namespace Machine {
     :
       | InvokeCollisionError<InvokeReturn<Config>>
       | InvokeInitialError<InvokeReturn<Config>>
-      | InvokeOutcomeError<InvokeReturn<Config>>
   /**
    * Extracts the parent service requirement contribution from invoked children.
    *
@@ -4546,53 +4372,24 @@ export declare namespace Machine {
     :
       | MachineRuntime
       | InvokeServices<InvokeReturn<Config>>
-      | InvokeOutcomeServices<InvokeReturn<Config>>
-  /**
-   * Extracts the return value from an eventless transition.
-   *
-   * @category utility types
-   * @since 0.4.0
-   */
-  export type AlwaysReturn<Config> = Config extends { readonly always?: infer Always }
-    ? EventTransitionReturn<NonNullable<Always>>
-    : never
-  /**
-   * Extracts the return value from a state completion transition.
-   *
-   * @category utility types
-   * @since 0.4.0
-   */
-  export type DoneReturn<Config> = Config extends { readonly onDone?: infer OnDone }
-    ? EventTransitionReturn<NonNullable<OnDone>>
-    : never
-
   /**
    * Extracts all service requirements contributed by a state handler config.
+   *
+   * **Details**
+   *
+   * Transitions and actions are synchronous, so only invocations contribute
+   * services. An action or history default whose return type is `any` contributes
+   * `unknown`.
    *
    * @category utility types
    * @since 0.4.0
    */
   export type ConfigServices<Config> = Config extends unknown ? [keyof Config] extends [never] ? never :
-    | Effect.Services<EventHandlerReturn<Config>>
-    | Effect.Services<AlwaysReturn<Config>>
-    | Effect.Services<DoneReturn<Config>>
     | Effect.Services<StateActionReturn<Config, "entry">>
     | Effect.Services<StateActionReturn<Config, "exit">>
     | Effect.Services<HistoryDefaultReturn<Config>>
-    | Effect.Services<ChoiceReturn<Config>>
     | InvokeRequirements<Config>
     : never
-
-  /** The only transition value accepted by machine handler APIs. */
-  type TransitionConfig<
-    States extends StateSchemas,
-    Events extends ReadonlyArray<TaggedSchema>,
-    Emits extends ReadonlyArray<TaggedSchema>,
-    StateId extends StateNodeIdentifier<States>,
-    Context,
-    Reenter extends boolean = false,
-    Acceptance extends TransitionAcceptance = "required"
-  > = Transition<States, StateId, Context, Events, Emits, {}, Reenter, Acceptance>
 
   /** Opaque evidence that `resolve` selected one declared branch. */
   export interface SelectedBranch<out Key extends string, out Result> {
@@ -4601,136 +4398,6 @@ export declare namespace Machine {
       readonly result: Types.Covariant<Result>
     }
   }
-
-  export type InvokeSource<Value, Context> = Value | ((context: Context) => Value)
-
-  /**
-   * State-owned work that runs for the lifetime of its active state.
-   *
-   * **Details**
-   *
-   * Every `invoke` entry carries this type-level marker, which records the
-   * state that owns the entry together with the machine's state schemas and
-   * event protocols. The marker property is optional and is never set at
-   * runtime.
-   *
-   * @category models
-   * @since 0.23.0
-   */
-  export interface InvokeOwned<
-    States extends StateSchemas,
-    Events extends ReadonlyArray<TaggedSchema>,
-    Emits extends ReadonlyArray<TaggedSchema>,
-    StateId extends StateIdentifier<States>,
-    InputEvents extends ReadonlyArray<TaggedSchema> = Events,
-    ParentEvents extends ReadonlyArray<TaggedSchema> = readonly []
-  > {
-    readonly "~effect/Machine/InvokeOwner"?: Types.Covariant<
-      readonly [States, Events, Emits, StateId, InputEvents, ParentEvents]
-    >
-  }
-
-  type StoredInvokeConfig<
-    States extends StateSchemas,
-    Events extends ReadonlyArray<TaggedSchema>,
-    Emits extends ReadonlyArray<TaggedSchema>,
-    StateId extends StateIdentifier<States>,
-    InputEvents extends ReadonlyArray<TaggedSchema> = Events,
-    ParentEvents extends ReadonlyArray<TaggedSchema> = readonly []
-  > =
-    & InvokeOwned<States, Events, Emits, StateId, InputEvents, ParentEvents>
-    & (
-      | {
-        readonly id: string
-        readonly effect: (
-          context: InvokeContext<States, Events, Emits, StateId, InputEvents, ParentEvents>
-        ) => Effect.Effect<any, any, any>
-        readonly stream?: never
-        readonly after?: never
-        readonly logic?: never
-        readonly child?: never
-        readonly address?: never
-        readonly onDone?: unknown
-        readonly onFailure?: unknown
-        readonly onElement?: never
-        readonly onSnapshot?: never
-      }
-      | {
-        readonly id: string
-        readonly stream: (
-          context: InvokeContext<States, Events, Emits, StateId, InputEvents, ParentEvents>
-        ) => Stream.Stream<any, any, any>
-        readonly effect?: never
-        readonly after?: never
-        readonly logic?: never
-        readonly child?: never
-        readonly address?: never
-        readonly onElement?: unknown
-        readonly onDone: unknown
-        readonly onFailure?: unknown
-        readonly onSnapshot?: never
-      }
-      | {
-        readonly id: string
-        readonly after: InvokeSource<
-          Duration.Input,
-          InvokeContext<States, Events, Emits, StateId, InputEvents, ParentEvents>
-        >
-        readonly effect?: never
-        readonly stream?: never
-        readonly logic?: never
-        readonly child?: never
-        readonly address?: never
-        readonly onDone: unknown
-        readonly onFailure?: never
-        readonly onElement?: never
-        readonly onSnapshot?: never
-      }
-      | {
-        readonly id: string
-        readonly address: string
-        readonly logic: InvokeSource<
-          Logic<any, any, any, any, any, any>,
-          InvokeContext<States, Events, Emits, StateId, InputEvents, ParentEvents>
-        >
-        readonly effect?: never
-        readonly stream?: never
-        readonly after?: never
-        readonly child?: never
-        readonly onDone?: unknown
-        readonly onFailure?: unknown
-        readonly onElement?: never
-        readonly onSnapshot?: unknown
-      }
-      | {
-        readonly child: ChildMachine.Any
-        readonly input?:
-          | {}
-          | null
-          | ((context: InvokeContext<States, Events, Emits, StateId, InputEvents, ParentEvents>) => unknown)
-        readonly id?: never
-        readonly address?: never
-        readonly effect?: never
-        readonly stream?: never
-        readonly after?: never
-        readonly logic?: never
-        readonly onDone?: unknown
-        readonly onFailure?: unknown
-        readonly onElement?: never
-        readonly onSnapshot?: unknown
-      }
-    )
-
-  type StoredInvokeDefinition<
-    States extends StateSchemas,
-    Events extends ReadonlyArray<TaggedSchema>,
-    Emits extends ReadonlyArray<TaggedSchema>,
-    StateId extends StateIdentifier<States>,
-    InputEvents extends ReadonlyArray<TaggedSchema> = Events,
-    ParentEvents extends ReadonlyArray<TaggedSchema> = readonly []
-  > =
-    | StoredInvokeConfig<States, Events, Emits, StateId, InputEvents, ParentEvents>
-    | ReadonlyArray<StoredInvokeConfig<States, Events, Emits, StateId, InputEvents, ParentEvents>>
 
   type LogicInitialEffectOf<Value> = Value extends { readonly initial: infer Initial } ?
     Initial extends (...args: ReadonlyArray<any>) => infer Result ? Result : never
@@ -4754,7 +4421,6 @@ export declare namespace Machine {
   /** Output construction available to final and output-producing parallel states. */
   type OutputHandlerConfig<
     States extends StateSchemas,
-    Events extends ReadonlyArray<TaggedSchema>,
     StateId extends StateIdentifier<States>,
     Context
   > = NodeByIdentifier<States, StateId> extends { readonly output: Schema.Top } ? {
@@ -4771,7 +4437,6 @@ export declare namespace Machine {
     StateId extends StateIdentifier<States>
   > = NodeByIdentifier<States, StateId> extends { readonly type: "parallel" } ? OutputHandlerConfig<
       States,
-      Events,
       StateId,
       ParallelOutputContext<States, Events, StateId>
     >
@@ -4874,42 +4539,6 @@ export declare namespace Machine {
     Children extends StateSchemas
   > = {
     readonly [Key in HistoryStateKey<Children>]?: HistoryDefaultEntry<States, Events, Emits, ParentId>
-  }
-
-  /**
-   * Required implementation for a choice pseudo-state.
-   *
-   * **Details**
-   *
-   * A choice state declares only `choice`, the transition that resolves it to
-   * a concrete destination. Every other handler key is rejected.
-   *
-   * @category models
-   * @since 0.23.0
-   */
-  export interface ChoiceStateConfig<
-    States extends StateSchemas,
-    Events extends ReadonlyArray<TaggedSchema>,
-    Emits extends ReadonlyArray<TaggedSchema>,
-    ChoiceId extends ChoiceIdentifier<States>,
-    InputEvents extends ReadonlyArray<TaggedSchema> = Events,
-    ParentEvents extends ReadonlyArray<TaggedSchema> = readonly []
-  > {
-    /** Required transition that resolves this transient choice to a concrete destination. */
-    readonly choice: TransitionConfig<
-      States,
-      Events,
-      Emits,
-      ChoiceId,
-      ChoiceContext<States, Events, Emits, ChoiceId, InputEvents, ParentEvents>
-    >
-    readonly entry?: never
-    readonly exit?: never
-    readonly invoke?: never
-    readonly always?: never
-    readonly on?: never
-    readonly onDone?: never
-    readonly output?: never
   }
 
   type HandlerChildren<Node> = Node extends { readonly states: infer Children extends StateSchemas } ? Children : never
@@ -5106,13 +4735,10 @@ export declare namespace Machine {
     Node,
     Events extends ReadonlyArray<TaggedSchema>,
     InputEvents extends ReadonlyArray<TaggedSchema>,
-    Emits extends ReadonlyArray<TaggedSchema>,
     StateId extends StateNodeIdentifier<AllStates>,
     Config,
     AvailableOutputStates extends StateIdentifier<AllStates>
-  > = StateId extends ChoiceIdentifier<AllStates> ?
-      & HandlerChoiceUnknownConfigKeyValidation<StateId, Config>
-      & HandlerRuntimeValidation<Events, Emits, StateId, Config>
+  > = StateId extends ChoiceIdentifier<AllStates> ? HandlerChoiceUnknownConfigKeyValidation<StateId, Config>
     : StateId extends StateIdentifier<AllStates> ?
         & HandlerUnknownConfigKeyValidation<StateId, Config>
         & HandlerOnKeyValidation<Events, StateId, Config>
@@ -5121,7 +4747,6 @@ export declare namespace Machine {
         & HandlerOutputRequirementValidation<AllStates, StateId, AvailableOutputStates, Config>
         & HandlerRequiredHistoryInitializeValidation<AllStates, StateId, Config>
         & ValidateConstructionDeclarations<Node, Config>
-        & HandlerRuntimeValidation<Events, Emits, StateId, Config>
     : unknown
 
   type HandlerChoiceUnknownConfigKeyValidation<
@@ -5150,25 +4775,11 @@ export declare namespace Machine {
       >
     }
 
-  type HandlerRuntimeValidation<
-    Events extends ReadonlyArray<TaggedSchema>,
-    Emits extends ReadonlyArray<TaggedSchema>,
-    StateId extends string,
-    Config,
-    Incompatible = keyof Config extends never ? never : IncompatibleRuntime<
-      ConfigServices<HandlerConfigPart<Config>>,
-      EventOf<Events>,
-      EmittedEventOf<Emits>
-    >
-  > = [Incompatible] extends [never] ? unknown
-    : HandlerValidationError<"Handler config requires an incompatible machine runtime", StateId, Incompatible>
-
   type HandlerTreeValidation<
     States extends StateSchemas,
     Node,
     Events extends ReadonlyArray<TaggedSchema>,
     InputEvents extends ReadonlyArray<TaggedSchema>,
-    Emits extends ReadonlyArray<TaggedSchema>,
     Path extends StateNodeIdentifier<States>,
     Config,
     OutputStates extends StateIdentifier<States>
@@ -5178,7 +4789,6 @@ export declare namespace Machine {
       Node,
       Events,
       InputEvents,
-      Emits,
       Path,
       Config,
       OutputStates
@@ -5191,7 +4801,6 @@ export declare namespace Machine {
                 Children[K],
                 Events,
                 InputEvents,
-                Emits,
                 Extract<JoinPath<Path, Extract<K, string>>, StateNodeIdentifier<States>>,
                 Handlers[K],
                 OutputStates
@@ -5206,7 +4815,6 @@ export declare namespace Machine {
     States extends StateSchemas,
     Events extends ReadonlyArray<TaggedSchema>,
     InputEvents extends ReadonlyArray<TaggedSchema>,
-    Emits extends ReadonlyArray<TaggedSchema>,
     Config,
     OutputStates extends StateIdentifier<States>
   > = HandlerTreeValidation<
@@ -5214,7 +4822,6 @@ export declare namespace Machine {
     States[""],
     Events,
     InputEvents,
-    Emits,
     Extract<"", StateNodeIdentifier<States>>,
     Config,
     OutputStates
@@ -5262,13 +4869,9 @@ export declare namespace Machine {
     : never
 
   type HandlerConfigError<Config> = Config extends unknown ? [keyof Config] extends [never] ? never :
-    | Effect.Error<EventHandlerReturn<Config>>
-    | Effect.Error<AlwaysReturn<Config>>
-    | Effect.Error<DoneReturn<Config>>
     | Effect.Error<StateActionReturn<Config, "entry">>
     | Effect.Error<StateActionReturn<Config, "exit">>
     | Effect.Error<HistoryDefaultReturn<Config>>
-    | Effect.Error<ChoiceReturn<Config>>
     | InvokeError<Config>
     : never
 
@@ -5496,7 +5099,6 @@ export declare namespace Machine {
     | ({} extends NodeMakeInput<Node> ? { readonly from?: never; readonly decoded?: never } : never)
   type InlineDestinationConstruction<
     S extends StateSchemas,
-    Src extends StateNodeIdentifier<S>,
     P extends DestinationPath<S>,
     C
   > = P extends ChoiceIdentifier<S> ? { readonly from?: never; readonly decoded?: never }
@@ -5552,7 +5154,7 @@ export declare namespace Machine {
         /** Selects one declared branch and may enqueue synchronous commands. */
         readonly resolve?: never
       }
-      & InlineDestinationConstruction<S, Src, P, C>
+      & InlineDestinationConstruction<S, P, C>
   }[DestinationPath<S>]
   // A misspelled target matches this member, so validation can name the declared paths instead of `never`.
   type InlineUnknownTarget<S extends StateSchemas> = {
@@ -5788,8 +5390,7 @@ export declare namespace Machine {
         & { readonly child: SourceValue<R, K> }
         & (SourceValue<R, K> extends ChildMachine<string, infer M> ? {
             readonly [InvokeTypeId]: {
-              readonly error: Types.Covariant<Error<M> | ActionError<Services<M>>>
-              readonly initialError: Types.Covariant<InitialError<M>>
+              readonly error: Types.Covariant<Error<M>>
               readonly requirements: Types.Covariant<Services<M>>
             }
           } :
@@ -5869,7 +5470,7 @@ export declare namespace Machine {
     >
   }
   type RegisteredInvokeError<R, K extends PropertyKey> = SourceKind<R, K> extends "children"
-    ? SourceValue<R, K> extends ChildMachine<string, infer M> ? Error<M> | ActionError<Services<M>> : never
+    ? SourceValue<R, K> extends ChildMachine<string, infer M> ? Error<M> : never
     : InvokeRuntimeError<ResolvedInvoke<R, K>>
   /**
    * A registered source invocation with its required input and reachable outcomes.
@@ -6068,20 +5669,20 @@ export declare namespace Machine {
         readonly entry?: (
           context: StateActionContext<S, Ev, Em, Src, In, Pa>,
           enqueue: Enqueue<EventOf<Ev>, EmittedEventOf<Em>>
-        ) => StateActionResult<any, any>
+        ) => StateActionResult
       }
       & (Node extends { readonly type: "final" } ?
           & {
             /** Runs synchronously on exit and may enqueue commands. */
             readonly exit?: never
           }
-          & OutputHandlerConfig<S, Ev, Src, FinalOutputContext<S, Ev, Src>>
+          & OutputHandlerConfig<S, Src, FinalOutputContext<S, Ev, Src>>
         : {
           /** Runs synchronously on exit and may enqueue commands. */
           readonly exit?: (
             context: StateActionContext<S, Ev, Em, Src, In, Pa>,
             enqueue: Enqueue<EventOf<Ev>, EmittedEventOf<Em>>
-          ) => StateActionResult<any, any>
+          ) => StateActionResult
         } & ActiveOutputHandlerConfig<S, Ev, Src>)
     : {
       /** Runs synchronously on entry and may enqueue commands. */
@@ -6162,7 +5763,7 @@ export declare namespace Machine {
               readonly [Tag in TagOf<Ev[number]>]?: Transition<
                 S,
                 Src,
-                HandlerContext<S, Ev, Em, Src, Tag, never, never, In, Pa>,
+                HandlerContext<S, Ev, Em, Src, Tag, In, Pa>,
                 Ev,
                 Em,
                 R,
@@ -6605,8 +6206,6 @@ export declare namespace Machine {
     Ev extends ReadonlyArray<TaggedSchema>,
     Em extends ReadonlyArray<TaggedSchema>,
     I extends Schema.Top,
-    IE,
-    IR,
     Final extends StateIdentifier<S>,
     Out,
     In extends ReadonlyArray<TaggedSchema>,
@@ -6632,7 +6231,6 @@ export declare namespace Machine {
           S,
           Ev,
           In,
-          Em,
           NormalizeObjectConfig<NoInfer<C>, R>,
           Extract<
             HandlerTreeEvidence<S, { readonly "": NormalizeObjectConfig<NoInfer<C>, R> }>["outputState"],
@@ -6645,13 +6243,7 @@ export declare namespace Machine {
       I,
       Exclude<StateIdentifier<S>, HandleEvidence<S, C, R>["stateId"]>,
       HandleEvidence<S, C, R>["error"],
-      ExcludeCompatibleRuntime<
-        HandleEvidence<S, C, R>["services"],
-        EventOf<Ev>,
-        EmittedEventOf<Em>
-      >,
-      IE,
-      IR,
+      HandleEvidence<S, C, R>["services"],
       Final,
       Out,
       Em,
@@ -6659,100 +6251,6 @@ export declare namespace Machine {
       In,
       Pa
     >
-  }
-
-  /**
-   * Any state config.
-   *
-   * @category utility types
-   * @since 0.4.0
-   */
-  export type AnyStateConfig =
-    | StateConfig<any, any, any, any, any, any, any>
-    | ChoiceStateConfig<any, any, any, any>
-
-  /**
-   * Runtime event-handler map stored for a single state tag.
-   *
-   * @category models
-   * @since 0.4.0
-   */
-  export type EventHandlerMap<
-    States extends StateSchemas,
-    Events extends ReadonlyArray<TaggedSchema>,
-    Emits extends ReadonlyArray<TaggedSchema>,
-    StateId extends StateIdentifier<States>,
-    EventTag extends TagOf<Events[number]>,
-    E,
-    R
-  > = Readonly<
-    Record<
-      PropertyKey,
-      TransitionConfig<
-        States,
-        Events,
-        Emits,
-        StateId,
-        HandlerContext<States, Events, Emits, StateId, EventTag, E, R>,
-        true,
-        TransitionAcceptance
-      >
-    >
-  >
-
-  /**
-   * Runtime state config stored for a single state tag.
-   *
-   * @category models
-   * @since 0.4.0
-   */
-  export interface StateConfig<
-    States extends StateSchemas,
-    Events extends ReadonlyArray<TaggedSchema>,
-    Emits extends ReadonlyArray<TaggedSchema>,
-    StateId extends StateIdentifier<States>,
-    EventTag extends TagOf<Events[number]>,
-    E,
-    R
-  > {
-    /** Runs synchronously on entry and may enqueue commands. */
-    readonly entry?: (
-      context: StateActionContext<States, Events, Emits, StateId>,
-      enqueue: Enqueue<EventOf<Events>, EmittedEventOf<Emits>>
-    ) => StateActionResult<E, R>
-    /** Runs synchronously on exit and may enqueue commands. */
-    readonly exit?: (
-      context: StateActionContext<States, Events, Emits, StateId>,
-      enqueue: Enqueue<EventOf<Events>, EmittedEventOf<Emits>>
-    ) => StateActionResult<E, R>
-    /** One registered invocation or an array with distinct lifecycle identities. */
-    readonly invoke?: StoredInvokeDefinition<States, Events, Emits, StateId>
-    /** Eventless transition evaluated during stabilization. */
-    readonly always?: TransitionConfig<
-      States,
-      Events,
-      Emits,
-      StateId,
-      AlwaysContext<States, Events, Emits, StateId>,
-      false,
-      TransitionAcceptance
-    >
-    /** Handles successful invocation or state completion with its exact output type. */
-    readonly onDone?: TransitionConfig<
-      States,
-      Events,
-      Emits,
-      StateId,
-      DoneContext<States, Events, Emits, StateId>,
-      false,
-      TransitionAcceptance
-    >
-    /** Constructs the decoded output declared by the state schema. */
-    readonly output?:
-      | ((context: FinalOutputContext<States, Events, StateId>) => unknown)
-      | ((context: ParallelOutputContext<States, Events, StateId>) => unknown)
-    /** Event handlers keyed by the public or internal event tag. */
-    readonly on?: EventHandlerMap<States, Events, Emits, StateId, EventTag, E, R>
   }
 
   // An explicit export makes this ambient namespace export only the members marked `export`; the rest stay private.
@@ -6851,8 +6349,6 @@ export const isFinal: <
   UnhandledStates extends Machine.StateIdentifier<States> = Machine.StateIdentifier<States>,
   E = never,
   R = never,
-  InitialE = never,
-  InitialR = never,
   FinalStates extends Machine.StateIdentifier<States> = never,
   Output = never,
   OutputStates extends Machine.StateIdentifier<States> = never,
@@ -6866,8 +6362,6 @@ export const isFinal: <
     UnhandledStates,
     E,
     R,
-    InitialE,
-    InitialR,
     FinalStates,
     Output,
     Emits,
@@ -6937,8 +6431,6 @@ type MakeConfig<
   InputEvents extends ReadonlyArray<Machine.TaggedSchema>,
   Emits extends ReadonlyArray<Machine.TaggedSchema>,
   Input extends Schema.Top,
-  InitialE,
-  InitialR,
   InternalEvents extends ReadonlyArray<Machine.TaggedSchema>,
   ParentDeclaration extends Parent.Any | undefined,
   Effects extends Machine.EffectSources,
@@ -6987,8 +6479,6 @@ type MakeResult<
   InputEvents extends ReadonlyArray<Machine.TaggedSchema>,
   Emits extends ReadonlyArray<Machine.TaggedSchema>,
   Input extends Schema.Top,
-  InitialE,
-  InitialR,
   InternalEvents extends ReadonlyArray<Machine.TaggedSchema>,
   ParentDeclaration extends Parent.Any | undefined,
   Effects extends Machine.EffectSources,
@@ -7000,8 +6490,6 @@ type MakeResult<
   { readonly "": Root },
   readonly [...InputEvents, ...InternalEvents],
   Input,
-  InitialE,
-  InitialR,
   Machine.FinalStateFromDefinition<{ readonly "": Root }>,
   Machine.TerminalOutput<{ readonly "": Root }>,
   Emits,
@@ -7029,8 +6517,6 @@ type Make = {
     const InputEvents extends ReadonlyArray<Machine.TaggedSchema>,
     const Emits extends ReadonlyArray<Machine.TaggedSchema> = readonly [],
     const Input extends Schema.Top = typeof Schema.Void,
-    InitialE = never,
-    InitialR = never,
     const InternalEvents extends ReadonlyArray<Machine.TaggedSchema> = readonly [],
     const ParentDeclaration extends Parent.Any | undefined = undefined,
     const Effects extends Machine.EffectSources = {},
@@ -7045,8 +6531,6 @@ type Make = {
         InputEvents,
         Emits,
         Input,
-        InitialE,
-        InitialR,
         InternalEvents,
         ParentDeclaration,
         Effects,
@@ -7061,8 +6545,6 @@ type Make = {
     InputEvents,
     Emits,
     Input,
-    InitialE,
-    InitialR,
     InternalEvents,
     ParentDeclaration,
     Effects,
@@ -7489,8 +6971,6 @@ export const encodeSnapshot: <
   UnhandledStates extends Machine.StateIdentifier<States> = Machine.StateIdentifier<States>,
   E = never,
   R = never,
-  InitialE = never,
-  InitialR = never,
   FinalStates extends Machine.StateIdentifier<States> = never,
   Output = never,
   OutputStates extends Machine.StateIdentifier<States> = never,
@@ -7504,8 +6984,6 @@ export const encodeSnapshot: <
     UnhandledStates,
     E,
     R,
-    InitialE,
-    InitialR,
     FinalStates,
     Output,
     Emits,
@@ -7572,8 +7050,6 @@ export const decodeSnapshot: <
   UnhandledStates extends Machine.StateIdentifier<States> = Machine.StateIdentifier<States>,
   E = never,
   R = never,
-  InitialE = never,
-  InitialR = never,
   FinalStates extends Machine.StateIdentifier<States> = never,
   Output = never,
   OutputStates extends Machine.StateIdentifier<States> = never,
@@ -7587,8 +7063,6 @@ export const decodeSnapshot: <
     UnhandledStates,
     E,
     R,
-    InitialE,
-    InitialR,
     FinalStates,
     Output,
     Emits,
@@ -7650,8 +7124,6 @@ export const planInitial: <
   UnhandledStates extends Machine.StateIdentifier<States> = Machine.StateIdentifier<States>,
   E = never,
   R = never,
-  InitialE = never,
-  InitialR = never,
   FinalStates extends Machine.StateIdentifier<States> = never,
   Output = never,
   OutputStates extends Machine.StateIdentifier<States> = never,
@@ -7666,8 +7138,6 @@ export const planInitial: <
       UnhandledStates,
       E,
       R,
-      InitialE,
-      InitialR,
       FinalStates,
       Output,
       Emits,
@@ -7715,7 +7185,7 @@ export const planInitial: <
       readonly output: undefined
     }
   ),
-  InitialE | E | InfiniteTransitionError | MachineSchemaDecodeError | StartupError,
+  E | InfiniteTransitionError | MachineSchemaDecodeError | StartupError,
   never
 > = internal.planInitial
 
@@ -7853,8 +7323,6 @@ export const enabled: <
   UnhandledStates extends Machine.StateIdentifier<States> = Machine.StateIdentifier<States>,
   E = never,
   R = never,
-  InitialE = never,
-  InitialR = never,
   FinalStates extends Machine.StateIdentifier<States> = never,
   Output = never,
   OutputStates extends Machine.StateIdentifier<States> = never,
@@ -7868,8 +7336,6 @@ export const enabled: <
     UnhandledStates,
     E,
     R,
-    InitialE,
-    InitialR,
     FinalStates,
     Output,
     Emits,
@@ -7944,8 +7410,6 @@ export const can: {
     UnhandledStates extends Machine.StateIdentifier<States> = Machine.StateIdentifier<States>,
     E = never,
     R = never,
-    InitialE = never,
-    InitialR = never,
     FinalStates extends Machine.StateIdentifier<States> = never,
     Output = never,
     OutputStates extends Machine.StateIdentifier<States> = never,
@@ -7960,8 +7424,6 @@ export const can: {
         UnhandledStates,
         E,
         R,
-        InitialE,
-        InitialR,
         FinalStates,
         Output,
         Emits,
@@ -7983,8 +7445,6 @@ export const can: {
     UnhandledStates extends Machine.StateIdentifier<States> = Machine.StateIdentifier<States>,
     E = never,
     R = never,
-    InitialE = never,
-    InitialR = never,
     FinalStates extends Machine.StateIdentifier<States> = never,
     Output = never,
     OutputStates extends Machine.StateIdentifier<States> = never,
@@ -7999,8 +7459,6 @@ export const can: {
         UnhandledStates,
         E,
         R,
-        InitialE,
-        InitialR,
         FinalStates,
         Output,
         Emits,
@@ -8071,8 +7529,6 @@ export const plan: <
   UnhandledStates extends Machine.StateIdentifier<States> = Machine.StateIdentifier<States>,
   E = never,
   R = never,
-  InitialE = never,
-  InitialR = never,
   FinalStates extends Machine.StateIdentifier<States> = never,
   Output = never,
   OutputStates extends Machine.StateIdentifier<States> = never,
@@ -8087,8 +7543,6 @@ export const plan: <
       UnhandledStates,
       E,
       R,
-      InitialE,
-      InitialR,
       FinalStates,
       Output,
       Emits,
@@ -8451,8 +7905,6 @@ export const prepare: <
   UnhandledStates extends Machine.StateIdentifier<States> = Machine.StateIdentifier<States>,
   E = never,
   R = never,
-  InitialE = never,
-  InitialR = never,
   FinalStates extends Machine.StateIdentifier<States> = never,
   Output = never,
   OutputStates extends Machine.StateIdentifier<States> = never,
@@ -8467,8 +7919,6 @@ export const prepare: <
       UnhandledStates,
       E,
       R,
-      InitialE,
-      InitialR,
       FinalStates,
       Output,
       Emits,
@@ -8484,25 +7934,18 @@ export const prepare: <
     Machine.Snapshot<States>,
     Machine.EventInputOf<InputEvents>,
     | E
-    | ActionError<R>
     | InfiniteTransitionError
     | MachineSchemaDecodeError
     | StoppedError,
     Output,
     Machine.EmittedEventOf<Emits>,
-    | InitialE
     | E
-    | ActionError<InitialR | R>
     | InfiniteTransitionError
     | MachineSchemaDecodeError
     | StartupError
     | StoppedError,
     | Scope.Scope
-    | ExcludeCompatibleRuntime<
-      ExecutionServices<InitialR | R>,
-      Machine.EventOf<Events>,
-      Machine.EmittedEventOf<Emits>
-    >
+    | ExecutionServices<R>
   >
 > = internal.prepare
 
@@ -8567,8 +8010,6 @@ export const start: <
   UnhandledStates extends Machine.StateIdentifier<States> = Machine.StateIdentifier<States>,
   E = never,
   R = never,
-  InitialE = never,
-  InitialR = never,
   FinalStates extends Machine.StateIdentifier<States> = never,
   Output = never,
   OutputStates extends Machine.StateIdentifier<States> = never,
@@ -8583,8 +8024,6 @@ export const start: <
       UnhandledStates,
       E,
       R,
-      InitialE,
-      InitialR,
       FinalStates,
       Output,
       Emits,
@@ -8600,26 +8039,19 @@ export const start: <
     Machine.Snapshot<States>,
     Machine.EventInputOf<InputEvents>,
     | E
-    | ActionError<R>
     | InfiniteTransitionError
     | MachineSchemaDecodeError
     | StoppedError,
     Output,
     Machine.EmittedEventOf<Emits>
   >,
-  | InitialE
   | E
-  | ActionError<InitialR | R>
   | InfiniteTransitionError
   | MachineSchemaDecodeError
   | StartupError
   | StoppedError,
   | Scope.Scope
-  | ExcludeCompatibleRuntime<
-    ExecutionServices<InitialR | R>,
-    Machine.EventOf<Events>,
-    Machine.EmittedEventOf<Emits>
-  >
+  | ExecutionServices<R>
 > = internal.start
 
 /**
@@ -8685,8 +8117,6 @@ export const resume: <
   UnhandledStates extends Machine.StateIdentifier<States> = Machine.StateIdentifier<States>,
   E = never,
   R = never,
-  InitialE = never,
-  InitialR = never,
   FinalStates extends Machine.StateIdentifier<States> = never,
   Output = never,
   OutputStates extends Machine.StateIdentifier<States> = never,
@@ -8701,8 +8131,6 @@ export const resume: <
       UnhandledStates,
       E,
       R,
-      InitialE,
-      InitialR,
       FinalStates,
       Output,
       Emits,
@@ -8718,7 +8146,6 @@ export const resume: <
     Machine.Snapshot<States>,
     Machine.EventInputOf<InputEvents>,
     | E
-    | ActionError<R>
     | InfiniteTransitionError
     | MachineSchemaDecodeError
     | StoppedError,
@@ -8727,9 +8154,5 @@ export const resume: <
   >,
   MachineSchemaDecodeError,
   | Scope.Scope
-  | ExcludeCompatibleRuntime<
-    ExecutionServices<R>,
-    Machine.EventOf<Events>,
-    Machine.EmittedEventOf<Emits>
-  >
+  | ExecutionServices<R>
 > = internal.resume

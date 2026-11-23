@@ -19,13 +19,14 @@ import type { Bound, ChildMachineAtom, MachineAtom } from "../../unstable/reacti
 import * as internalMachine from "./machine.js"
 import * as PlannedSnapshot from "./plannedSnapshot.js"
 import type { EnsureExecutable } from "./readiness.js"
-import type { ExcludeCompatibleRuntime as ExcludeCompatibleMachineRuntime, IsAny } from "./requirements.js"
 import { isSnapshotObservable, snapshotObserver } from "./runtimeProtocol.js"
 import * as Topology from "./topology.js"
 
 export class ChildNotActiveError extends Data.TaggedError("ChildNotActiveError")<{
   readonly id: string
 }> {}
+
+type IsAny<A> = 0 extends (1 & A) ? true : false
 
 type AtomSupportedRequirements = Scope.Scope | AtomRegistry.AtomRegistry
 
@@ -37,29 +38,14 @@ type EnsureNoExternalRequirements<Requirements> = [ExternalRequirements<Requirem
   readonly [ExternalRequirementsTypeId]: ExternalRequirements<Requirements>
 }
 
-type MachineRequirements<InitialR, R, Events, Emits> = ExcludeCompatibleMachineRuntime<
-  Machine.ExecutionServices<InitialR | R>,
-  Events,
-  Emits
->
-
-type MachineResumeRequirements<R, Events, Emits> = ExcludeCompatibleMachineRuntime<
-  Machine.ExecutionServices<R>,
-  Events,
-  Emits
->
-
-type MachineRuntimeError<E, R> =
+type MachineRuntimeError<E> =
   | E
-  | Machine.ActionError<R>
   | Machine.InfiniteTransitionError
   | Machine.MachineSchemaDecodeError
   | Machine.StoppedError
 
-type MachineStartError<InitialE, E, InitialR, R, RuntimeError = never> =
-  | InitialE
+type MachineStartError<E, RuntimeError = never> =
   | E
-  | Machine.ActionError<InitialR | R>
   | Machine.InfiniteTransitionError
   | Machine.MachineSchemaDecodeError
   | Machine.StartupError
@@ -957,12 +943,6 @@ export const can = (event: unknown) => {
   }
 }
 
-type MachineResumeRequirementsOf<M extends Machine.Machine.Any> = MachineResumeRequirements<
-  Machine.Machine.Services<M>,
-  Machine.Machine.Event<M>,
-  Machine.Machine.EmittedEvent<M>
->
-
 type EnsureMachineExecutable<M extends Machine.Machine.Any> = IsAny<Machine.Machine.States<M>> extends true ? {
     readonly "~effect/reactivity/AtomMachine/ConcreteMachineRequired": M
   }
@@ -975,7 +955,7 @@ type EnsureMachineExecutable<M extends Machine.Machine.Any> = IsAny<Machine.Mach
 type ResumedMachineAtomOf<M extends Machine.Machine.Any, RuntimeError> = MachineAtom<
   Machine.Machine.Snapshot<Machine.Machine.States<M>>,
   Machine.Machine.EventInput<Machine.Machine.InputEvent<M>>,
-  MachineRuntimeError<Machine.Machine.Error<M>, Machine.Machine.Services<M>>,
+  MachineRuntimeError<Machine.Machine.Error<M>>,
   Machine.Machine.Output<M>,
   Machine.MachineSchemaDecodeError | RuntimeError,
   Machine.Machine.EmittedEvent<M>
@@ -990,8 +970,6 @@ export const make: {
     UnhandledStates extends Machine.Machine.StateIdentifier<States> = Machine.Machine.StateIdentifier<States>,
     E = never,
     R = never,
-    InitialE = never,
-    InitialR = never,
     FinalStates extends Machine.Machine.StateIdentifier<States> = never,
     Output = never,
     OutputStates extends Machine.Machine.StateIdentifier<States> = never,
@@ -1006,8 +984,6 @@ export const make: {
         UnhandledStates,
         E,
         R,
-        InitialE,
-        InitialR,
         FinalStates,
         Output,
         Emits,
@@ -1015,23 +991,16 @@ export const make: {
         InputEvents,
         ParentEvents
       >
-      & EnsureNoExternalRequirements<
-        MachineRequirements<
-          InitialR,
-          R,
-          Machine.Machine.EventOf<Events>,
-          Machine.Machine.EmittedEventOf<Emits>
-        >
-      >
+      & EnsureNoExternalRequirements<Machine.ExecutionServices<R>>
       & EnsureExecutable<States, UnhandledStates, OutputStates>
       & Machine.Machine.RootCompatible<ParentEvents>,
     ...args: [...Machine.Machine.InputArgs<Input>]
   ): MachineAtom<
     Machine.Machine.Snapshot<States>,
     Machine.Machine.EventInputOf<InputEvents>,
-    MachineRuntimeError<E, R>,
+    MachineRuntimeError<E>,
     Output,
-    MachineStartError<InitialE, E, InitialR, R>,
+    MachineStartError<E>,
     Machine.Machine.EmittedEventOf<Emits>
   >
 } = ((machine: Machine.Machine.Any, ...args: ReadonlyArray<unknown>) => {
@@ -1049,7 +1018,7 @@ export const resume: {
   <M extends Machine.Machine.Any>(
     machine:
       & M
-      & EnsureNoExternalRequirements<MachineResumeRequirementsOf<NoInfer<M>>>
+      & EnsureNoExternalRequirements<Machine.ExecutionServices<Machine.Machine.Services<NoInfer<M>>>>
       & EnsureMachineExecutable<NoInfer<M>>
       & Machine.Machine.RootCompatible<Machine.Machine.ParentEvents<NoInfer<M>>>,
     snapshot: Machine.Machine.Snapshot<Machine.Machine.States<M>>

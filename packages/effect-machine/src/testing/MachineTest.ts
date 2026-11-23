@@ -278,10 +278,7 @@ export type PlanCompletion<M extends AnyMachine> =
  * @category models
  * @since 0.4.0
  */
-export interface Microstep<
-  M extends AnyMachine,
-  Requirements = Machine.Machine.Services<M>
-> {
+export interface Microstep<M extends AnyMachine> {
   readonly next: Machine.Machine.Snapshot<Machine.Machine.States<M>>
   readonly event: Machine.Machine.Event<M> | Machine.InitialEvent
   readonly transitions: ReadonlyArray<
@@ -312,9 +309,7 @@ export type InitialPlan<M extends AnyMachine> =
     readonly state: Machine.Machine.Snapshot<Machine.Machine.States<M>>
     readonly commands: ReadonlyArray<Machine.Command>
     readonly emittedEvents: ReadonlyArray<Machine.Machine.EmittedEvent<M>>
-    readonly microsteps: ReadonlyArray<
-      Microstep<M, Machine.Machine.InitialServices<M> | Machine.Machine.Services<M>>
-    >
+    readonly microsteps: ReadonlyArray<Microstep<M>>
   }
   & PlanCompletion<M>
 
@@ -525,7 +520,6 @@ export const probe: <M extends AnyMachine, Error, Output>(
  */
 export type RuntimeInvariantErrorChannel<M extends AnyMachine> =
   | Machine.Machine.Error<M>
-  | Machine.ActionError<Machine.Machine.Services<M>>
   | Machine.InfiniteTransitionError
   | Machine.MachineSchemaDecodeError
   | Machine.StoppedError
@@ -1416,7 +1410,7 @@ export type ExploreOptions<M extends AnyMachine, Key extends ExplorationKey = Ex
  * Explores the bounded logical state graph in breadth-first order.
  *
  * Invariants are checked against startup and every concretely planned edge,
- * so a failure retains a shortest discovered counterexample. Staged actions
+ * so a failure retains a shortest discovered counterexample. Planned commands
  * and runtime activities are not executed. `transitionCoverage` includes
  * startup and every event plan that was actually computed, including a plan
  * retained at a state-limit frontier. Depth- and transition-limit frontiers
@@ -1586,7 +1580,6 @@ export type RunFailure<Cause, M extends AnyMachine = AnyMachine> =
  * @since 0.4.0
  */
 export type RunError<M extends AnyMachine> =
-  | Machine.Machine.InitialError<M>
   | Machine.Machine.Error<M>
   | Machine.InfiniteTransitionError
   | Machine.MachineSchemaDecodeError
@@ -1596,20 +1589,19 @@ export type RunError<M extends AnyMachine> =
  * Services required while planning a complete scenario.
  *
  * Scenario execution delegates exclusively to the service-free `planInitial`
- * and `plan` APIs. Invoke services and managed runtime capabilities belong to
- * later execution, not synchronous planning.
+ * and `plan` APIs, so it requires no services. Invoke services belong to later
+ * execution, not synchronous planning. A machine whose services are erased to
+ * `any` keeps `any`.
  *
  * @category models
  * @since 0.4.0
  */
-export type RunServices<M extends AnyMachine> = IsAny<
-  Machine.PlanningServices<Machine.Machine.InitialServices<M> | Machine.Machine.Services<M>>
-> extends true ? Machine.PlanningServices<Machine.Machine.InitialServices<M> | Machine.Machine.Services<M>> : never
+export type RunServices<M extends AnyMachine> = IsAny<Machine.Machine.Services<M>> extends true ? any : never
 
 /**
  * Executes a generated scenario exclusively through `planInitial` and `plan`.
  *
- * Staged actions are retained in each plan but are never executed. Every event
+ * Commands are retained in each plan but are never executed. Every event
  * is planned, including events that occur after a terminal configuration.
  * Typed planning errors retain the scenario and successfully completed prefix
  * in a `RunFailure`.
@@ -1942,7 +1934,7 @@ export interface ObservedGraphNode<M extends AnyMachine> {
 export interface ObservedGraphMicrostep<M extends AnyMachine> {
   readonly next: string
   readonly event: Machine.Machine.Event<M> | Machine.InitialEvent
-  readonly transitions: Microstep<M, any>["transitions"]
+  readonly transitions: Microstep<M>["transitions"]
   readonly raisedEvents: ReadonlyArray<Machine.Machine.Event<M>>
   readonly emittedEvents: ReadonlyArray<Machine.Machine.EmittedEvent<M>>
   readonly exitPaths: ReadonlyArray<StatePath<M>>

@@ -72,7 +72,7 @@ import type {
   TransitionHandler as CapturedTransitionHandler
 } from "./transition.js"
 
-export type MicrostepPlan<State, Event, E, R> = {
+export type MicrostepPlan<State, Event> = {
   readonly next: State
   readonly event: Event | MachineInitialEvent
   readonly transitions: ReadonlyArray<{
@@ -93,16 +93,16 @@ export type MicrostepPlan<State, Event, E, R> = {
   readonly changed: boolean
 }
 
-type SettlingMicrostep<State, Event, E, R> = MicrostepPlan<State, Event, E, R> & {
+type SettlingMicrostep<State, Event> = MicrostepPlan<State, Event> & {
   /** Internal signal that eventless stabilization must run again. */
   readonly stabilize: boolean
 }
 
-export type MacrostepPlan<State, Event, E, R, Output> =
+export type MacrostepPlan<State, Event, Output> =
   & {
     readonly next: State
     readonly commands: ReadonlyArray<RuntimeCommand>
-    readonly microsteps: ReadonlyArray<MicrostepPlan<State, Event, E, R>>
+    readonly microsteps: ReadonlyArray<MicrostepPlan<State, Event>>
     readonly emittedEvents: ReadonlyArray<unknown>
   }
   & (
@@ -116,10 +116,8 @@ export type MacrostepPlan<State, Event, E, R, Output> =
     }
   )
 
-export type TransitionHandler<States extends Machine.StateSchemas, E, R, Context> = CapturedTransitionHandler<
+export type TransitionHandler<States extends Machine.StateSchemas, Context> = CapturedTransitionHandler<
   States,
-  E,
-  R,
   Context
 >
 
@@ -173,17 +171,17 @@ export const resolveMachineReferences = (
   return root
 }
 
-export type MicrostepTransition<States extends Machine.StateSchemas, E, R, Context> = {
+export type MicrostepTransition<States extends Machine.StateSchemas, Context> = {
   readonly reenter: boolean
   readonly declinable: boolean
   readonly targets: ReadonlyArray<string> | undefined
-  readonly transition: TransitionHandler<States, E, R, Context>
-  readonly evaluate: TransitionEvaluator<States, E, R, Context> | undefined
+  readonly transition: TransitionHandler<States, Context>
+  readonly evaluate: TransitionEvaluator<States, Context> | undefined
 }
 
-export const normalizeTransition = <States extends Machine.StateSchemas, E, R, Context>(
-  transition: EventTransition<States, E, R, Context> | undefined
-): MicrostepTransition<States, E, R, Context> | undefined => {
+export const normalizeTransition = <States extends Machine.StateSchemas, Context>(
+  transition: EventTransition<States, Context> | undefined
+): MicrostepTransition<States, Context> | undefined => {
   if (transition === undefined) {
     return undefined
   }
@@ -198,9 +196,9 @@ export const normalizeTransition = <States extends Machine.StateSchemas, E, R, C
     }
 }
 
-const collectStateAction = <Context, Event, E, R>(
+const collectStateAction = <Context, Event>(
   machine: Machine.Any,
-  handler: ((context: Context, enqueue: Enqueue<any, any>) => Machine.StateActionResult<E, R>) | undefined,
+  handler: ((context: Context, enqueue: Enqueue<any, any>) => Machine.StateActionResult) | undefined,
   context: Context
 ) => {
   const collected = makeCollector<Event>(machine)
@@ -222,14 +220,12 @@ const collectStateAction = <Context, Event, E, R>(
 const collectTransition = <
   const States extends Machine.StateSchemas,
   Event,
-  E,
-  R,
   Context
 >(
   machine: Machine.Any,
-  transition: TransitionHandler<States, E, R, Context>,
+  transition: TransitionHandler<States, Context>,
   context: Context,
-  evaluate?: TransitionEvaluator<States, E, R, Context>
+  evaluate?: TransitionEvaluator<States, Context>
 ) => {
   const collected = makeCollector<Event>(machine)
   const evaluated = evaluate === undefined
@@ -593,11 +589,11 @@ function resolveHistoryTarget(
   }
 }
 
-export type SelectedTransition<States extends Machine.StateSchemas, E, R, Context> = {
+export type SelectedTransition<States extends Machine.StateSchemas, Context> = {
   readonly sourcePath: string
   readonly leafPath: string
   readonly trigger: Machine.TransitionTrigger
-  readonly transition: MicrostepTransition<States, E, R, Context>
+  readonly transition: MicrostepTransition<States, Context>
   readonly context: Context
   readonly collected?: {
     readonly declined: false
@@ -610,10 +606,10 @@ export type SelectedTransition<States extends Machine.StateSchemas, E, R, Contex
   }
 }
 
-const resolveDeclinableCandidate = <States extends Machine.StateSchemas, E, R, Context>(
+const resolveDeclinableCandidate = <States extends Machine.StateSchemas, Context>(
   machine: Machine.Any,
-  selection: SelectedTransition<States, E, R, Context>
-): SelectedTransition<States, E, R, Context> | undefined => {
+  selection: SelectedTransition<States, Context>
+): SelectedTransition<States, Context> | undefined => {
   if (!selection.transition.declinable) return selection
   const collected = collectTransition(
     machine,
@@ -624,8 +620,8 @@ const resolveDeclinableCandidate = <States extends Machine.StateSchemas, E, R, C
   return collected.declined ? undefined : { ...selection, collected }
 }
 
-export type EvaluatedTransition<States extends Machine.StateSchemas, Event, E, R, Context> = {
-  readonly selection: SelectedTransition<States, E, R, Context>
+export type EvaluatedTransition<States extends Machine.StateSchemas, Event, Context> = {
+  readonly selection: SelectedTransition<States, Context>
   readonly branchIndex: number
   readonly branchKey: string | undefined
   readonly unresolvedTarget:
@@ -767,7 +763,7 @@ const makeTransitionContext = <
   path: string,
   event: Machine.EventByTag<Events, EventTag>,
   snapshot: Machine.Snapshot<States>
-): ConstructionContext<Machine.HandlerContext<States, Events, Emits, StateId, EventTag, any, any>> => ({
+): ConstructionContext<Machine.HandlerContext<States, Events, Emits, StateId, EventTag>> => ({
   ...resolveMachineReferences(machine, configuration),
   state: configuration.values.get(path) as Machine.StateByIdentifier<States, StateId>,
   containingState: getParentValue(machine, configuration, path) as Machine.ParentStateValue<States, StateId>,
@@ -801,9 +797,7 @@ const makeDoneContext = <
 const collectStateActions = <
   const States extends Machine.StateSchemas,
   const Events extends ReadonlyArray<Machine.TaggedSchema>,
-  const Emits extends ReadonlyArray<Machine.TaggedSchema>,
-  E,
-  R
+  const Emits extends ReadonlyArray<Machine.TaggedSchema>
 >(
   machine: Machine.Any,
   configuration: ActiveConfiguration,
@@ -817,9 +811,7 @@ const collectStateActions = <
   for (const path of paths) {
     const collected = collectStateAction<
       Machine.StateActionContext<States, Events, Emits, Machine.StateIdentifier<States>>,
-      Machine.EventOf<Events>,
-      E,
-      R
+      Machine.EventOf<Events>
     >(
       machine,
       toImpl(machine).handlers[path]?.[key],
@@ -840,9 +832,7 @@ const collectStateActions = <
 const selectAlwaysTransitions = <
   const States extends Machine.StateSchemas,
   const Events extends ReadonlyArray<Machine.TaggedSchema>,
-  const Emits extends ReadonlyArray<Machine.TaggedSchema>,
-  E,
-  R
+  const Emits extends ReadonlyArray<Machine.TaggedSchema>
 >(
   machine: Machine.Any,
   configuration: ActiveConfiguration,
@@ -850,21 +840,17 @@ const selectAlwaysTransitions = <
 ): ReadonlyArray<
   SelectedTransition<
     States,
-    E,
-    R,
     ConstructionContext<Machine.AlwaysContext<States, Events, Emits, Machine.StateIdentifier<States>>>
   >
 > => {
   const selected: Array<
     SelectedTransition<
       States,
-      E,
-      R,
       ConstructionContext<Machine.AlwaysContext<States, Events, Emits, Machine.StateIdentifier<States>>>
     >
   > = []
   const selectedSources = new Set<string>()
-  const evaluatedSources = new Map<string, SelectedTransition<States, E, R, any> | undefined>()
+  const evaluatedSources = new Map<string, SelectedTransition<States, any> | undefined>()
   let snapshot: Machine.Snapshot<States> | undefined
   const capturedSnapshot = () => snapshot ??= snapshotFromConfiguration<States>(machine, configuration)
   for (const leaf of getActiveLeafPaths(machine, configuration)) {
@@ -913,9 +899,7 @@ const selectAlwaysTransitions = <
 const selectDoneTransitions = <
   const States extends Machine.StateSchemas,
   const Events extends ReadonlyArray<Machine.TaggedSchema>,
-  const Emits extends ReadonlyArray<Machine.TaggedSchema>,
-  E,
-  R
+  const Emits extends ReadonlyArray<Machine.TaggedSchema>
 >(
   machine: Machine.Any,
   configuration: ActiveConfiguration,
@@ -924,16 +908,12 @@ const selectDoneTransitions = <
 ): ReadonlyArray<
   SelectedTransition<
     States,
-    E,
-    R,
     ConstructionContext<Machine.DoneContext<States, Events, Emits, Machine.StateIdentifier<States>>>
   >
 > => {
   const selected: Array<
     SelectedTransition<
       States,
-      E,
-      R,
       ConstructionContext<Machine.DoneContext<States, Events, Emits, Machine.StateIdentifier<States>>>
     >
   > = []
@@ -967,9 +947,7 @@ const selectDoneTransitions = <
 const selectEventTransitions = <
   const States extends Machine.StateSchemas,
   const Events extends ReadonlyArray<Machine.TaggedSchema>,
-  const Emits extends ReadonlyArray<Machine.TaggedSchema>,
-  E,
-  R
+  const Emits extends ReadonlyArray<Machine.TaggedSchema>
 >(
   machine: Machine.Any,
   configuration: ActiveConfiguration,
@@ -977,17 +955,13 @@ const selectEventTransitions = <
 ): ReadonlyArray<
   SelectedTransition<
     States,
-    E,
-    R,
     ConstructionContext<
       Machine.HandlerContext<
         States,
         Events,
         Emits,
         Machine.StateIdentifier<States>,
-        Machine.TagOf<Events[number]>,
-        E,
-        R
+        Machine.TagOf<Events[number]>
       >
     >
   >
@@ -995,23 +969,19 @@ const selectEventTransitions = <
   const selected: Array<
     SelectedTransition<
       States,
-      E,
-      R,
       ConstructionContext<
         Machine.HandlerContext<
           States,
           Events,
           Emits,
           Machine.StateIdentifier<States>,
-          Machine.TagOf<Events[number]>,
-          E,
-          R
+          Machine.TagOf<Events[number]>
         >
       >
     >
   > = []
   const selectedSources = new Set<string>()
-  const evaluatedSources = new Map<string, SelectedTransition<States, E, R, any> | undefined>()
+  const evaluatedSources = new Map<string, SelectedTransition<States, any> | undefined>()
   let snapshot: Machine.Snapshot<States> | undefined
   const capturedSnapshot = () => snapshot ??= snapshotFromConfiguration<States>(machine, configuration)
   for (const leaf of getActiveLeafPaths(machine, configuration)) {
@@ -1047,17 +1017,11 @@ const selectEventTransitions = <
   return selected
 }
 
-const selectInvocationTransition = <
-  const States extends Machine.StateSchemas,
-  const Events extends ReadonlyArray<Machine.TaggedSchema>,
-  const Emits extends ReadonlyArray<Machine.TaggedSchema>,
-  E,
-  R
->(
+const selectInvocationTransition = <const States extends Machine.StateSchemas>(
   machine: Machine.Any,
   configuration: ActiveConfiguration,
   event: InvocationEvent.InvocationEvent
-): ReadonlyArray<SelectedTransition<States, E, R, any>> => {
+): ReadonlyArray<SelectedTransition<States, any>> => {
   // An outcome belongs to the activation of its owner that started it. One
   // queued before that owner exited is discarded, even after the same path and
   // id are entered again.
@@ -1164,12 +1128,10 @@ export const sortEvaluatedTransitions = <Transition extends Pick<ConflictCandida
 
 const removePreemptedAncestorSelections = <
   const States extends Machine.StateSchemas,
-  E,
-  R,
   Context
 >(
-  selections: ReadonlyArray<SelectedTransition<States, E, R, Context>>
-): ReadonlyArray<SelectedTransition<States, E, R, Context>> =>
+  selections: ReadonlyArray<SelectedTransition<States, Context>>
+): ReadonlyArray<SelectedTransition<States, Context>> =>
   selections.filter((selection) =>
     !selections.some((other) =>
       other.sourcePath !== selection.sourcePath && isDescendantOf(other.sourcePath, selection.sourcePath)
@@ -1381,16 +1343,14 @@ function resolveChoiceTarget(
 const collectEvaluatedTransition = <
   const States extends Machine.StateSchemas,
   Event,
-  E,
-  R,
   Context extends { readonly event?: unknown }
 >(
   machine: Machine.Any,
   state: ActiveConfiguration,
-  selection: SelectedTransition<States, E, R, Context>
+  selection: SelectedTransition<States, Context>
 ) => {
   const stateIdentifier = selection.leafPath
-  const transitionResult = selection.collected ?? collectTransition<States, Event, E, R, Context>(
+  const transitionResult = selection.collected ?? collectTransition<States, Event, Context>(
     machine,
     selection.transition.transition,
     selection.context,
@@ -1597,7 +1557,7 @@ const collectEvaluatedTransition = <
         ...(historyResolution?.transitions ?? []),
         ...additionalTargetChoiceTransitions
       ]
-    } as EvaluatedTransition<States, Event, E, R, Context>
+    } as EvaluatedTransition<States, Event, Context>
   }
 
   const naturalBoundary = targetPath === undefined
@@ -1656,7 +1616,7 @@ const collectEvaluatedTransition = <
       ...(historyResolution?.transitions ?? []),
       ...additionalTargetChoiceTransitions
     ]
-  } as EvaluatedTransition<States, Event, E, R, Context>
+  } as EvaluatedTransition<States, Event, Context>
 }
 
 export const MaxMacrostepIterations = 1000
@@ -1814,7 +1774,7 @@ const microstep = (
   machine: Machine.Any,
   state: ActiveConfiguration,
   event: Machine.LifecycleEvent<any>,
-  selections: ReadonlyArray<SelectedTransition<any, any, any, any>>
+  selections: ReadonlyArray<SelectedTransition<any, any>>
 ) => {
   if (selections.length === 0) {
     return {
@@ -1832,7 +1792,7 @@ const microstep = (
   }
 
   const activeSelections = removePreemptedAncestorSelections(selections)
-  const evaluatedTransitions: Array<EvaluatedTransition<any, Machine.EventOf<any>, any, any, any>> = []
+  const evaluatedTransitions: Array<EvaluatedTransition<any, Machine.EventOf<any>, any>> = []
   for (const selection of activeSelections) {
     evaluatedTransitions.push(
       collectEvaluatedTransition(
@@ -1954,7 +1914,7 @@ const settle = (
   commands: Array<RuntimeCommand>,
   raisedEvents: Array<Machine.EventOf<any>>,
   emittedEvents: Array<unknown>,
-  microsteps: Array<SettlingMicrostep<ActiveConfiguration, Machine.EventOf<any>, any, any>>
+  microsteps: Array<SettlingMicrostep<ActiveConfiguration, Machine.EventOf<any>>>
 ) => {
   let currentState = state
   let currentEvent = event
@@ -1990,7 +1950,7 @@ const settle = (
       pendingCompletions.length === 0 ? [] : [pendingCompletions.shift()!]
     )
     if (done.length > 0) {
-      const doneStep: SettlingMicrostep<ActiveConfiguration, Machine.EventOf<any>, any, any> = microstep(
+      const doneStep: SettlingMicrostep<ActiveConfiguration, Machine.EventOf<any>> = microstep(
         machine,
         currentState,
         currentEvent,
@@ -2018,7 +1978,7 @@ const settle = (
       ? selectAlwaysTransitions(machine, currentState, currentEvent)
       : []
     if (always.length > 0) {
-      const alwaysStep: SettlingMicrostep<ActiveConfiguration, Machine.EventOf<any>, any, any> = microstep(
+      const alwaysStep: SettlingMicrostep<ActiveConfiguration, Machine.EventOf<any>> = microstep(
         machine,
         currentState,
         currentEvent,
@@ -2139,13 +2099,11 @@ const macrostepConfiguration = (
 const snapshotMacrostep = <
   const States extends Machine.StateSchemas,
   Event,
-  E,
-  R,
   Output
 >(
   machine: Machine.Any,
-  settled: MacrostepPlan<ActiveConfiguration, Event, E, R, Output> & { readonly event: unknown }
-): MacrostepPlan<Machine.Snapshot<States>, Event, E, R, Output> & { readonly event: unknown } => {
+  settled: MacrostepPlan<ActiveConfiguration, Event, Output> & { readonly event: unknown }
+): MacrostepPlan<Machine.Snapshot<States>, Event, Output> & { readonly event: unknown } => {
   const planned = {
     event: settled.event,
     next: snapshotFromConfiguration<States>(machine, settled.next),

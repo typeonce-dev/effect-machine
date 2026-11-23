@@ -48,8 +48,6 @@ type InputIsExact = Expect<
 type InputEventIsExact = Expect<Equal<Machine.Machine.InputEvent<typeof complete>, typeof Start.Type>>
 type EventIsExact = Expect<Equal<Machine.Machine.Event<typeof complete>, typeof Start.Type | typeof Loaded.Type>>
 type EmitIsExact = Expect<Equal<Machine.Machine.EmittedEvent<typeof complete>, typeof Notice.Type>>
-type InitialErrorIsExact = Expect<Equal<Machine.Machine.InitialError<typeof complete>, never>>
-type InitialServicesAreExact = Expect<Equal<Machine.Machine.InitialServices<typeof complete>, never>>
 type ErrorIsExact = Expect<Equal<Machine.Machine.Error<typeof complete>, never>>
 type ServicesAreExact = Expect<Equal<Machine.Machine.Services<typeof complete>, never>>
 type OutputIsExact = Expect<Equal<Machine.Machine.Output<typeof complete>, string>>
@@ -65,8 +63,6 @@ export type {
   ErrorIsExact,
   ErrorIsNotAny,
   EventIsExact,
-  InitialErrorIsExact,
-  InitialServicesAreExact,
   InputEventIsExact,
   InputIsExact,
   InputSchemaIsExact,

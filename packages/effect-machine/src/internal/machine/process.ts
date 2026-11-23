@@ -6,7 +6,7 @@
 
 import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
-import type { Machine, Runtime } from "../../Machine.js"
+import type { Machine } from "../../Machine.js"
 import * as CommandRuntime from "./commandRuntime.js"
 import * as Configuration from "./configuration.js"
 import { failPlanning, toStartupFailure } from "./errors.js"
@@ -93,8 +93,8 @@ const makeChildlessCompiledDrain = (
 ): Pick<internalRuntimeProtocol.OwnedCompiledProcessDrain<any, any, any, any, any>, "run" | "runSync"> => {
   type Context = internalRuntimeProtocol.CompiledProcessContext<any, any>
   const executionPlan = ExecutionPlan.compileExecutionPlan(machine)
-  const liveRuntimes = new WeakMap<object, Runtime<unknown, unknown>>()
-  const liveRuntime = (context: Context): Runtime<unknown, unknown> => {
+  const liveRuntimes = new WeakMap<object, CommandRuntime.LiveRuntime>()
+  const liveRuntime = (context: Context): CommandRuntime.LiveRuntime => {
     let runtime = liveRuntimes.get(context.scope)
     if (runtime === undefined) {
       runtime = CommandRuntime.makeLiveRuntime(machine, context.scope)
@@ -277,7 +277,7 @@ const makeInvokingCompiledDrain = (
       ? stored
       : new InvokeExecutionState()
     context.executionState = execution
-    let liveRuntime: Runtime<any, any> | undefined
+    let liveRuntime: CommandRuntime.LiveRuntime | undefined
     let configuration: unknown
 
     let loop: Effect.Effect<Option.Option<any>, any, any>
@@ -518,7 +518,7 @@ const makeProcessLogic = (
             let configuration: Configuration.ActiveConfiguration | undefined
             let pendingMessage: Option.Option<internalRuntimeProtocol.ProcessMessage<Machine.EventOf<any>>> = Option
               .none()
-            let liveRuntime: Runtime<Machine.EventOf<any>, Machine.EmittedEventOf<any>> | undefined
+            let liveRuntime: CommandRuntime.LiveRuntime | undefined
             while (terminal === undefined) {
               const message = Option.isSome(pendingMessage) ? pendingMessage.value : yield* receiveMessage
               pendingMessage = Option.none()
@@ -623,7 +623,7 @@ const makeProcessLogic = (
             configuration = undefined
             let pendingMessage: Option.Option<internalRuntimeProtocol.ProcessMessage<Machine.EventOf<any>>> = Option
               .none()
-            let liveRuntime: Runtime<Machine.EventOf<any>, Machine.EmittedEventOf<any>> | undefined
+            let liveRuntime: CommandRuntime.LiveRuntime | undefined
 
             // Match the compact non-invoke loop while retaining state-scoped
             // child lifecycle work at the same ordered Effect boundaries.

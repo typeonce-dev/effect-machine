@@ -727,7 +727,7 @@ describe("machine planner and runtime strategies", () => {
     }))
   it("falls back to the generic planner for unknown state semantics", () => {
     const machine = makeFlatMachine()
-    const config = machine.handlers.Count as Machine.Machine.AnyStateConfig & Record<PropertyKey, unknown>
+    const config = machine.handlers.Count as Record<PropertyKey, unknown>
     config.futureSemanticCapability = () => undefined
     assert.strictEqual(ExecutionPlan.selectExecutionPlanForTesting(machine, "auto").strategy, "generic")
   })
