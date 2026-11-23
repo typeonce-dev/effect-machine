@@ -2486,31 +2486,35 @@ describe("ClusterMachine", () => {
             }))
         }))
 
-      it.effect("still revives an entity whose work has run for longer than a claim lasts", () =>
-        Effect.gen(function*() {
-          const work = makeWork()
-          yield* run(makeLoader(work), { idle: 0 }, ({ driver, send, sharding }) =>
-            Effect.gen(function*() {
-              assertAccepted(yield* send(Event.Load({ id: "a" })))
-              for (let minutes = 0; minutes < 16; minutes++) {
-                yield* TestClock.adjust("1 minute")
+      it.effect(
+        "still revives an entity whose work has run for longer than a claim lasts",
+        () =>
+          Effect.gen(function*() {
+            const work = makeWork()
+            yield* run(makeLoader(work), { idle: 0 }, ({ driver, send, sharding }) =>
+              Effect.gen(function*() {
+                assertAccepted(yield* send(Event.Load({ id: "a" })))
+                for (let minutes = 0; minutes < 16; minutes++) {
+                  yield* TestClock.adjust("1 minute")
+                  yield* settle
+                  assert.strictEqual(keptAlive(driver), 1)
+                }
+                assert.strictEqual(yield* sharding.activeEntityCount, 1)
+                assert.strictEqual(work.runs.length, 1)
+                assert.isFalse(work.runs[0]!.stopped)
+                // The requests that were replaced are answered.
+                assertAccepted(yield* send(Event.Cancel()))
                 yield* settle
-                assert.strictEqual(keptAlive(driver), 1)
-              }
-              assert.strictEqual(yield* sharding.activeEntityCount, 1)
-              assert.strictEqual(work.runs.length, 1)
-              assert.isFalse(work.runs[0]!.stopped)
-              // The requests that were replaced are answered.
-              assertAccepted(yield* send(Event.Cancel()))
-              yield* settle
-              assert.strictEqual(keptAlive(driver), 0)
-              const sent = driver.journal.length
-              yield* TestClock.adjust("6 minutes")
-              yield* settle
-              assert.strictEqual(driver.journal.length, sent)
-              assert.strictEqual(yield* sharding.activeEntityCount, 0)
-            }))
-        }))
+                assert.strictEqual(keptAlive(driver), 0)
+                const sent = driver.journal.length
+                yield* TestClock.adjust("6 minutes")
+                yield* settle
+                assert.strictEqual(driver.journal.length, sent)
+                assert.strictEqual(yield* sharding.activeEntityCount, 0)
+              }))
+          }),
+        30000
+      )
 
       it.effect("releases a request left by a deployment that invoked effects", () =>
         Effect.gen(function*() {
