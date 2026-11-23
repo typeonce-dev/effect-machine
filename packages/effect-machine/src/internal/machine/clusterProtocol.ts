@@ -56,7 +56,7 @@ export class Accepted extends Schema.TaggedClass<Accepted>("effect/cluster/Clust
 ) {}
 
 export const RejectionReason = Schema.Literals([
-  "MachineIdMismatch",
+  "DefinitionIdMismatch",
   "VersionMismatch",
   "InvalidCheckpoint",
   "UnsupportedProcessLocal",

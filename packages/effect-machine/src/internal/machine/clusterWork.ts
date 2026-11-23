@@ -13,10 +13,10 @@ import * as Fiber from "effect/Fiber"
 import * as Scope from "effect/Scope"
 import type { ChildOwner, MachineTarget } from "../../Machine.js"
 import type { Checkpoint } from "../../unstable/cluster/ClusterMachine.js"
+import * as CapturedInvocation from "./capturedInvocation.js"
 import * as ClusterProgress from "./clusterProgress.js"
 import * as ClusterTimer from "./clusterTimer.js"
 import { ProcessLocalError } from "./errors.js"
-import * as InvocationDefinition from "./invocationDefinition.js"
 import type { Generation } from "./invocationEvent.js"
 import { InvocationGenerations } from "./invocationGeneration.js"
 import type * as InvocationOutcome from "./invocationOutcome.js"
@@ -53,8 +53,8 @@ const refusedChildren: ChildOwner<any> = {
  *
  * @internal
  */
-export const makeCapabilities = (machineId: string): InvocationResolution.InvocationCapabilities => ({
-  self: new HostedTarget(machineId),
+export const makeCapabilities = (definitionId: string): InvocationResolution.InvocationCapabilities => ({
+  self: new HostedTarget(definitionId),
   parent: undefined,
   children: refusedChildren
 })
@@ -103,7 +103,7 @@ export type Stored = ClusterTimer.Schedule
 
 /** @internal */
 export interface Options<R> {
-  readonly machineId: string
+  readonly definitionId: string
   readonly address: EntityAddress
 
   /** Services of every work fiber, whatever started it. */
@@ -235,12 +235,12 @@ export class ClusterWork<R> {
     effect: Effect.Effect<unknown, unknown, unknown>,
     generation: Generation
   ): Effect.Effect<void> {
-    const { address, context, machineId, onEnd } = this.options
+    const { address, context, definitionId, onEnd } = this.options
     const hosted = Effect.suspend(() => effect).pipe(
       Effect.scoped,
       Effect.withSpan("Machine.invoke", {
         attributes: {
-          "machine.id": machineId,
+          "machine.id": definitionId,
           "machine.state.path": invocation.path,
           "machine.invoke.id": invocation.id,
           "machine.invoke.source": invocation.sourceName ?? invocation.id,
@@ -329,7 +329,7 @@ export type Support =
   | { readonly _tag: "Hosted" }
   | { readonly _tag: "Unsupported"; readonly message: string }
 
-const unsupportedKind = (definition: InvocationDefinition.InvocationDefinition): string | undefined => {
+const unsupportedKind = (definition: CapturedInvocation.CapturedInvocation): string | undefined => {
   if ("effect" in definition || "after" in definition) return undefined
   if ("stream" in definition) return "Stream"
   if ("logic" in definition) return "Logic"
@@ -345,10 +345,10 @@ const unsupportedKind = (definition: InvocationDefinition.InvocationDefinition):
 export const supportOf = (handlers: Readonly<Record<string, { readonly invoke?: unknown } | undefined>>): Support => {
   let support: Support = { _tag: "Idle" }
   for (const path of Object.keys(handlers)) {
-    for (const definition of InvocationDefinition.definitions(handlers[path]?.invoke)) {
+    for (const definition of CapturedInvocation.list(handlers[path]?.invoke)) {
       const kind = unsupportedKind(definition)
       if (kind !== undefined) {
-        const id = InvocationDefinition.lifecycleId(definition)
+        const id = CapturedInvocation.lifecycleId(definition)
         return {
           _tag: "Unsupported",
           message: `${kind} invocation "${id}" of state "${path}" is process-local and is not supported`

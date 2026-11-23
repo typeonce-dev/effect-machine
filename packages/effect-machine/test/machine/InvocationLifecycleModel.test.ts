@@ -3,21 +3,21 @@ import { Deferred, Effect, Exit, Fiber, Schema, Stream } from "effect"
 import { TestClock } from "effect/testing"
 import { LocalMachine, Machine } from "../../src/index.js"
 import {
-  ActivityFailure,
   countRecords,
   expectedLifecycle,
+  InvocationFailure,
   lifecycleCommandSamples,
-  makeActivityProbe
-} from "./support/activityLifecycleModel.js"
-class Idle extends Schema.TaggedClass<Idle>("ActivityIdle")("Idle", {}) {}
-class Active extends Schema.TaggedClass<Active>("ActivityActive")("Active", {}) {}
-class Done extends Schema.TaggedClass<Done>("ActivityDone")("Done", { epoch: Schema.Number }) {}
-class Enter extends Schema.TaggedClass<Enter>("ActivityEnter")("Enter", {}) {}
-class Leave extends Schema.TaggedClass<Leave>("ActivityLeave")("Leave", {}) {}
-class Restart extends Schema.TaggedClass<Restart>("ActivityRestart")("Restart", {}) {}
-class QueueBarrier extends Schema.TaggedClass<QueueBarrier>("ActivityQueueBarrier")("QueueBarrier", {}) {}
-class Completed extends Schema.TaggedClass<Completed>("ActivityCompleted")("Completed", { epoch: Schema.Number }) {}
-class TimerFired extends Schema.TaggedClass<TimerFired>("ActivityTimerFired")("TimerFired", {}) {}
+  makeInvocationProbe
+} from "./support/invocationLifecycleModel.js"
+class Idle extends Schema.TaggedClass<Idle>("InvocationIdle")("Idle", {}) {}
+class Active extends Schema.TaggedClass<Active>("InvocationActive")("Active", {}) {}
+class Done extends Schema.TaggedClass<Done>("InvocationDone")("Done", { epoch: Schema.Number }) {}
+class Enter extends Schema.TaggedClass<Enter>("InvocationEnter")("Enter", {}) {}
+class Leave extends Schema.TaggedClass<Leave>("InvocationLeave")("Leave", {}) {}
+class Restart extends Schema.TaggedClass<Restart>("InvocationRestart")("Restart", {}) {}
+class QueueBarrier extends Schema.TaggedClass<QueueBarrier>("InvocationQueueBarrier")("QueueBarrier", {}) {}
+class Completed extends Schema.TaggedClass<Completed>("InvocationCompleted")("Completed", { epoch: Schema.Number }) {}
+class TimerFired extends Schema.TaggedClass<TimerFired>("InvocationTimerFired")("TimerFired", {}) {}
 const sendAndWaitForActiveState = <State, Event, Error, Output>(
   actor: Machine.MachineRef<State, Event, Error, Output>,
   event: Event,
@@ -54,17 +54,17 @@ const assertOneExitPerStart = (
         record._tag === "Exited" && record.owner === start.owner && record.epoch === start.epoch
       ).length,
       1,
-      `activity ${start.owner} epoch ${start.epoch} must exit exactly once`
+      `invocation ${start.owner} epoch ${start.epoch} must exit exactly once`
     )
   }
 }
-describe("machine activity lifecycle model", () => {
+describe("machine invocation lifecycle model", () => {
   it.effect("matches exactly-once start and cancellation across generated lifecycle commands", () =>
     Effect.gen(function*() {
       const samples = lifecycleCommandSamples({ numRuns: 40, maxCommands: 20, seed: 82419 })
       yield* Effect.forEach(samples, (commands) =>
         Effect.gen(function*() {
-          const probe = yield* makeActivityProbe
+          const probe = yield* makeInvocationProbe
           const states = Machine.state({ states: { Idle, Active } })
           const machine = Machine.make({
             logic: { source1: probe.logic("active", { _tag: "Blocked" }) },
@@ -85,8 +85,8 @@ describe("machine activity lifecycle model", () => {
               Active: {
                 invoke: {
                   src: "source1",
-                  id: "activity",
-                  address: Machine.childAddress("activity"),
+                  id: "invocation",
+                  address: Machine.childAddress("invocation"),
                   onDone: { stay: true },
                   onFailure: { stay: true }
                 },
@@ -136,7 +136,7 @@ describe("machine activity lifecycle model", () => {
     }))
   it.effect("records immediate invoke completion and cleanup exactly once", () =>
     Effect.gen(function*() {
-      const probe = yield* makeActivityProbe
+      const probe = yield* makeInvocationProbe
       const states = Machine.state({
         states: {
           Active,
@@ -182,8 +182,8 @@ describe("machine activity lifecycle model", () => {
     }))
   it.effect("rejects stale cancellation completion from a previous re-entry epoch", () =>
     Effect.gen(function*() {
-      const probe = yield* makeActivityProbe
-      class EpochActive extends Schema.TaggedClass<EpochActive>("ActivityEpochActive")("EpochActive", {
+      const probe = yield* makeInvocationProbe
+      class EpochActive extends Schema.TaggedClass<EpochActive>("InvocationEpochActive")("EpochActive", {
         acknowledged: Schema.Number
       }) {
       }
@@ -269,22 +269,22 @@ describe("machine activity lifecycle model", () => {
       assert.strictEqual(countRecords(records, "cancelled", "epoch"), 3)
       assertOneExitPerStart(records)
     }))
-  it.effect("cancels only the activity owned by an exited parallel region", () =>
+  it.effect("cancels only the invocation owned by an exited parallel region", () =>
     Effect.gen(function*() {
-      const probe = yield* makeActivityProbe
-      class Root extends Schema.TaggedClass<Root>("ActivityRoot")("Root", {}) {
+      const probe = yield* makeInvocationProbe
+      class Root extends Schema.TaggedClass<Root>("InvocationRoot")("Root", {}) {
       }
-      class Left extends Schema.TaggedClass<Left>("ActivityLeft")("Left", {}) {
+      class Left extends Schema.TaggedClass<Left>("InvocationLeft")("Left", {}) {
       }
-      class LeftActive extends Schema.TaggedClass<LeftActive>("ActivityLeftActive")("LeftActive", {}) {
+      class LeftActive extends Schema.TaggedClass<LeftActive>("InvocationLeftActive")("LeftActive", {}) {
       }
-      class LeftIdle extends Schema.TaggedClass<LeftIdle>("ActivityLeftIdle")("LeftIdle", {}) {
+      class LeftIdle extends Schema.TaggedClass<LeftIdle>("InvocationLeftIdle")("LeftIdle", {}) {
       }
-      class Right extends Schema.TaggedClass<Right>("ActivityRight")("Right", {}) {
+      class Right extends Schema.TaggedClass<Right>("InvocationRight")("Right", {}) {
       }
-      class RightActive extends Schema.TaggedClass<RightActive>("ActivityRightActive")("RightActive", {}) {
+      class RightActive extends Schema.TaggedClass<RightActive>("InvocationRightActive")("RightActive", {}) {
       }
-      class LeaveLeft extends Schema.TaggedClass<LeaveLeft>("ActivityLeaveLeft")("LeaveLeft", {}) {
+      class LeaveLeft extends Schema.TaggedClass<LeaveLeft>("InvocationLeaveLeft")("LeaveLeft", {}) {
       }
       const root4 = Machine.state({
         states: {
@@ -331,8 +331,8 @@ describe("machine activity lifecycle model", () => {
                   active: {
                     invoke: {
                       src: "source1",
-                      id: "left-activity",
-                      address: Machine.childAddress("left-activity"),
+                      id: "left-invocation",
+                      address: Machine.childAddress("left-invocation"),
                       onDone: { stay: true },
                       onFailure: { stay: true }
                     },
@@ -353,8 +353,8 @@ describe("machine activity lifecycle model", () => {
                   active: {
                     invoke: {
                       src: "source2",
-                      id: "right-activity",
-                      address: Machine.childAddress("right-activity"),
+                      id: "right-invocation",
+                      address: Machine.childAddress("right-invocation"),
                       onDone: { stay: true },
                       onFailure: { stay: true }
                     }
@@ -383,7 +383,7 @@ describe("machine activity lifecycle model", () => {
     }))
   it.effect("cancels a state-owned timer before virtual time advances", () =>
     Effect.gen(function*() {
-      const probe = yield* makeActivityProbe
+      const probe = yield* makeInvocationProbe
       const states = Machine.state({ states: { Idle, Active, Done } })
       const machine = Machine.make({
         timers: { source2: "1 hour" },
@@ -402,8 +402,8 @@ describe("machine activity lifecycle model", () => {
           Active: {
             invoke: [{
               src: "source1",
-              id: "timed-activity",
-              address: Machine.childAddress("timed-activity"),
+              id: "timed-invocation",
+              address: Machine.childAddress("timed-invocation"),
               onDone: { stay: true },
               onFailure: { stay: true }
             }, {
@@ -432,9 +432,9 @@ describe("machine activity lifecycle model", () => {
       assertOneExitPerStart(records)
       yield* actor.stop
     }))
-  it.effect("cleans sibling activities when an invoked child fails", () =>
+  it.effect("cleans sibling invocations when an invoked child fails", () =>
     Effect.gen(function*() {
-      const probe = yield* makeActivityProbe
+      const probe = yield* makeInvocationProbe
       const states = Machine.state({ states: { Active } })
       const machine = Machine.make({
         logic: {
@@ -480,16 +480,16 @@ describe("machine activity lifecycle model", () => {
       const failed = yield* Effect.exit(actor.join)
       assert(Exit.isFailure(failed))
       if (Exit.isFailure(failed)) {
-        assert.instanceOf(failed.cause.reasons.find((reason) => reason._tag === "Die")?.defect, ActivityFailure)
+        assert.instanceOf(failed.cause.reasons.find((reason) => reason._tag === "Die")?.defect, InvocationFailure)
       }
       const records = yield* probe.records
       assert.strictEqual(countRecords(records, "failed", "failing"), 1)
       assert.strictEqual(countRecords(records, "cancelled", "sibling"), 1)
       assertOneExitPerStart(records)
     }))
-  it.effect("waits for every activity cleanup before parent stop completes", () =>
+  it.effect("waits for every invocation cleanup before parent stop completes", () =>
     Effect.gen(function*() {
-      const probe = yield* makeActivityProbe
+      const probe = yield* makeInvocationProbe
       const states = Machine.state({ states: { Active } })
       const machine = Machine.make({
         logic: {

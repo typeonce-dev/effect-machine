@@ -6,6 +6,7 @@
 
 import * as Effect from "effect/Effect"
 import type { Enqueue, InitialEvent as MachineInitialEvent, Machine, MachineTarget } from "../../Machine.js"
+import * as CapturedInvocation from "./capturedInvocation.js"
 import { makeCollector, type RuntimeCommand } from "./command.js"
 import {
   type ActiveConfiguration,
@@ -42,7 +43,6 @@ import type { PlanningError, StartupError } from "./errors.js"
 import { toImpl } from "./implementation.js"
 import { isDataInitializer } from "./initialDeclaration.js"
 import { getStateInitializeValues, makeStateInitializeBuilder } from "./initialization.js"
-import * as InvocationDefinition from "./invocationDefinition.js"
 import * as InvocationEvent from "./invocationEvent.js"
 import { decodeEventSync, decodeInputSync, decodeStateValueSync } from "./protocol.js"
 import { InitialEventTypeId } from "./symbols.js"
@@ -1027,7 +1027,7 @@ const selectInvocationTransition = <const States extends Machine.StateSchemas>(
   // id are entered again.
   if (!InvocationEvent.isCurrent(event) || !configuration.active.has(event.path)) return []
   const config = toImpl(machine).handlers[event.path]
-  const invoke = InvocationDefinition.definitions(config?.invoke).find((definition) => {
+  const invoke = CapturedInvocation.list(config?.invoke).find((definition) => {
     const id = "child" in definition ? definition.child?.id : definition.id
     return String(id) === event.id
   })

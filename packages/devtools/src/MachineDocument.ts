@@ -13,7 +13,7 @@ import * as internal from "./internal/machineDocument.js"
  * @category models
  * @since 0.23.0
  */
-export const schemaVersion = 3 as const
+export const schemaVersion = 4 as const
 
 /**
  * Source module and export that produced a machine.
@@ -102,7 +102,7 @@ export const State = Schema.Struct({
   valueSchema: Schema.NullOr(InputSchema),
   outputSchema: Schema.NullOr(InputSchema),
   transitionIds: Schema.Array(Schema.String),
-  activityIds: Schema.Array(Schema.String)
+  invocationIds: Schema.Array(Schema.String)
 })
 
 /**
@@ -178,7 +178,7 @@ export const Transition = Schema.Struct({
  */
 export type Transition = Schema.Schema.Type<typeof Transition>
 
-const ActivityFields = {
+const InvocationFields = {
   id: Schema.String,
   source: Schema.String,
   lifecycleId: Schema.String
@@ -188,10 +188,10 @@ const ActivityFields = {
  * @category schemas
  * @since 0.23.0
  */
-export const Activity = Schema.Union([
-  Schema.Struct({ ...ActivityFields, type: Schema.tag("process") }),
+export const Invocation = Schema.Union([
+  Schema.Struct({ ...InvocationFields, type: Schema.tag("process") }),
   Schema.Struct({
-    ...ActivityFields,
+    ...InvocationFields,
     type: Schema.tag("effect"),
     outcomes: Schema.Struct({
       success: Schema.Literal("dynamic"),
@@ -199,13 +199,13 @@ export const Activity = Schema.Union([
     })
   }),
   Schema.Struct({
-    ...ActivityFields,
+    ...InvocationFields,
     type: Schema.tag("timer"),
     duration: Schema.String
   }),
-  Schema.Struct({ ...ActivityFields, type: Schema.tag("stream") }),
+  Schema.Struct({ ...InvocationFields, type: Schema.tag("stream") }),
   Schema.Struct({
-    ...ActivityFields,
+    ...InvocationFields,
     type: Schema.tag("machine"),
     child: Schema.Struct({
       id: Schema.String,
@@ -218,7 +218,7 @@ export const Activity = Schema.Union([
  * @category models
  * @since 0.23.0
  */
-export type Activity = Schema.Schema.Type<typeof Activity>
+export type Invocation = Schema.Schema.Type<typeof Invocation>
 
 /**
  * @category schemas
@@ -284,7 +284,7 @@ export const MachineDocument = Schema.Struct({
   roots: Schema.Array(Schema.String),
   states: Schema.Array(State),
   transitions: Schema.Array(Transition),
-  activities: Schema.Array(Activity),
+  invocations: Schema.Array(Invocation),
   inputs: Inputs,
   snapshot: Schema.NullOr(Snapshot)
 })
@@ -309,7 +309,7 @@ export interface MakeOptions<M extends Machine.Machine.Any> {
 
 /**
  * Captures every serializable definition exposed by Effect Machine inspection.
- * It never evaluates transition resolvers or activity sources.
+ * It never evaluates transition resolvers or invocation sources.
  *
  * @category constructors
  * @since 0.23.0

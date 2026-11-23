@@ -30,8 +30,8 @@ import type * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import type * as Stream from "effect/Stream"
 import type { ChildMachine, ChildOwner, Logic, Machine, MachineTarget } from "../../Machine.js"
+import * as CapturedInvocation from "./capturedInvocation.js"
 import * as Configuration from "./configuration.js"
-import * as InvocationDefinition from "./invocationDefinition.js"
 import * as Planner from "./planner.js"
 
 /**
@@ -153,7 +153,7 @@ const channelCombinations: ReadonlyArray<OutcomeChannels> = Array.from({ length:
 
 // Descriptions live as long as the work they start, so equal channels share one
 // immutable value.
-const outcomeChannels = (definition: InvocationDefinition.InvocationDefinition): OutcomeChannels =>
+const outcomeChannels = (definition: CapturedInvocation.CapturedInvocation): OutcomeChannels =>
   channelCombinations[
     (definition.onDone === undefined ? 0 : 1) |
     (definition.onFailure === undefined ? 0 : 2) |
@@ -169,29 +169,29 @@ const toDuration = (input: Duration.Input): Exit.Exit<Duration.Duration> => {
   }
 }
 
-type ChildDefinition = Extract<InvocationDefinition.InvocationDefinition, { readonly child: ChildMachine.Any }>
+type CapturedChild = Extract<CapturedInvocation.CapturedInvocation, { readonly child: ChildMachine.Any }>
 
 // A child without input does not depend on its entry context, so neither
 // building nor retaining one is worthwhile.
 const resolveChild = (
-  definition: ChildDefinition,
+  definition: CapturedChild,
   path: string,
   input: (() => unknown) | undefined
 ): ChildInvocation => ({
   _tag: "Child",
   path,
-  id: InvocationDefinition.lifecycleId(definition),
+  id: CapturedInvocation.lifecycleId(definition),
   channels: outcomeChannels(definition),
   child: definition.child,
   input
 })
 
 const resolveDefinition = (
-  definition: InvocationDefinition.InvocationDefinition,
+  definition: CapturedInvocation.CapturedInvocation,
   path: string,
-  context: InvocationDefinition.Context
+  context: CapturedInvocation.Context
 ): ResolvedInvocation => {
-  const id = InvocationDefinition.lifecycleId(definition)
+  const id = CapturedInvocation.lifecycleId(definition)
   const sourceName = definition.sourceName
   const channels = outcomeChannels(definition)
   if ("effect" in definition) {
@@ -253,9 +253,9 @@ export const resolve = (
   let groups: Array<InvocationGroup> | undefined
   for (const path of Planner.sortEntryPaths(machine, entryPaths)) {
     if (!configuration.active.has(path)) continue
-    const definitions = InvocationDefinition.definitions(Configuration.getStateConfigByPath(machine, path)?.invoke)
+    const definitions = CapturedInvocation.list(Configuration.getStateConfigByPath(machine, path)?.invoke)
     if (definitions.length === 0) continue
-    let context: InvocationDefinition.Context | undefined
+    let context: CapturedInvocation.Context | undefined
     ;(groups ??= []).push({
       path,
       invocations: definitions.map((definition) =>

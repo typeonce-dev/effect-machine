@@ -59,7 +59,7 @@ const makeHost = (context: Context.Context<never> = Context.empty()) => {
   const ended: Array<readonly [id: string, exit: Exit.Exit<unknown, unknown>]> = []
   const seen: Array<ClusterWork.Work> = []
   const work = new ClusterWork.ClusterWork<never>({
-    machineId: "Worker",
+    definitionId: "Worker",
     address,
     context,
     onEnd: (work, exit) =>
@@ -125,7 +125,7 @@ describe("ClusterWork", () => {
         const { ended, work } = makeHost()
         const captured: Array<ClusterWork.Work> = []
         const host = new ClusterWork.ClusterWork<never>({
-          machineId: "Worker",
+          definitionId: "Worker",
           address,
           context: Context.empty(),
           onEnd: (work) => Effect.sync(() => void captured.push(work))

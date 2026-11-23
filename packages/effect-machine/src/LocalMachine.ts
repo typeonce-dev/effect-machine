@@ -95,7 +95,7 @@ export declare namespace Inspection {
   export type Causation =
     | { readonly _tag: "Initialization" }
     | { readonly _tag: "Macrostep"; readonly macrostepId: number }
-    | { readonly _tag: "Activity"; readonly activitySessionId: string }
+    | { readonly _tag: "ProgramInvocation"; readonly invocationSessionId: string }
 
   /** Closed command projection safe for observation. */
   export type Command =
@@ -193,8 +193,14 @@ export declare namespace Inspection {
     readonly causedBy: Causation | undefined
   }
 
-  /** Identity of one Effect or timer invocation run. */
-  export interface Activity {
+  /**
+   * Identity of one run of an invoked program: an Effect, a Stream, or a timer.
+   *
+   * A program has no state or mailbox of its own, so its records name the machine
+   * that owns it as their subject. An invoked child machine or `Logic` process is
+   * a subject itself, and its `Created` record has an `Invoke` origin instead.
+   */
+  export interface ProgramInvocation {
     readonly id: string
     readonly sessionId: string
     readonly owner: Subject
@@ -202,16 +208,16 @@ export declare namespace Inspection {
     readonly kind: "Effect" | "Stream" | "Timer"
   }
 
-  /** Announces an Effect, Stream, or timer invocation starting. */
-  export interface ActivityStarted extends Base {
-    readonly _tag: "ActivityStarted"
-    readonly activity: Activity
+  /** Announces an invoked Effect, Stream, or timer starting. */
+  export interface ProgramInvocationStarted extends Base {
+    readonly _tag: "ProgramInvocationStarted"
+    readonly invocation: ProgramInvocation
   }
 
-  /** Announces an Effect or timer invocation outcome. */
-  export interface ActivityStopped extends Base {
-    readonly _tag: "ActivityStopped"
-    readonly activity: Activity
+  /** Announces the outcome of an invoked Effect, Stream, or timer. */
+  export interface ProgramInvocationStopped extends Base {
+    readonly _tag: "ProgramInvocationStopped"
+    readonly invocation: ProgramInvocation
     /** Success or failure from the invoke; interruption means its owner stopped it. */
     readonly exit: Exit.Exit<unknown, unknown>
   }
@@ -231,8 +237,8 @@ export declare namespace Inspection {
     | EventProcessed
     | StateChanged
     | Emitted
-    | ActivityStarted
-    | ActivityStopped
+    | ProgramInvocationStarted
+    | ProgramInvocationStopped
     | Terminated
 }
 

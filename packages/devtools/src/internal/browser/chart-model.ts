@@ -1,15 +1,15 @@
 import type {
-  Activity as VisualizationActivity,
   Branch as VisualizationBranch,
+  Invocation as VisualizationInvocation,
   MachineDocument as VisualizationDocument,
   State as VisualizationState,
   Transition as VisualizationTransition
 } from "../../MachineDocument.js"
 import { stateLabel, triggerLabel } from "./visualizer-model.js"
 
-export interface ChartActivity {
+export interface ChartInvocation {
   readonly id: string
-  readonly kind: VisualizationActivity["type"]
+  readonly kind: VisualizationInvocation["type"]
   readonly label: string
 }
 
@@ -21,7 +21,7 @@ export interface ChartNode {
   readonly children: ReadonlyArray<string>
   readonly active: boolean
   readonly initial: boolean
-  readonly activities: ReadonlyArray<ChartActivity>
+  readonly invocations: ReadonlyArray<ChartInvocation>
 }
 
 export type ChartEdgeBadge =
@@ -44,7 +44,7 @@ export interface ChartEdge {
   readonly accessibleLabel: string
   readonly badges: ReadonlyArray<ChartEdgeBadge>
   readonly trigger: VisualizationTransition["trigger"]
-  readonly activityKind: ChartActivity["kind"] | null
+  readonly invocationKind: ChartInvocation["kind"] | null
   readonly reenter: boolean
   readonly acceptance: VisualizationTransition["acceptance"]
 }
@@ -74,16 +74,16 @@ export interface ChartModel {
 export const isChartStateDescendant = (path: string, ancestor: string): boolean =>
   ancestor === "" ? path !== "" : path.startsWith(`${ancestor}.`)
 
-const activityLabel = (activity: VisualizationActivity): string => {
-  switch (activity.type) {
+const invocationLabel = (invocation: VisualizationInvocation): string => {
+  switch (invocation.type) {
     case "machine":
-      return `${activity.lifecycleId} → ${activity.child.machineId ?? activity.child.id}`
+      return `${invocation.lifecycleId} → ${invocation.child.machineId ?? invocation.child.id}`
     case "timer":
-      return `${activity.lifecycleId} · ${activity.duration}`
+      return `${invocation.lifecycleId} · ${invocation.duration}`
     case "process":
     case "effect":
     case "stream":
-      return activity.lifecycleId
+      return invocation.lifecycleId
   }
 }
 
@@ -151,12 +151,12 @@ const edgeGroup = (
 export const makeChartModel = (document: VisualizationDocument): ChartModel => {
   const active = new Set(document.snapshot?.activePaths ?? [])
   const initialPaths = new Set([document.initial.target])
-  const activities = new Map(document.activities.map((activity) => [activity.id, activity]))
-  const activitiesBySource = new Map<string, Map<string, ChartActivity["kind"]>>()
-  for (const activity of document.activities) {
-    const sourceActivities = activitiesBySource.get(activity.source) ?? new Map()
-    sourceActivities.set(activity.lifecycleId, activity.type)
-    activitiesBySource.set(activity.source, sourceActivities)
+  const invocations = new Map(document.invocations.map((invocation) => [invocation.id, invocation]))
+  const invocationsBySource = new Map<string, Map<string, ChartInvocation["kind"]>>()
+  for (const invocation of document.invocations) {
+    const sourceInvocations = invocationsBySource.get(invocation.source) ?? new Map()
+    sourceInvocations.set(invocation.lifecycleId, invocation.type)
+    invocationsBySource.set(invocation.source, sourceInvocations)
   }
   const states = new Map(document.states.map((state) => [state.path, state]))
 
@@ -172,9 +172,9 @@ export const makeChartModel = (document: VisualizationDocument): ChartModel => {
     children: [...state.children],
     active: active.has(state.path),
     initial: initialPaths.has(state.path),
-    activities: state.activityIds.flatMap((id): ReadonlyArray<ChartActivity> => {
-      const activity = activities.get(id)
-      return activity === undefined ? [] : [{ id, kind: activity.type, label: activityLabel(activity) }]
+    invocations: state.invocationIds.flatMap((id): ReadonlyArray<ChartInvocation> => {
+      const invocation = invocations.get(id)
+      return invocation === undefined ? [] : [{ id, kind: invocation.type, label: invocationLabel(invocation) }]
     })
   }))
 
@@ -203,8 +203,8 @@ export const makeChartModel = (document: VisualizationDocument): ChartModel => {
         : `${triggerLabel(transition)} · ${branches.length} branches`,
       badges: labelBadges(transition, branches),
       trigger: transition.trigger,
-      activityKind: transition.trigger.type === "invoke"
-        ? activitiesBySource.get(transition.source)?.get(transition.trigger.id) ?? null
+      invocationKind: transition.trigger.type === "invoke"
+        ? invocationsBySource.get(transition.source)?.get(transition.trigger.id) ?? null
         : null,
       reenter: transition.reenter,
       acceptance: transition.acceptance

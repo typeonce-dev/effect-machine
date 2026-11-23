@@ -685,11 +685,11 @@ export interface StartInternalOptions {
   readonly runtime: ProcessRuntime
   readonly sendParent?: (event: unknown) => Effect.Effect<void, StoppedError>
   readonly origin?: Inspection.Origin
-  readonly activity?: {
+  readonly programInvocation?: {
     readonly id: string
     readonly owner: Inspection.Subject
     readonly ownerPath: string
-    readonly kind: Inspection.Activity["kind"]
+    readonly kind: Inspection.ProgramInvocation["kind"]
   }
   readonly inspectionRoot?: boolean
 }
@@ -716,7 +716,7 @@ interface OwnedChildSpawnOptions {
   readonly onOutcome: (
     isCurrent: () => boolean,
     outcome: RuntimeOutcome<any, any, any>,
-    activitySessionId: string | undefined
+    invocationSessionId: string | undefined
   ) => Effect.Effect<void>
   readonly onSnapshot?: (
     isCurrent: () => boolean,
@@ -726,7 +726,7 @@ interface OwnedChildSpawnOptions {
     isCurrent: () => boolean,
     event: unknown
   ) => Effect.Effect<void, StoppedError>
-  readonly activityKind?: Inspection.Activity["kind"]
+  readonly programKind?: Inspection.ProgramInvocation["kind"]
 }
 
 /** @internal */
@@ -856,15 +856,15 @@ class OwnedChildRuntimeImpl extends InvocationGenerations implements OwnedChildR
         parent,
         runtime: this.runtime,
         origin: { _tag: "Invoke", ownerPath: options.path, invokeId: options.duplicateId },
-        ...(options.activityKind === undefined || this.runtime.inspection === undefined ||
+        ...(options.programKind === undefined || this.runtime.inspection === undefined ||
             this.self.inspectionSubject === undefined
           ? undefined
           : {
-            activity: {
+            programInvocation: {
               id: options.duplicateId,
               owner: this.self.inspectionSubject,
               ownerPath: options.path,
-              kind: options.activityKind
+              kind: options.programKind
             }
           })
       }

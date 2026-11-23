@@ -19,7 +19,7 @@ import {
   isChartStateDescendant
 } from "./chart-model.js"
 
-export const maxVisibleActivities = 3
+export const maxVisibleInvocations = 3
 export const chartSelfLoopMinimumClearance = 24
 export const chartEdgeLabelSpacing = 5
 
@@ -224,23 +224,23 @@ const layoutProfiles: ReadonlyArray<LayoutProfile> = [
   }
 ]
 
-const activitySectionHeight = (length: number): number => {
+const invocationSectionHeight = (length: number): number => {
   if (length === 0) return 0
-  const visible = Math.min(length, maxVisibleActivities)
-  return 16 + visible * 20 + (length > maxVisibleActivities ? 16 : 0)
+  const visible = Math.min(length, maxVisibleInvocations)
+  return 16 + visible * 20 + (length > maxVisibleInvocations ? 16 : 0)
 }
 
 const approximateTextWidth = (value: string, characterWidth: number): number => value.length * characterWidth
 
 const nodeMetric = (node: ChartNode, selfLoops: number): NodeMetric => {
-  const headerHeight = 52 + activitySectionHeight(node.activities.length)
+  const headerHeight = 52 + invocationSectionHeight(node.invocations.length)
   const nameWidth = approximateTextWidth(node.label, 7.2) + 55
-  const activityWidth = node.activities.reduce(
-    (width, activity) =>
+  const invocationWidth = node.invocations.reduce(
+    (width, invocation) =>
       Math.max(
         width,
-        approximateTextWidth(activity.kind.toUpperCase(), 5.5) +
-          approximateTextWidth(activity.label, 6.1) + 48
+        approximateTextWidth(invocation.kind.toUpperCase(), 5.5) +
+          approximateTextWidth(invocation.label, 6.1) + 48
       ),
     0
   )
@@ -251,7 +251,7 @@ const nodeMetric = (node: ChartNode, selfLoops: number): NodeMetric => {
     : 144
   const selfLoopWidth = selfLoops <= 1 ? 0 : 144 + (selfLoops - 1) * 44
   const selfLoopHeight = selfLoops <= 1 ? 0 : 52 + (selfLoops - 1) * 16
-  const width = Math.min(320, Math.max(minimumWidth, nameWidth, activityWidth, selfLoopWidth))
+  const width = Math.min(320, Math.max(minimumWidth, nameWidth, invocationWidth, selfLoopWidth))
   return {
     width,
     height: node.children.length === 0

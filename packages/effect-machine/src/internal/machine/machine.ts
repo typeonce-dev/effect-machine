@@ -18,15 +18,15 @@ import type {
   State,
   StoppedError
 } from "../../Machine.js"
-import * as Activities from "./activities.js"
 import { MachineRuntime } from "./capability.js"
+import * as CapturedInvocation from "./capturedInvocation.js"
 import * as Configuration from "./configuration.js"
 import * as Construction from "./construction.js"
 import * as Declaration from "./declaration.js"
 import type { PlanningError, StartupError } from "./errors.js"
 import type { CapturedStateConfig } from "./implementation.js"
 import * as InitialDeclaration from "./initialDeclaration.js"
-import * as InvocationDefinition from "./invocationDefinition.js"
+import * as InvocationDefinitions from "./invocationDefinitions.js"
 import * as Observation from "./observation.js"
 import * as internalPlanner from "./planner.js"
 import * as Protocol from "./protocol.js"
@@ -637,7 +637,7 @@ const captureInvokeDefinition = (
   declaration: Declaration.Declaration
 ): unknown => {
   const definitions = Array.isArray(invoke) ? invoke : [invoke]
-  const capturedDefinitions = definitions.map((definition) => {
+  const capturedInvocations = definitions.map((definition) => {
     const captured = Declaration.invocation(
       declaration,
       definition,
@@ -649,11 +649,11 @@ const captureInvokeDefinition = (
         captured[key] = captureTransition(captured[key], stateNodes, path, declaration, key, "required")
       }
     }
-    return InvocationDefinition.capture(captured, path)
+    return CapturedInvocation.capture(captured, path)
   })
-  InvocationDefinition.assertDistinctIds(capturedDefinitions, path)
-  if (Array.isArray(invoke)) return Object.freeze(capturedDefinitions)
-  return capturedDefinitions[0]
+  CapturedInvocation.assertDistinctIds(capturedInvocations, path)
+  if (Array.isArray(invoke)) return Object.freeze(capturedInvocations)
+  return capturedInvocations[0]
 }
 
 const flattenHandlers = (
@@ -1019,11 +1019,11 @@ export const transitionDefinitions = <M extends Machine.Any>(
     >
   >
 
-export const activityDefinitions = <M extends Machine.Any>(
+export const invocationDefinitions = <M extends Machine.Any>(
   machine: M
-): ReadonlyArray<Machine.ActivityDefinition<Machine.StateIdentifier<Machine.States<M>>>> =>
-  Activities.activityDefinitions(machine) as ReadonlyArray<
-    Machine.ActivityDefinition<Machine.StateIdentifier<Machine.States<M>>>
+): ReadonlyArray<Machine.InvocationDefinition<Machine.StateIdentifier<Machine.States<M>>>> =>
+  InvocationDefinitions.invocationDefinitions(machine) as ReadonlyArray<
+    Machine.InvocationDefinition<Machine.StateIdentifier<Machine.States<M>>>
   >
 
 export const configuration = <M extends Machine.Any>(

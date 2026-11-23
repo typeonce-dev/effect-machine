@@ -2,7 +2,7 @@ import { assert, describe, it } from "@effect/vitest"
 import { Duration, Effect, Schema, Stream } from "effect"
 import * as Arbitrary from "effect/Arbitrary"
 import { Machine } from "../../../src/index.js"
-import { activityDefinitions } from "../../../src/internal/machine/activities.js"
+import { invocationDefinitions } from "../../../src/internal/machine/invocationDefinitions.js"
 import { makeMermaidRenderer } from "../../machine/visualization/mermaid.js"
 import { makeTextRenderer } from "../../machine/visualization/text.js"
 class Loading extends Schema.TaggedClass<Loading>("Loading")("Loading", {}) {}
@@ -29,8 +29,8 @@ const childMachine = Machine.make({
 const child = Machine.child("child", childMachine)
 let dynamicFactoryEvaluations = 0
 const timerDuration = "10 seconds"
-const activityStates = Machine.state({ states: { Loading, Dynamic } })
-const activityMachine = Machine.make({
+const invocationStates = Machine.state({ states: { Loading, Dynamic } })
+const invocationMachine = Machine.make({
   effects: { source2: Effect.suspend(() => Effect.fail("unavailable").pipe(Effect.as(1))) },
   streams: { source4: Stream.suspend(() => Stream.empty) },
   timers: { source3: timerDuration },
@@ -45,8 +45,8 @@ const activityMachine = Machine.make({
     })
   },
   children: { source5: child },
-  id: "activity-inspection",
-  root: activityStates,
+  id: "invocation-inspection",
+  root: invocationStates,
   events: Machine.eventsFromSchemas(WorkSucceeded, WorkFailed, LoadTimedOut)
 }).handle({
   initial: {
@@ -74,10 +74,12 @@ const activityMachine = Machine.make({
     }
   }
 })
-const renderActivityMachine = makeTextRenderer<typeof activityMachine, Machine.Snapshot<typeof activityStates>>(Machine)
-const renderMermaidActivityMachine = makeMermaidRenderer<
-  typeof activityMachine,
-  Machine.Snapshot<typeof activityStates>
+const renderInvocationMachine = makeTextRenderer<typeof invocationMachine, Machine.Snapshot<typeof invocationStates>>(
+  Machine
+)
+const renderMermaidInvocationMachine = makeMermaidRenderer<
+  typeof invocationMachine,
+  Machine.Snapshot<typeof invocationStates>
 >(Machine)
 const machine = {
   stateNodes: {
@@ -110,12 +112,12 @@ const machine = {
     }
   }
 }
-describe("machine activity metadata", () => {
+describe("machine invocation metadata", () => {
   it("inspects all public helper descriptors without retaining runtime values", () => {
     const expected: ReadonlyArray<
-      Machine.Machine.ActivityDefinition<
+      Machine.Machine.InvocationDefinition<
         Machine.Machine.StateIdentifier<{
-          readonly "": typeof activityStates.node
+          readonly "": typeof invocationStates.node
         }>
       >
     > = [
@@ -153,17 +155,17 @@ describe("machine activity metadata", () => {
         type: "process"
       }
     ]
-    assert.deepStrictEqual(Machine.activityDefinitions(activityMachine), expected)
-    assert.deepStrictEqual(Machine.activityDefinitions(activityMachine), expected)
-    assert.deepStrictEqual(JSON.parse(JSON.stringify(Machine.activityDefinitions(activityMachine))), expected)
-    const timer = Machine.activityDefinitions(activityMachine).find(({ type }) => type === "timer")
+    assert.deepStrictEqual(Machine.invocationDefinitions(invocationMachine), expected)
+    assert.deepStrictEqual(Machine.invocationDefinitions(invocationMachine), expected)
+    assert.deepStrictEqual(JSON.parse(JSON.stringify(Machine.invocationDefinitions(invocationMachine))), expected)
+    const timer = Machine.invocationDefinitions(invocationMachine).find(({ type }) => type === "timer")
     assert(timer?.type === "timer")
     assert.strictEqual(timer.duration, Duration.format(Duration.fromInputUnsafe(timerDuration)))
     assert.strictEqual(dynamicFactoryEvaluations, 0)
   })
   it("only reports public definitions owned by real active state nodes", () => {
-    const paths = new Set(Machine.stateNodes(activityMachine).map(({ path }) => path))
-    assert(Machine.activityDefinitions(activityMachine).every(({ source }) => paths.has(source)))
+    const paths = new Set(Machine.stateNodes(invocationMachine).map(({ path }) => path))
+    assert(Machine.invocationDefinitions(invocationMachine).every(({ source }) => paths.has(source)))
   })
   it.effect.prop("keeps generated timer ids, durations, events, and owners aligned with helper declarations", {
     durationMillis: Arbitrary.schema(Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 604800000 }))),
@@ -173,7 +175,7 @@ describe("machine activity metadata", () => {
       const id = `generated-timer-${idSuffix}`
       const generated = Machine.make({
         timers: { source1: durationMillis },
-        root: activityStates,
+        root: invocationStates,
         events: Machine.eventsFromSchemas(LoadTimedOut)
       }).handle({
         initial: {
@@ -188,7 +190,7 @@ describe("machine activity metadata", () => {
           Dynamic: {}
         }
       })
-      const definition = Machine.activityDefinitions(generated)[0]
+      const definition = Machine.invocationDefinitions(generated)[0]
       assert.deepStrictEqual(definition, {
         source: "Loading",
         id,
@@ -198,7 +200,7 @@ describe("machine activity metadata", () => {
       assert(Machine.stateNodes(generated).some(({ path }) => path === definition?.source))
     }), { arbitrary: { runs: 100, seed: 68241 } })
   it("collects static descriptors in topology and declaration order", () => {
-    assert.deepStrictEqual(activityDefinitions(machine), [
+    assert.deepStrictEqual(invocationDefinitions(machine), [
       {
         source: "Loading",
         id: "load-document",
@@ -238,12 +240,12 @@ describe("machine activity metadata", () => {
         }
       }
     }
-    assert.deepStrictEqual(activityDefinitions(dynamic), [{
+    assert.deepStrictEqual(invocationDefinitions(dynamic), [{
       source: "Active",
       id: "runtime-dependent",
       type: "process"
     }])
-    assert.deepStrictEqual(activityDefinitions(dynamic), [{
+    assert.deepStrictEqual(invocationDefinitions(dynamic), [{
       source: "Active",
       id: "runtime-dependent",
       type: "process"
@@ -260,21 +262,21 @@ describe("machine activity metadata", () => {
         }
       }
     }
-    const definitions = activityDefinitions(withUnknownHandler)
+    const definitions = invocationDefinitions(withUnknownHandler)
     const paths = new Set<string>(Array.from(withUnknownHandler.stateNodes.byPath.values(), ({ path }) => path))
     assert(definitions.every(({ source }) => paths.has(source)))
     assert.notInclude(definitions.map((definition) => "id" in definition ? definition.id : undefined), "orphan")
   })
-  it("renders activities beneath their owning state", () => {
+  it("renders invocations beneath their owning state", () => {
     assert.strictEqual(
-      renderActivityMachine(activityMachine, {
+      renderInvocationMachine(invocationMachine, {
         path: "" as const,
         value: undefined,
         state: { path: "Loading" as const, value: new Loading({}) }
       }),
       [
-        "activity-inspection",
-        "● active  ○ inactive  ◇ transition  ┄ branch → target  ◆ activity",
+        "invocation-inspection",
+        "● active  ○ inactive  ◇ transition  ┄ branch → target  ◆ invocation",
         "",
         "└─ ● (root) [compound, initial: Loading]",
         "   ├─ ● Loading",
@@ -290,8 +292,8 @@ describe("machine activity metadata", () => {
       ].join("\n")
     )
   })
-  it("renders state-owned activities inside their Mermaid state", () => {
-    const rendered = renderMermaidActivityMachine(activityMachine, {
+  it("renders state-owned invocations inside their Mermaid state", () => {
+    const rendered = renderMermaidInvocationMachine(invocationMachine, {
       path: "" as const,
       value: undefined,
       state: {

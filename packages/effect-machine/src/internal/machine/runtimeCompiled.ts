@@ -135,7 +135,7 @@ class CompiledProcess implements MachineRef<any, any, any, any> {
   private inFlightMessage: ProcessMessage<unknown> | undefined
   private readonly externalEmissions: EmissionRuntime | undefined
   private emissionsPubSub: LazyEmissions
-  private readonly activity?: Inspection.Activity
+  private readonly programInvocation?: Inspection.ProgramInvocation
   private initialEntryPaths?: ReadonlyArray<string>
   private initialMicrosteps?: ReadonlyArray<unknown>
   private initializing?: boolean
@@ -152,7 +152,7 @@ class CompiledProcess implements MachineRef<any, any, any, any> {
     if (inspector !== undefined) {
       this.inspectionSubject = inspectionSubject(logic, this.id, sessionId)
       this.initializing = true
-      if (options.activity !== undefined) this.activity = { ...options.activity, sessionId }
+      if (options.programInvocation !== undefined) this.programInvocation = { ...options.programInvocation, sessionId }
     }
     this.externalEmissions = options.emissions
     this.send = inspector === undefined
@@ -189,7 +189,7 @@ class CompiledProcess implements MachineRef<any, any, any, any> {
     const subject = this.inspectionSubject
     if (inspector === undefined || subject === undefined) return
     inspector.publishUnsafe(
-      this.activity === undefined
+      this.programInvocation === undefined
         ? {
           _tag: "Created",
           subject,
@@ -197,13 +197,17 @@ class CompiledProcess implements MachineRef<any, any, any, any> {
           origin: this.options.origin ?? { _tag: "Root" },
           definition: this.logic.inspection?.definition
         }
-        : { _tag: "ActivityStarted", subject: this.activity.owner, activity: this.activity }
+        : {
+          _tag: "ProgramInvocationStarted",
+          subject: this.programInvocation.owner,
+          invocation: this.programInvocation
+        }
     )
   }
 
   private publishInitialized(state: unknown): void {
     this.initializing = false
-    if (this.activity !== undefined) return
+    if (this.programInvocation !== undefined) return
     const inspector = this.inspector
     const subject = this.inspectionSubject
     if (inspector === undefined || subject === undefined) return
@@ -222,12 +226,12 @@ class CompiledProcess implements MachineRef<any, any, any, any> {
     const subject = this.inspectionSubject
     if (inspector === undefined || subject === undefined) return
     inspector.publishUnsafe(
-      this.activity === undefined
+      this.programInvocation === undefined
         ? { _tag: "StartFailed", subject, cause }
         : {
-          _tag: "ActivityStopped",
-          subject: this.activity.owner,
-          activity: this.activity,
+          _tag: "ProgramInvocationStopped",
+          subject: this.programInvocation.owner,
+          invocation: this.programInvocation,
           exit: Exit.failCause(cause)
         }
     )
@@ -850,12 +854,12 @@ class CompiledProcess implements MachineRef<any, any, any, any> {
         : this.closeEmissions().pipe(
           Effect.andThen(Effect.sync(() =>
             inspector.publishUnsafe(
-              this.activity === undefined
+              this.programInvocation === undefined
                 ? { _tag: "Terminated", subject, snapshot }
                 : {
-                  _tag: "ActivityStopped",
-                  subject: this.activity.owner,
-                  activity: this.activity,
+                  _tag: "ProgramInvocationStopped",
+                  subject: this.programInvocation.owner,
+                  invocation: this.programInvocation,
                   exit: snapshot.status === "stopped" ? Exit.interrupt() : exit
                 }
             )

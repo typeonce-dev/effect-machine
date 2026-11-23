@@ -13,7 +13,7 @@ describe("MachineDocument", () => {
       snapshot
     })
 
-    assert.strictEqual(document.schemaVersion, 3)
+    assert.strictEqual(document.schemaVersion, 4)
     assert.strictEqual(document.revision, 3)
     assert.deepStrictEqual(document.source, {
       file: "/project/src/workflow.ts",
