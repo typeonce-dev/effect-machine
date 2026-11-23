@@ -3,53 +3,53 @@ import * as Arbitrary from "effect/Arbitrary"
 import * as Schema from "effect/Schema"
 import { Machine } from "../../../src/index.js"
 
-export type ActivityOutcome = "succeeded" | "cancelled" | "failed"
+export type InvocationOutcome = "succeeded" | "cancelled" | "failed"
 
-export type ActivityRecord =
+export type InvocationRecord =
   | { readonly _tag: "Started"; readonly owner: string; readonly epoch: number }
-  | { readonly _tag: "Exited"; readonly owner: string; readonly epoch: number; readonly outcome: ActivityOutcome }
+  | { readonly _tag: "Exited"; readonly owner: string; readonly epoch: number; readonly outcome: InvocationOutcome }
 
-export interface StartedActivity {
+export interface StartedInvocation {
   readonly owner: string
   readonly epoch: number
   readonly release: Deferred.Deferred<void>
 }
 
-export class ActivityFailure extends Data.TaggedError("ActivityFailure")<{
+export class InvocationFailure extends Data.TaggedError("InvocationFailure")<{
   readonly owner: string
   readonly epoch: number
 }> {}
 
-export type ActivityBehavior =
+export type InvocationBehavior =
   | { readonly _tag: "Blocked" }
   | { readonly _tag: "Failure" }
   | { readonly _tag: "StaleOnCancel"; readonly event: (epoch: number) => unknown }
 
-type ActivityState = { readonly epoch: number; readonly release: Deferred.Deferred<void> }
+type InvocationState = { readonly epoch: number; readonly release: Deferred.Deferred<void> }
 
-export interface ActivityProbe {
+export interface InvocationProbe {
   readonly logic: (
     owner: string,
-    behavior: ActivityBehavior
-  ) => Machine.Logic<ActivityState, never, ActivityFailure, never, void>
+    behavior: InvocationBehavior
+  ) => Machine.Logic<InvocationState, never, InvocationFailure, never, void>
   readonly immediate: <Event>(
     owner: string,
     event: (epoch: number) => Event
-  ) => Machine.Logic<ActivityState, never, ActivityFailure, never, Event>
-  readonly takeStarted: Effect.Effect<StartedActivity>
-  readonly records: Effect.Effect<ReadonlyArray<ActivityRecord>>
+  ) => Machine.Logic<InvocationState, never, InvocationFailure, never, Event>
+  readonly takeStarted: Effect.Effect<StartedInvocation>
+  readonly records: Effect.Effect<ReadonlyArray<InvocationRecord>>
 }
 
-const outcomeOf = (exit: Exit.Exit<unknown, unknown>): ActivityOutcome => {
+const outcomeOf = (exit: Exit.Exit<unknown, unknown>): InvocationOutcome => {
   if (Exit.isSuccess(exit)) return "succeeded"
   return exit.cause.reasons.some(Cause.isInterruptReason) ? "cancelled" : "failed"
 }
 
-export const makeActivityProbe: Effect.Effect<ActivityProbe> = Effect.gen(function*() {
+export const makeInvocationProbe: Effect.Effect<InvocationProbe> = Effect.gen(function*() {
   const nextEpoch = yield* Ref.make(0)
-  const records = yield* Ref.make<ReadonlyArray<ActivityRecord>>([])
-  const started = yield* Queue.unbounded<StartedActivity>()
-  const append = (record: ActivityRecord) => Ref.update(records, (current) => [...current, record])
+  const records = yield* Ref.make<ReadonlyArray<InvocationRecord>>([])
+  const started = yield* Queue.unbounded<StartedInvocation>()
+  const append = (record: InvocationRecord) => Ref.update(records, (current) => [...current, record])
   const initial = (owner: string) =>
     Effect.gen(function*() {
       const epoch = yield* Ref.updateAndGet(nextEpoch, (current) => current + 1)
@@ -69,8 +69,8 @@ export const makeActivityProbe: Effect.Effect<ActivityProbe> = Effect.gen(functi
   const immediate = <Event>(
     owner: string,
     event: (epoch: number) => Event
-  ): Machine.Logic<ActivityState, never, ActivityFailure, never, Event> =>
-    Machine.logic<ActivityState, never, Event, ActivityFailure>({
+  ): Machine.Logic<InvocationState, never, InvocationFailure, never, Event> =>
+    Machine.logic<InvocationState, never, Event, InvocationFailure>({
       initial: () => initial(owner),
       run: ({ state }) =>
         state.pipe(
@@ -81,17 +81,17 @@ export const makeActivityProbe: Effect.Effect<ActivityProbe> = Effect.gen(functi
 
   return {
     logic: (owner, behavior) =>
-      Machine.logic<ActivityState, never, void, ActivityFailure>({
+      Machine.logic<InvocationState, never, void, InvocationFailure>({
         initial: () => initial(owner),
         run: ({ parent, sendTo, state }) =>
-          parent === undefined ? Effect.die("activity expected an owning machine") : state.pipe(
+          parent === undefined ? Effect.die("invocation expected an owning machine") : state.pipe(
             Effect.flatMap(({ epoch, release }) => {
               switch (behavior._tag) {
                 case "Blocked":
                   return Effect.never.pipe(Effect.asVoid)
                 case "Failure":
                   return Deferred.await(release).pipe(
-                    Effect.andThen(Effect.fail(new ActivityFailure({ owner, epoch })))
+                    Effect.andThen(Effect.fail(new InvocationFailure({ owner, epoch })))
                   )
                 case "StaleOnCancel":
                   return Effect.never.pipe(
@@ -166,8 +166,8 @@ export const expectedLifecycle = (commands: ReadonlyArray<LifecycleCommand>): Li
 }
 
 export const countRecords = (
-  records: ReadonlyArray<ActivityRecord>,
-  kind: "starts" | ActivityOutcome,
+  records: ReadonlyArray<InvocationRecord>,
+  kind: "starts" | InvocationOutcome,
   owner?: string
 ): number =>
   records.filter((record) => {

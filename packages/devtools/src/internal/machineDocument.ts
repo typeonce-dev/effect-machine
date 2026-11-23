@@ -92,7 +92,7 @@ const trigger = (value: Machine.Machine.TransitionTrigger): Public.Trigger => {
   }
 }
 
-const activity = (value: Machine.Machine.ActivityDefinition, id: string): Public.Activity => {
+const invocation = (value: Machine.Machine.InvocationDefinition, id: string): Public.Invocation => {
   const common = { id, source: value.source, lifecycleId: value.id }
   switch (value.type) {
     case "process":
@@ -120,9 +120,9 @@ export const make = <M extends Machine.Machine.Any>(
 ): Public.MachineDocument => {
   const nodes = Machine.stateNodes(machine)
   const transitionIds = new Map<string, Array<string>>()
-  const activityIds = new Map<string, Array<string>>()
+  const invocationIds = new Map<string, Array<string>>()
   const transitionOffsets = new Map<string, number>()
-  const activityOffsets = new Map<string, number>()
+  const invocationOffsets = new Map<string, number>()
   const childPaths = new Map<string | null, Array<string>>()
 
   for (const node of nodes) {
@@ -157,17 +157,17 @@ export const make = <M extends Machine.Machine.Any>(
     }
   })
 
-  const activities = Machine.activityDefinitions(machine).map((definition): Public.Activity => {
-    const offset = activityOffsets.get(definition.source) ?? 0
-    activityOffsets.set(definition.source, offset + 1)
-    const id = `${definition.source}:activity:${offset}`
-    appendReference(activityIds, definition.source, id)
-    return activity(definition, id)
+  const invocations = Machine.invocationDefinitions(machine).map((definition): Public.Invocation => {
+    const offset = invocationOffsets.get(definition.source) ?? 0
+    invocationOffsets.set(definition.source, offset + 1)
+    const id = `${definition.source}:invocation:${offset}`
+    appendReference(invocationIds, definition.source, id)
+    return invocation(definition, id)
   })
 
   const initial = Machine.initialDefinition(machine)
   return {
-    schemaVersion: 3,
+    schemaVersion: 4,
     revision: options.revision ?? 0,
     source: options.source ?? null,
     machineId: machine.id ?? "Machine",
@@ -191,10 +191,10 @@ export const make = <M extends Machine.Machine.Any>(
       valueSchema: node.schema === undefined ? null : inputSchema(node.schema),
       outputSchema: node.output === undefined ? null : inputSchema(node.output),
       transitionIds: [...transitionIds.get(node.path) ?? []],
-      activityIds: [...activityIds.get(node.path) ?? []]
+      invocationIds: [...invocationIds.get(node.path) ?? []]
     })),
     transitions,
-    activities,
+    invocations,
     inputs: {
       machine: machine.input === undefined ? null : inputSchema(machine.input),
       events: eventInputs(machine)

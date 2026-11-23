@@ -1,5 +1,5 @@
 import type { Enqueue, Machine } from "../../Machine.js"
-import type { InvocationDefinition } from "./invocationDefinition.js"
+import type { CapturedInvocation } from "./capturedInvocation.js"
 import type { EventTransition } from "./transition.js"
 
 // Callback contexts are erased after the public builder checks their dependent
@@ -15,7 +15,7 @@ export interface CapturedStateConfig {
   readonly always?: Transition
   readonly onDone?: Transition
   readonly choice?: Exclude<Transition, (...args: never[]) => unknown>
-  readonly invoke?: InvocationDefinition | ReadonlyArray<InvocationDefinition>
+  readonly invoke?: CapturedInvocation | ReadonlyArray<CapturedInvocation>
   readonly initialize?: (context: any) => unknown
   readonly output?: (context: any) => unknown
   readonly history?: Readonly<

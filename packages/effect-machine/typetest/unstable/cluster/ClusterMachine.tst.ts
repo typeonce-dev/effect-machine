@@ -15,7 +15,7 @@ describe("ClusterMachine", () => {
       ClusterMachine.Accepted | ClusterMachine.Rejected
     >()
     expect<Schema.Schema.Type<typeof ClusterMachine.RejectionReason>>().type.toBe<
-      | "MachineIdMismatch"
+      | "DefinitionIdMismatch"
       | "VersionMismatch"
       | "InvalidCheckpoint"
       | "UnsupportedProcessLocal"

@@ -78,7 +78,7 @@ const inspection: InspectionApi<TestMachine, { readonly active: boolean }> = {
       }]
     }
   ],
-  activityDefinitions: () => [
+  invocationDefinitions: () => [
     {
       source: "Root",
       id: "search",

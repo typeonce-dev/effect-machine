@@ -1411,7 +1411,7 @@ export type ExploreOptions<M extends AnyMachine, Key extends ExplorationKey = Ex
  *
  * Invariants are checked against startup and every concretely planned edge,
  * so a failure retains a shortest discovered counterexample. Planned commands
- * and runtime activities are not executed. `transitionCoverage` includes
+ * and invocations are not executed. `transitionCoverage` includes
  * startup and every event plan that was actually computed, including a plan
  * retained at a state-limit frontier. Depth- and transition-limit frontiers
  * have no plan and therefore contribute no transition hits.

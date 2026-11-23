@@ -86,9 +86,10 @@ export const startGenericInternal: StartProcess = Effect.fnUntraced(
     const id = requestedId ?? sessionId
     const inspector = runtime.inspection
     const subject = inspector === undefined ? undefined : inspectionSubject(logic, id, sessionId)
-    const activity: Inspection.Activity | undefined = inspector === undefined || options.activity === undefined
-      ? undefined
-      : { ...options.activity, sessionId }
+    const programInvocation: Inspection.ProgramInvocation | undefined =
+      inspector === undefined || options.programInvocation === undefined
+        ? undefined
+        : { ...options.programInvocation, sessionId }
     let initialEntryPaths: ReadonlyArray<string> | undefined
     let initialMicrosteps: ReadonlyArray<unknown> | undefined
     const mailbox = makeProcessMailbox<Event>()
@@ -187,9 +188,14 @@ export const startGenericInternal: StartProcess = Effect.fnUntraced(
       if (Exit.isSuccess(exit)) return Effect.void
       if (inspector !== undefined) {
         inspector.publishUnsafe(
-          activity === undefined
+          programInvocation === undefined
             ? { _tag: "StartFailed", subject: subject!, cause: exit.cause }
-            : { _tag: "ActivityStopped", subject: activity.owner, activity, exit }
+            : {
+              _tag: "ProgramInvocationStopped",
+              subject: programInvocation.owner,
+              invocation: programInvocation,
+              exit
+            }
         )
       }
       return closeChildren(exit).pipe(
@@ -252,7 +258,7 @@ export const startGenericInternal: StartProcess = Effect.fnUntraced(
 
     if (inspector !== undefined) {
       inspector.publishUnsafe(
-        activity === undefined
+        programInvocation === undefined
           ? {
             _tag: "Created",
             subject: subject!,
@@ -260,7 +266,7 @@ export const startGenericInternal: StartProcess = Effect.fnUntraced(
             origin: options.origin ?? { _tag: "Root" },
             definition: logic.inspection?.definition
           }
-          : { _tag: "ActivityStarted", subject: activity.owner, activity }
+          : { _tag: "ProgramInvocationStarted", subject: programInvocation.owner, invocation: programInvocation }
       )
     }
 
@@ -279,7 +285,7 @@ export const startGenericInternal: StartProcess = Effect.fnUntraced(
         state: initial
       }
     })
-    if (activity === undefined) {
+    if (programInvocation === undefined) {
       inspector?.publishUnsafe({
         _tag: "Initialized",
         subject: subject!,
@@ -471,12 +477,12 @@ export const startGenericInternal: StartProcess = Effect.fnUntraced(
         : emissions.close().pipe(
           Effect.andThen(Effect.sync(() =>
             inspector.publishUnsafe(
-              activity === undefined
+              programInvocation === undefined
                 ? { _tag: "Terminated", subject: subject!, snapshot }
                 : {
-                  _tag: "ActivityStopped",
-                  subject: activity.owner,
-                  activity,
+                  _tag: "ProgramInvocationStopped",
+                  subject: programInvocation.owner,
+                  invocation: programInvocation,
                   exit: snapshot.status === "stopped" ? Exit.interrupt() : exit
                 }
             )

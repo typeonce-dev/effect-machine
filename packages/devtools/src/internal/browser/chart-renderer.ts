@@ -6,7 +6,7 @@ import {
   type LaidOutChart,
   type LaidOutChartNode,
   layoutChart,
-  maxVisibleActivities
+  maxVisibleInvocations
 } from "./chart-layout.js"
 import { type ChartEdge, type ChartEdgeBadge, isChartStateDescendant, makeChartModel } from "./chart-model.js"
 
@@ -200,20 +200,20 @@ const stateContent = (layout: LaidOutChartNode, stateStatus: HTMLElement): Docum
   heading.append(identity)
   fragment.append(heading)
 
-  if (layout.node.activities.length > 0) {
-    const activities = element("div", "chart-state-section")
-    layout.node.activities.slice(0, maxVisibleActivities).forEach((activity) => {
-      const row = element("div", `chart-activity-row chart-activity-${activity.kind}`)
+  if (layout.node.invocations.length > 0) {
+    const invocations = element("div", "chart-state-section")
+    layout.node.invocations.slice(0, maxVisibleInvocations).forEach((invocation) => {
+      const row = element("div", `chart-invocation-row chart-invocation-${invocation.kind}`)
       row.append(
-        element("span", "chart-activity-kind", activity.kind),
-        element("span", "chart-activity-name", activity.label)
+        element("span", "chart-invocation-kind", invocation.kind),
+        element("span", "chart-invocation-name", invocation.label)
       )
-      activities.append(row)
+      invocations.append(row)
     })
-    if (layout.node.activities.length > maxVisibleActivities) {
-      activities.append(more(layout.node.activities.length - maxVisibleActivities))
+    if (layout.node.invocations.length > maxVisibleInvocations) {
+      invocations.append(more(layout.node.invocations.length - maxVisibleInvocations))
     }
-    fragment.append(activities)
+    fragment.append(invocations)
   }
 
   return fragment
@@ -484,7 +484,7 @@ const render = (
       `chart-edge-group chart-edge-${laidOut.kind}${
         laidOut.kind === "transition"
           ? ` chart-transition-${laidOut.edge.kind} chart-edge-trigger-${laidOut.edge.trigger.type}${
-            laidOut.edge.activityKind === null ? "" : ` chart-edge-activity-${laidOut.edge.activityKind}`
+            laidOut.edge.invocationKind === null ? "" : ` chart-edge-invocation-${laidOut.edge.invocationKind}`
           }${parentChild ? " chart-edge-parent-child" : ""}${failure ? " chart-edge-failure" : ""}`
           : ""
       }`
@@ -529,7 +529,7 @@ const render = (
     const label = element(
       "button",
       `chart-edge-label chart-edge-label-${laidOut.edge.trigger.type}${
-        laidOut.edge.activityKind === null ? "" : ` chart-edge-activity-${laidOut.edge.activityKind}`
+        laidOut.edge.invocationKind === null ? "" : ` chart-edge-invocation-${laidOut.edge.invocationKind}`
       }${parentChild ? " chart-edge-label-parent-child" : ""}${failure ? " chart-edge-label-failure" : ""}${
         laidOut.edge.label.length === 0 ? " chart-edge-label-icon-only" : ""
       }${laidOut.edge.label.length > 0 && laidOut.edge.badges.length > 0 ? " chart-edge-label-corner-badge" : ""}`

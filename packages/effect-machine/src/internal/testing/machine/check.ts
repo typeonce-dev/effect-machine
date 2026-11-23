@@ -243,7 +243,7 @@ export const check = <M extends AnyMachine>(
       events = derived.value.events
     }
     if (options.stateKey !== undefined) limits.add("customStateKey")
-    if (Machine.activityDefinitions(machine).length > 0) limits.add("invocations")
+    if (Machine.invocationDefinitions(machine).length > 0) limits.add("invocations")
 
     const replay = (replayEvents: ReadonlyArray<unknown>) => replayOf(input, hasInput, replayEvents)
     const stateKey = options.stateKey ?? (({ snapshot }: { readonly snapshot: unknown }) => formatValue(snapshot))

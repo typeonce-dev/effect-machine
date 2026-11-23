@@ -509,7 +509,7 @@ button {
 
 .chart-state-heading,
 .chart-state-identity,
-.chart-activity-row {
+.chart-invocation-row {
   display: flex;
   min-width: 0;
   align-items: center;
@@ -539,7 +539,7 @@ button {
 }
 
 .chart-state-name,
-.chart-activity-name {
+.chart-invocation-name {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -550,14 +550,14 @@ button {
   font-size: 12px;
 }
 
-.chart-activity-kind,
+.chart-invocation-kind,
 .chart-more {
   color: var(--chart-text-muted);
   font-size: 9px;
   line-height: 1.3;
 }
 
-.chart-activity-kind {
+.chart-invocation-kind {
   text-transform: uppercase;
 }
 
@@ -568,73 +568,73 @@ button {
   border-top: 1px solid #333d48;
 }
 
-.chart-activity-row {
+.chart-invocation-row {
   display: grid;
   min-height: 20px;
   gap: 10px;
 }
 
-.chart-activity-row {
+.chart-invocation-row {
   grid-template-columns: auto minmax(0, 1fr);
 }
 
-.chart-activity-name {
+.chart-invocation-name {
   color: #d1d7df;
   font-size: 10px;
 }
 
-.chart-activity-kind {
+.chart-invocation-kind {
   flex: 0 1 auto;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.chart-activity-kind {
+.chart-invocation-kind {
   min-width: max-content;
-  color: var(--chart-activity-color, #82a9cb);
+  color: var(--chart-invocation-color, #82a9cb);
   overflow: visible;
   text-overflow: clip;
 }
 
-.chart-activity-process,
-.chart-edge-activity-process,
-.badge-activity-process {
-  --chart-activity-color: #c99a82;
-  --chart-activity-border: #624d42;
-  --chart-activity-background: #1d1714;
+.chart-invocation-process,
+.chart-edge-invocation-process,
+.badge-invocation-process {
+  --chart-invocation-color: #c99a82;
+  --chart-invocation-border: #624d42;
+  --chart-invocation-background: #1d1714;
 }
 
-.chart-activity-effect,
-.chart-edge-activity-effect,
-.badge-activity-effect {
-  --chart-activity-color: #82a9cb;
-  --chart-activity-border: #435c71;
-  --chart-activity-background: #121a22;
+.chart-invocation-effect,
+.chart-edge-invocation-effect,
+.badge-invocation-effect {
+  --chart-invocation-color: #82a9cb;
+  --chart-invocation-border: #435c71;
+  --chart-invocation-background: #121a22;
 }
 
-.chart-activity-timer,
-.chart-edge-activity-timer,
-.badge-activity-timer {
-  --chart-activity-color: #c1ad73;
-  --chart-activity-border: #625842;
-  --chart-activity-background: #1c1a13;
+.chart-invocation-timer,
+.chart-edge-invocation-timer,
+.badge-invocation-timer {
+  --chart-invocation-color: #c1ad73;
+  --chart-invocation-border: #625842;
+  --chart-invocation-background: #1c1a13;
 }
 
-.chart-activity-stream,
-.chart-edge-activity-stream,
-.badge-activity-stream {
-  --chart-activity-color: #75a9ad;
-  --chart-activity-border: #3f5c5f;
-  --chart-activity-background: #111a1b;
+.chart-invocation-stream,
+.chart-edge-invocation-stream,
+.badge-invocation-stream {
+  --chart-invocation-color: #75a9ad;
+  --chart-invocation-border: #3f5c5f;
+  --chart-invocation-background: #111a1b;
 }
 
-.chart-activity-machine,
-.chart-edge-activity-machine,
-.badge-activity-machine {
-  --chart-activity-color: #a99cbd;
-  --chart-activity-border: #574e67;
-  --chart-activity-background: #1a1720;
+.chart-invocation-machine,
+.chart-edge-invocation-machine,
+.badge-invocation-machine {
+  --chart-invocation-color: #a99cbd;
+  --chart-invocation-border: #574e67;
+  --chart-invocation-background: #1a1720;
 }
 
 .chart-more {
@@ -916,32 +916,32 @@ button {
   stroke-dasharray: 7 5;
 }
 
-.chart-edge-group.chart-edge-activity-process .chart-edge-line,
-.chart-edge-group.chart-edge-activity-effect .chart-edge-line,
-.chart-edge-group.chart-edge-activity-timer .chart-edge-line,
-.chart-edge-group.chart-edge-activity-stream .chart-edge-line,
-.chart-edge-group.chart-edge-activity-machine .chart-edge-line,
-.chart-edge-group.chart-edge-activity-process .chart-edge-direction,
-.chart-edge-group.chart-edge-activity-effect .chart-edge-direction,
-.chart-edge-group.chart-edge-activity-timer .chart-edge-direction,
-.chart-edge-group.chart-edge-activity-stream .chart-edge-direction,
-.chart-edge-group.chart-edge-activity-machine .chart-edge-direction,
-.chart-edge-group.chart-edge-activity-process .chart-edge-parent-origin,
-.chart-edge-group.chart-edge-activity-effect .chart-edge-parent-origin,
-.chart-edge-group.chart-edge-activity-timer .chart-edge-parent-origin,
-.chart-edge-group.chart-edge-activity-stream .chart-edge-parent-origin,
-.chart-edge-group.chart-edge-activity-machine .chart-edge-parent-origin {
-  stroke: var(--chart-activity-color);
+.chart-edge-group.chart-edge-invocation-process .chart-edge-line,
+.chart-edge-group.chart-edge-invocation-effect .chart-edge-line,
+.chart-edge-group.chart-edge-invocation-timer .chart-edge-line,
+.chart-edge-group.chart-edge-invocation-stream .chart-edge-line,
+.chart-edge-group.chart-edge-invocation-machine .chart-edge-line,
+.chart-edge-group.chart-edge-invocation-process .chart-edge-direction,
+.chart-edge-group.chart-edge-invocation-effect .chart-edge-direction,
+.chart-edge-group.chart-edge-invocation-timer .chart-edge-direction,
+.chart-edge-group.chart-edge-invocation-stream .chart-edge-direction,
+.chart-edge-group.chart-edge-invocation-machine .chart-edge-direction,
+.chart-edge-group.chart-edge-invocation-process .chart-edge-parent-origin,
+.chart-edge-group.chart-edge-invocation-effect .chart-edge-parent-origin,
+.chart-edge-group.chart-edge-invocation-timer .chart-edge-parent-origin,
+.chart-edge-group.chart-edge-invocation-stream .chart-edge-parent-origin,
+.chart-edge-group.chart-edge-invocation-machine .chart-edge-parent-origin {
+  stroke: var(--chart-invocation-color);
 }
 
-.chart-edge-label.chart-edge-activity-process,
-.chart-edge-label.chart-edge-activity-effect,
-.chart-edge-label.chart-edge-activity-timer,
-.chart-edge-label.chart-edge-activity-stream,
-.chart-edge-label.chart-edge-activity-machine {
-  --chart-edge-label-background: var(--chart-activity-background);
-  --chart-edge-label-border: var(--chart-activity-border);
-  color: var(--chart-activity-color);
+.chart-edge-label.chart-edge-invocation-process,
+.chart-edge-label.chart-edge-invocation-effect,
+.chart-edge-label.chart-edge-invocation-timer,
+.chart-edge-label.chart-edge-invocation-stream,
+.chart-edge-label.chart-edge-invocation-machine {
+  --chart-edge-label-background: var(--chart-invocation-background);
+  --chart-edge-label-border: var(--chart-invocation-border);
+  color: var(--chart-invocation-color);
 }
 
 .chart-edge-group.chart-edge-failure .chart-edge-line,
@@ -1124,18 +1124,18 @@ button {
   background: rgb(172 104 224 / 15%);
 }
 
-.badge-activity {
+.badge-invocation {
   color: #acd0e5;
   background: rgb(82 145 183 / 16%);
 }
 
-.badge-activity-process,
-.badge-activity-effect,
-.badge-activity-timer,
-.badge-activity-stream,
-.badge-activity-machine {
-  color: var(--chart-activity-color);
-  background: var(--chart-activity-background);
+.badge-invocation-process,
+.badge-invocation-effect,
+.badge-invocation-timer,
+.badge-invocation-stream,
+.badge-invocation-machine {
+  color: var(--chart-invocation-color);
+  background: var(--chart-invocation-background);
 }
 
 .badge-count {
@@ -1463,7 +1463,7 @@ button {
 
 .branch-row .metadata,
 .transition-card .card-metadata,
-.activity-card .metadata,
+.invocation-card .metadata,
 .incoming-card .metadata {
   margin-top: 10px;
 }
@@ -1496,11 +1496,11 @@ button {
   grid-column: 2;
 }
 
-.activity-card {
+.invocation-card {
   padding-bottom: 12px;
 }
 
-.activity-card .metadata {
+.invocation-card .metadata {
   padding: 0 12px;
 }
 

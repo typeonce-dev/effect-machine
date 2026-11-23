@@ -20,14 +20,14 @@ const machine = Machine.make({
     Dynamic: { invoke: { src: "source2", id: "dynamic", input: () => undefined, onDone: { stay: true } } }
   }
 })
-describe("Machine activity inspection", () => {
-  it("preserves source path and activity kind unions", () => {
-    const definition = Machine.activityDefinitions(machine)[0]!
+describe("Machine invocation inspection", () => {
+  it("preserves source path and invocation kind unions", () => {
+    const definition = Machine.invocationDefinitions(machine)[0]!
     expect(definition.source).type.toBe<"" | "Loading" | "Dynamic">()
     expect(definition.type).type.toBe<"process" | "effect" | "stream" | "timer" | "machine">()
   })
   it("narrows kind-specific descriptive metadata", () => {
-    const definition = Machine.activityDefinitions(machine)[0]!
+    const definition = Machine.invocationDefinitions(machine)[0]!
     if (definition.type === "timer") {
       expect(definition.id).type.toBe<string>()
       expect(definition.duration).type.toBe<string | "dynamic">()

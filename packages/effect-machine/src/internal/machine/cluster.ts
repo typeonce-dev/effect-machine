@@ -161,7 +161,7 @@ export const make = <
   })
     .annotate(ClusterSchema.Persisted, true) as SendRpc<MachineEvents<M>>
   const entity = Entity.make(type, [rpc])
-  const machineId = machine.id ?? type
+  const definitionId = machine.id ?? type
 
   const toLayer = <EnqueueR = never>(layerOptions?: {
     readonly enqueue?: (event: Machine.Machine.EmittedEventOf<Emits>) => Effect.Effect<void, unknown, EnqueueR>
@@ -173,7 +173,7 @@ export const make = <
       Effect.gen(function*() {
         const instance = yield* ClusterInstance.make<Services | EnqueueR>({
           machine,
-          machineId,
+          definitionId,
           version: options.version,
           input,
           address: yield* Entity.CurrentAddress,

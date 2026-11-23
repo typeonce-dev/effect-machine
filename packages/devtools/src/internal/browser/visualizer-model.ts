@@ -1,6 +1,6 @@
 import type {
-  Activity as VisualizationActivity,
   Branch as VisualizationBranch,
+  Invocation as VisualizationInvocation,
   MachineDocument as VisualizationDocument,
   State as VisualizationState,
   Transition as VisualizationTransition
@@ -13,7 +13,7 @@ export interface TopologyNode {
   readonly active: boolean
   readonly initial: boolean
   readonly transitionCount: number
-  readonly activityCount: number
+  readonly invocationCount: number
   readonly children: ReadonlyArray<TopologyNode>
 }
 
@@ -35,7 +35,7 @@ export interface StateInspection {
   readonly breadcrumbs: ReadonlyArray<StateBreadcrumb>
   readonly outgoing: ReadonlyArray<VisualizationTransition>
   readonly incoming: ReadonlyArray<IncomingTransition>
-  readonly activities: ReadonlyArray<VisualizationActivity>
+  readonly invocations: ReadonlyArray<VisualizationInvocation>
 }
 
 export interface EventInspection {
@@ -101,7 +101,7 @@ const buildInitialPaths = (document: VisualizationDocument): ReadonlySet<string>
 export const makeVisualizerModel = (document: VisualizationDocument): VisualizerModel => {
   const states = new Map(document.states.map((state) => [state.path, state]))
   const transitions = new Map(document.transitions.map((transition) => [transition.id, transition]))
-  const activities = new Map(document.activities.map((activity) => [activity.id, activity]))
+  const invocations = new Map(document.invocations.map((invocation) => [invocation.id, invocation]))
   const active = new Set(document.snapshot?.activePaths ?? [])
   const initial = buildInitialPaths(document)
   const candidateEvents = document.snapshot?.candidateEvents ?? []
@@ -112,9 +112,9 @@ export const makeVisualizerModel = (document: VisualizationDocument): Visualizer
       return transition === undefined ? [] : [transition]
     })
 
-  const ownedActivities = (state: VisualizationState): ReadonlyArray<VisualizationActivity> =>
-    state.activityIds.flatMap((id): ReadonlyArray<VisualizationActivity> => {
-      const definition = activities.get(id)
+  const ownedInvocations = (state: VisualizationState): ReadonlyArray<VisualizationInvocation> =>
+    state.invocationIds.flatMap((id): ReadonlyArray<VisualizationInvocation> => {
+      const definition = invocations.get(id)
       return definition === undefined ? [] : [definition]
     })
 
@@ -138,7 +138,7 @@ export const makeVisualizerModel = (document: VisualizationDocument): Visualizer
       active: active.has(state.path),
       initial: initial.has(state.path),
       transitionCount: state.transitionIds.length,
-      activityCount: state.activityIds.length,
+      invocationCount: state.invocationIds.length,
       children: state.children.flatMap((childPath): ReadonlyArray<TopologyNode> => {
         const child = visit(childPath)
         return child === undefined ? [] : [child]
@@ -177,7 +177,7 @@ export const makeVisualizerModel = (document: VisualizationDocument): Visualizer
           breadcrumbs: breadcrumbs(state),
           outgoing: outgoing(state),
           incoming: [...incoming.get(path) ?? []],
-          activities: ownedActivities(state)
+          invocations: ownedInvocations(state)
         }
     },
     inspectEvent: (event) => ({

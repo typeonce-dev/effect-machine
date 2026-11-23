@@ -45,7 +45,7 @@ const historyDocument = (initial: "Workspace" | "Paused" = "Workspace"): Machine
       valueSchema: null,
       outputSchema: null,
       transitionIds: [],
-      activityIds: []
+      invocationIds: []
     },
     {
       path: "Workspace.One",
@@ -62,7 +62,7 @@ const historyDocument = (initial: "Workspace" | "Paused" = "Workspace"): Machine
       valueSchema: null,
       outputSchema: null,
       transitionIds: ["next"],
-      activityIds: []
+      invocationIds: []
     },
     {
       path: "Workspace.Two",
@@ -79,7 +79,7 @@ const historyDocument = (initial: "Workspace" | "Paused" = "Workspace"): Machine
       valueSchema: null,
       outputSchema: null,
       transitionIds: ["pause"],
-      activityIds: []
+      invocationIds: []
     },
     {
       path: "Workspace.recent",
@@ -96,7 +96,7 @@ const historyDocument = (initial: "Workspace" | "Paused" = "Workspace"): Machine
       valueSchema: null,
       outputSchema: null,
       transitionIds: [],
-      activityIds: []
+      invocationIds: []
     },
     {
       path: "Paused",
@@ -113,7 +113,7 @@ const historyDocument = (initial: "Workspace" | "Paused" = "Workspace"): Machine
       valueSchema: null,
       outputSchema: null,
       transitionIds: ["resume"],
-      activityIds: []
+      invocationIds: []
     }
   ],
   transitions: [
@@ -160,7 +160,7 @@ const historyDocument = (initial: "Workspace" | "Paused" = "Workspace"): Machine
       }]
     }
   ],
-  activities: [],
+  invocations: [],
   inputs: { machine: null, events: [] },
   snapshot: null
 })

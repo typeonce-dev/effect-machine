@@ -17,7 +17,7 @@ import * as Runtime from "./runtimeProtocol.js"
 
 type AnyProcessLogic = Runtime.ProcessLogic<any, any, any, any, any, any>
 
-/** Invocations the runtime hosts as an inspected and traced activity. */
+/** Invocations the runtime hosts as an inspected and traced program. */
 type ProgramInvocation =
   | InvocationResolution.EffectInvocation
   | InvocationResolution.TimerInvocation
@@ -84,16 +84,16 @@ const runSequentialDiscard = <E, R>(
 const sendLifecycle = (
   scope: Runtime.ProcessScope<any>,
   event: InvocationEvent.InvocationEvent,
-  activitySessionId?: string
+  invocationSessionId?: string
 ): Effect.Effect<void> =>
-  (activitySessionId === undefined
+  (invocationSessionId === undefined
     ? scope.self.send(event)
     : scope.self.sendInspected === undefined
     ? scope.self.send(event)
     : scope.self.sendInspected(
       event,
       scope.self.inspectionSubject,
-      { _tag: "Activity", activitySessionId }
+      { _tag: "ProgramInvocation", invocationSessionId }
     )).pipe(Effect.catchTag("StoppedError", () => Effect.void))
 
 const isProgram = (invocation: InvocationResolution.ResolvedInvocation): invocation is ProgramInvocation => {
@@ -186,14 +186,14 @@ const spawn = (
       path: invocation.path,
       id: childId(invocation),
       duplicateId: invocation.id,
-      ...(isProgram(invocation) ? { activityKind: invocation._tag } : undefined),
+      ...(isProgram(invocation) ? { programKind: invocation._tag } : undefined),
       sendParent: (isCurrent, event) => isCurrent() ? scope.self.send(event) : Effect.void,
       // The work starts while the event that entered its state is processed,
       // and its outcome is handled in a later turn, even when the work
       // completes without suspending. The entered state is therefore always
       // observed before the outcome leaves it, and the outcome of a state that
       // was exited in between is discarded.
-      onOutcome: (isCurrent, outcome, activitySessionId) =>
+      onOutcome: (isCurrent, outcome, invocationSessionId) =>
         Effect.andThen(
           Effect.yieldNow,
           Effect.suspend(() => {
@@ -201,7 +201,7 @@ const spawn = (
             const decision = InvocationOutcome.decide(invocation, generation, outcome)
             switch (decision._tag) {
               case "Deliver":
-                return sendLifecycle(scope, decision.event, isProgram(invocation) ? activitySessionId : undefined)
+                return sendLifecycle(scope, decision.event, isProgram(invocation) ? invocationSessionId : undefined)
               case "Fail":
                 return scope.failCause(decision.cause)
               case "Ignore":

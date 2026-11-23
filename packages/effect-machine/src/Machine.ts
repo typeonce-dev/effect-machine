@@ -19,8 +19,8 @@ import type * as Schema from "effect/Schema"
 import type * as Scope from "effect/Scope"
 import type * as Stream from "effect/Stream"
 import type * as Types from "effect/Types"
-import type * as Activities from "./internal/machine/activities.js"
 import type { MachineRuntime } from "./internal/machine/capability.js"
+import type * as InvocationDefinitions from "./internal/machine/invocationDefinitions.js"
 import type {
   ChildAlreadyExistsError,
   InfiniteTransitionError,
@@ -2580,7 +2580,9 @@ export declare namespace Machine {
    * @category models
    * @since 0.4.0
    */
-  export type ActivityDefinition<SourcePath extends string = string> = Activities.ActivityDefinition<SourcePath>
+  export type InvocationDefinition<SourcePath extends string = string> = InvocationDefinitions.InvocationDefinition<
+    SourcePath
+  >
 
   /**
    * Transition retained after hierarchy precedence and conflict resolution for
@@ -7043,7 +7045,7 @@ export const transitionDefinitions: <M extends Machine.Any>(machine: M) => Reado
 > = internal.transitionDefinitions
 
 /**
- * Returns serializable descriptions of every state-owned activity.
+ * Returns serializable descriptions of every state-owned invocation.
  *
  * **Details**
  *
@@ -7054,10 +7056,10 @@ export const transitionDefinitions: <M extends Machine.Any>(machine: M) => Reado
  * @category getters
  * @since 0.4.0
  */
-export const activityDefinitions: <M extends Machine.Any>(
+export const invocationDefinitions: <M extends Machine.Any>(
   machine: M
-) => ReadonlyArray<Machine.ActivityDefinition<Machine.StateIdentifier<Machine.States<M>>>> =
-  internal.activityDefinitions
+) => ReadonlyArray<Machine.InvocationDefinition<Machine.StateIdentifier<Machine.States<M>>>> =
+  internal.invocationDefinitions
 
 /**
  * Returns every state node active in a decoded snapshot, in definition order.

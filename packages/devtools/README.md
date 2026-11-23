@@ -92,7 +92,7 @@ An incomplete edit can remove `.handle(...)` or change an export temporarily wit
 
 ## Trusted projects only
 
-Discovery parses source files without executing them. Evaluation then loads candidate modules in a fresh worker. Module initialization code executes during that load, although transition resolvers and activity sources do not.
+Discovery parses source files without executing them. Evaluation then loads candidate modules in a fresh worker. Module initialization code executes during that load, although transition resolvers and invocation sources do not.
 
 Run the devtools only against code you trust. The server has no authentication and binds to the loopback interface by default. Do not expose it on a public or untrusted network.
 

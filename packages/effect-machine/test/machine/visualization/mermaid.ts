@@ -1,4 +1,4 @@
-import type { ActivityDefinition, InspectionApi, MachineValue, StateNode, TransitionDefinition } from "./model.js"
+import type { InspectionApi, InvocationDefinition, MachineValue, StateNode, TransitionDefinition } from "./model.js"
 
 const indent = (depth: number): string => "  ".repeat(depth)
 
@@ -60,7 +60,7 @@ const branchLabel = (
   return escapeText(`${triggerLabel(definition)}${suffix}`)
 }
 
-const activityLabel = (definition: ActivityDefinition): string => {
+const invocationLabel = (definition: InvocationDefinition): string => {
   switch (definition.type) {
     case "process":
       return `process / ${definition.id}`
@@ -96,17 +96,17 @@ export const makeMermaidRenderer = <Machine extends MachineValue, Snapshot>(
   )
   const ids = new Map(nodes.map((node, index) => [node.path, `state_${index}`] as const))
   const children = new Map<string | undefined, Array<StateNode>>()
-  const activities = new Map<string, Array<ActivityDefinition>>()
+  const invocations = new Map<string, Array<InvocationDefinition>>()
 
   for (const node of nodes) {
     const siblings = children.get(node.parent) ?? []
     siblings.push(node)
     children.set(node.parent, siblings)
   }
-  for (const definition of inspection.activityDefinitions?.(machine) ?? []) {
-    const registrations = activities.get(definition.source) ?? []
+  for (const definition of inspection.invocationDefinitions?.(machine) ?? []) {
+    const registrations = invocations.get(definition.source) ?? []
     registrations.push(definition)
-    activities.set(definition.source, registrations)
+    invocations.set(definition.source, registrations)
   }
 
   const lines = [
@@ -120,17 +120,19 @@ export const makeMermaidRenderer = <Machine extends MachineValue, Snapshot>(
     const id = ids.get(node.path)
     if (id === undefined) return
 
-    const ownedActivities = activities.get(node.path) ?? []
+    const ownedInvocations = invocations.get(node.path) ?? []
     const descendants = children.get(node.path) ?? []
-    const renderedActivities = ownedActivities.map((activity) => escapeText(activityLabel(activity))).join(" · ")
-    const label = descendants.length > 0 && renderedActivities.length > 0
-      ? `${stateLabel(node, active)} · ${renderedActivities}`
+    const renderedInvocations = ownedInvocations.map((invocation) => escapeText(invocationLabel(invocation))).join(
+      " · "
+    )
+    const label = descendants.length > 0 && renderedInvocations.length > 0
+      ? `${stateLabel(node, active)} · ${renderedInvocations}`
       : stateLabel(node, active)
 
     lines.push(`${indent(depth)}state "${label}" as ${id}`)
-    if (descendants.length === 0 && renderedActivities.length > 0) {
+    if (descendants.length === 0 && renderedInvocations.length > 0) {
       lines.push(
-        `${indent(depth)}${id}: ${renderedActivities}`
+        `${indent(depth)}${id}: ${renderedInvocations}`
       )
     }
     if (node.type === "choice") {

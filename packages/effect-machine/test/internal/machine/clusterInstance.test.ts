@@ -96,7 +96,7 @@ const makeHarness = Effect.gen(function*() {
   ) =>
     ClusterInstance.make({
       machine: options.machine ?? Counter,
-      machineId: "Counter",
+      definitionId: "Counter",
       version: "1",
       input: [],
       address,

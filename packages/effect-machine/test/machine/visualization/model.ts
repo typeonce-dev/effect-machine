@@ -67,7 +67,7 @@ export interface TransitionDefinition {
   >
 }
 
-export type ActivityDefinition =
+export type InvocationDefinition =
   | {
     readonly source: string
     readonly id: string
@@ -107,7 +107,7 @@ export interface InspectionApi<Machine, Snapshot> {
   readonly stateNodes: (machine: Machine) => ReadonlyArray<StateNode>
   readonly initialDefinition: (machine: Machine) => InitialDefinition
   readonly transitionDefinitions: (machine: Machine) => ReadonlyArray<TransitionDefinition>
-  readonly activityDefinitions?: (machine: Machine) => ReadonlyArray<ActivityDefinition>
+  readonly invocationDefinitions?: (machine: Machine) => ReadonlyArray<InvocationDefinition>
   readonly configuration: (machine: Machine, snapshot: Snapshot) => ReadonlyArray<StateNode>
   readonly enabled: (machine: Machine, snapshot: Snapshot) => ReadonlyArray<PropertyKey>
 }

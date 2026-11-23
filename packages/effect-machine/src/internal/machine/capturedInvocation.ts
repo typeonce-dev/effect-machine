@@ -14,7 +14,7 @@ interface Outcomes {
   readonly onSnapshot?: EventTransition<any, any>
 }
 
-export type InvocationDefinition =
+export type CapturedInvocation =
   & Outcomes
   & { readonly sourceName?: string }
   & (
@@ -30,7 +30,7 @@ export type InvocationDefinition =
   )
 
 /** Captures exactly one invocation source before any planner or runtime sees it. */
-export const capture = (config: Record<PropertyKey, unknown>, path: string): InvocationDefinition => {
+export const capture = (config: Record<PropertyKey, unknown>, path: string): CapturedInvocation => {
   const sources = ["effect", "stream", "after", "logic", "child"].filter((key) => key in config)
   if (sources.length !== 1) {
     throw new Error(`Machine invocation for state "${path}" must define exactly one source`)
@@ -41,18 +41,18 @@ export const capture = (config: Record<PropertyKey, unknown>, path: string): Inv
   if ((sources[0] === "effect" || sources[0] === "stream") && typeof config[sources[0]] !== "function") {
     throw new Error(`Machine invocation for state "${path}" requires a source callback`)
   }
-  return Object.freeze(config) as unknown as InvocationDefinition
+  return Object.freeze(config) as unknown as CapturedInvocation
 }
 
 /** Lifecycle id that routes an invocation's outcomes within its owning state. */
-export const lifecycleId = (definition: InvocationDefinition): string =>
+export const lifecycleId = (definition: CapturedInvocation): string =>
   "child" in definition ? definition.child.id : definition.id
 
 /**
  * Rejects one state's invocations when two share a lifecycle id. Distinct ids
  * keep runtime-owned invocation child ids collision-free.
  */
-export const assertDistinctIds = (definitions: ReadonlyArray<InvocationDefinition>, path: string): void => {
+export const assertDistinctIds = (definitions: ReadonlyArray<CapturedInvocation>, path: string): void => {
   const seen = new Set<string>()
   for (const definition of definitions) {
     const id = lifecycleId(definition)
@@ -64,9 +64,9 @@ export const assertDistinctIds = (definitions: ReadonlyArray<InvocationDefinitio
 }
 
 /** Only captured state handlers cross this erased boundary. */
-export const definitions = (invoke: unknown): ReadonlyArray<InvocationDefinition> =>
+export const list = (invoke: unknown): ReadonlyArray<CapturedInvocation> =>
   invoke === undefined
     ? []
     : Array.isArray(invoke)
-    ? invoke as ReadonlyArray<InvocationDefinition>
-    : [invoke as InvocationDefinition]
+    ? invoke as ReadonlyArray<CapturedInvocation>
+    : [invoke as CapturedInvocation]
