@@ -1682,6 +1682,14 @@ describe("ClusterMachine", () => {
       Array.from(driver.unprocessed).filter((envelope) =>
         envelope._tag === "Request" && envelope.tag === "Cluster/Entity/keepAlive"
       ).length
+    /** The entity sent one keep-alive request, and nothing answered it. */
+    const assertHeld = (driver: MessageStorage.MemoryDriver["Service"]) => {
+      const sent = driver.journal.filter((envelope) =>
+        envelope._tag === "Request" && envelope.tag === "Cluster/Entity/keepAlive"
+      )
+      assert.deepStrictEqual(sent.map(({ requestId }) => driver.requests.get(requestId)?.replies), [[]])
+      assert.strictEqual(keptAlive(driver), 1)
+    }
 
     it.effect("moves the machine with the output of its effect, without another request", () =>
       Effect.gen(function*() {
@@ -2436,6 +2444,21 @@ describe("ClusterMachine", () => {
       }
     })
 
+    /** Counts how often a runner that reads through the overrides is delivered a keep-alive request. */
+    const recordKeepAlive = (messages: Effect.Success<typeof makeMessages>) => {
+      let deliveries = 0
+      const overrides: Partial<MessageStorage.MessageStorage["Service"]> = {
+        unprocessedMessages: (shardIds, options) =>
+          Effect.tap(messages.storage.unprocessedMessages(shardIds, options), (read) =>
+            Effect.sync(() => {
+              deliveries += read.filter(({ envelope }) =>
+                envelope._tag === "Request" && envelope.tag === "Cluster/Entity/keepAlive"
+              ).length
+            }))
+      }
+      return { count: () => deliveries, overrides }
+    }
+
     describe("keep-alive", () => {
       it.effect("keeps an idle entity while its work runs, and lets it go afterwards", () =>
         Effect.gen(function*() {
@@ -2490,32 +2513,98 @@ describe("ClusterMachine", () => {
             }))
         }))
 
+      it.effect("follows work that ends and starts again in requests sent together", () =>
+        Effect.gen(function*() {
+          const work = makeWork()
+          yield* run(makeLoader(work), { idle: 0 }, ({ driver, send, sharding }) =>
+            Effect.gen(function*() {
+              assertAccepted(yield* send(Event.Load({ id: "a" })))
+              for (let round = 0; round < 5; round++) {
+                yield* settle
+                const [cancelled, loaded] = yield* Effect.all([
+                  send(Event.Cancel()),
+                  send(Event.Load({ id: "a" }))
+                ], { concurrency: "unbounded" })
+                assertAccepted(cancelled)
+                assertAccepted(loaded)
+                yield* settle
+                assert.strictEqual(keptAlive(driver), 1)
+              }
+              yield* TestClock.adjust("30 seconds")
+              yield* settle
+              assert.strictEqual(yield* sharding.activeEntityCount, 1)
+              assert.strictEqual(work.runs.length, 6)
+              assert.isFalse(work.runs.at(-1)!.stopped)
+            }))
+        }))
+
+      it.effect("revives an entity that ended before it held a request for a caller that gave up", () =>
+        Effect.gen(function*() {
+          const work = makeWork()
+          const storage = makeTestStorage()
+          const messages = yield* makeMessages
+          const machine = makeLoader(work)
+          let saveKeepAlive: Effect.Effect<void> = Effect.never
+          const first = yield* startRunner(machine, storage, messages, {
+            overrides: {
+              saveRequest: (message) =>
+                Effect.andThen(
+                  message.envelope.tag === "Cluster/Entity/keepAlive"
+                    ? Effect.suspend(() => saveKeepAlive)
+                    : Effect.void,
+                  messages.storage.saveRequest(message)
+                )
+            }
+          })
+          const caller = yield* Effect.forkChild(first.send(Event.Load({ id: "a" })), { startImmediately: true })
+          yield* settle
+          yield* Fiber.interrupt(caller)
+          yield* settle
+          // Its step is stored, and it is answered.
+          assert.strictEqual(pathOf(first.stored()), "Loading")
+          assert.strictEqual(messages.driver.unprocessed.size, 0)
+          saveKeepAlive = Effect.void
+          yield* first.stop
+          assert.strictEqual(keptAlive(messages.driver), 1)
+          yield* startRunner(machine, storage, messages)
+          yield* until(() => work.runs.length === 2)
+        }))
+
       it.effect(
         "still revives an entity whose work has run for longer than a claim lasts",
         () =>
           Effect.gen(function*() {
             const work = makeWork()
-            yield* run(makeLoader(work), { idle: 0 }, ({ driver, send, sharding }) =>
-              Effect.gen(function*() {
-                assertAccepted(yield* send(Event.Load({ id: "a" })))
-                for (let minutes = 0; minutes < 16; minutes++) {
-                  yield* TestClock.adjust("1 minute")
-                  yield* settle
-                  assert.strictEqual(keptAlive(driver), 1)
-                }
-                assert.strictEqual(yield* sharding.activeEntityCount, 1)
-                assert.strictEqual(work.runs.length, 1)
-                assert.isFalse(work.runs[0]!.stopped)
-                // The requests that were replaced are answered.
-                assertAccepted(yield* send(Event.Cancel()))
-                yield* settle
-                assert.strictEqual(keptAlive(driver), 0)
-                const sent = driver.journal.length
-                yield* TestClock.adjust("6 minutes")
-                yield* settle
-                assert.strictEqual(driver.journal.length, sent)
-                assert.strictEqual(yield* sharding.activeEntityCount, 0)
-              }))
+            const storage = makeTestStorage()
+            const messages = yield* makeMessages
+            const machine = makeLoader(work)
+            const delivered = recordKeepAlive(messages)
+            const first = yield* startRunner(machine, storage, messages, { idle: 0, overrides: delivered.overrides })
+            assertAccepted(yield* first.send(Event.Load({ id: "a" })))
+            for (let minutes = 0; minutes < 35; minutes++) {
+              yield* TestClock.adjust("1 minute")
+              yield* settle
+              assertHeld(messages.driver)
+            }
+            // Once, and again after each claim expired.
+            assert.strictEqual(delivered.count(), 4)
+            assert.strictEqual(yield* first.sharding.activeEntityCount, 1)
+            assert.strictEqual(work.runs.length, 1)
+            assert.isFalse(work.runs[0]!.stopped)
+            const before = first.stored()
+            yield* first.stop
+            assertHeld(messages.driver)
+
+            const second = yield* startRunner(machine, storage, messages, { idle: 0 })
+            yield* until(() => work.runs.length === 2)
+            assert.strictEqual(second.stored(), before)
+            yield* succeed(work.runs[1], "document a")
+            yield* until(() => pathOf(second.stored()) === "Loaded")
+            yield* settle
+            assert.strictEqual(keptAlive(messages.driver), 0)
+            yield* TestClock.adjust("30 seconds")
+            yield* settle
+            assert.strictEqual(yield* second.sharding.activeEntityCount, 0)
           }),
         30000
       )
@@ -4205,28 +4294,61 @@ describe("ClusterMachine", () => {
       })
 
       describe("keep-alive", () => {
-        it.effect("is held across renewals while a timer waits, and released when it fires", () =>
-          Effect.gen(function*() {
-            yield* run(
-              makeTimer(),
-              { idle: 0 },
-              ({ driver, send, sharding, storage, stored }) =>
-                Effect.gen(function*() {
-                  assertAccepted(yield* send(wait(16 * 60)))
-                  for (let minutes = 0; minutes < 15; minutes++) {
-                    yield* advance("1 minute")
-                    assert.strictEqual(keptAlive(driver), 1)
-                    assert.strictEqual(yield* sharding.activeEntityCount, 1)
-                    assert.strictEqual(storage.commits, 1)
-                  }
-                  yield* advance("1 minute")
-                  assert.strictEqual(pathOf(stored()), "Expired")
-                  assert.strictEqual(keptAlive(driver), 0)
-                  yield* advance("30 seconds")
-                  assert.strictEqual(yield* sharding.activeEntityCount, 0)
-                })
-            )
-          }))
+        it.effect(
+          "is held as one request while a timer waits, and released when it fires",
+          () =>
+            Effect.gen(function*() {
+              const storage = makeTestStorage()
+              const messages = yield* makeMessages
+              const delivered = recordKeepAlive(messages)
+              const runner = yield* startRunner(makeTimer(), storage, messages, {
+                idle: 0,
+                overrides: delivered.overrides
+              })
+              assertAccepted(yield* runner.send(wait(36 * 60)))
+              for (let minutes = 0; minutes < 35; minutes++) {
+                yield* advance("1 minute")
+                assertHeld(messages.driver)
+                assert.strictEqual(yield* runner.sharding.activeEntityCount, 1)
+                assert.strictEqual(storage.commits, 1)
+              }
+              // Once, and again after each claim expired.
+              assert.strictEqual(delivered.count(), 4)
+              yield* advance("1 minute")
+              assert.strictEqual(pathOf(runner.stored()), "Expired")
+              assert.strictEqual(keptAlive(messages.driver), 0)
+              yield* advance("30 seconds")
+              assert.strictEqual(yield* runner.sharding.activeEntityCount, 0)
+            }),
+          30000
+        )
+
+        it.effect(
+          "revives an entity whose timer has waited for longer than a claim lasts",
+          () =>
+            Effect.gen(function*() {
+              const storage = makeTestStorage()
+              const messages = yield* makeMessages
+              const machine = makeTimer()
+              const first = yield* startRunner(machine, storage, messages, { idle: 0 })
+              const dueAt = (yield* now) + 30 * 60_000
+              assertAccepted(yield* first.send(wait(30 * 60)))
+              for (let minutes = 0; minutes < 25; minutes++) yield* advance("1 minute")
+              assertHeld(messages.driver)
+              yield* first.stop
+              yield* advance("1 minute")
+              assertHeld(messages.driver)
+
+              const second = yield* startRunner(machine, storage, messages, { idle: 0 })
+              yield* settle
+              assert.deepStrictEqual(second.stored()?.status, waits(dueAt))
+              yield* reach(dueAt, () => assert.strictEqual(pathOf(second.stored()), "Waiting"))
+              assert.strictEqual(pathOf(second.stored()), "Expired")
+              assert.strictEqual(keptAlive(messages.driver), 0)
+            }),
+          30000
+        )
+
         it.effect("is released when a timer is cancelled", () =>
           Effect.gen(function*() {
             yield* run(makeTimer(), { idle: 0 }, ({ driver, send, sharding }) =>
