@@ -1,6 +1,10 @@
 /**
  * Runs Effect machines as persisted Cluster entities.
  *
+ * Each live entity keeps one machine instance in memory. {@link Storage} holds
+ * the truth: every accepted request commits a checkpoint to it, and an entity
+ * that comes up anywhere continues from that checkpoint.
+ *
  * @since 0.4.0
  */
 import type { Entity, MessageStorage, Sharding, Snowflake } from "effect/cluster"
@@ -25,7 +29,13 @@ type Snowflake = Snowflake.Snowflake
  *
  * Machine identity and deployment version are stored around the generic
  * encoded snapshot. The request id records the request that produced the
- * checkpoint.
+ * checkpoint. The revision orders the checkpoints of one entity and decides
+ * which checkpoint a commit may replace.
+ *
+ * **Gotchas**
+ *
+ * Store and return the revision unchanged. The bridge assigns it and rejects a
+ * checkpoint whose revision is not a positive integer as `InvalidCheckpoint`.
  *
  * @category models
  * @since 0.4.0
@@ -36,6 +46,12 @@ export interface Checkpoint {
 
   /** Application-controlled deployment or migration version. */
   readonly version: string
+
+  /**
+   * Position in the entity's checkpoint history: `1` for its first checkpoint,
+   * then one more than the checkpoint it replaces.
+   */
+  readonly revision: number
 
   /** Cluster request whose accepted transition produced this checkpoint. */
   readonly requestId: Snowflake
@@ -67,10 +83,16 @@ export interface LoadResult {
 /**
  * Result of atomically committing a Cluster machine request.
  *
+ * **Details**
+ *
+ * The results are ordered. `Duplicate` takes precedence over
+ * `RevisionConflict`, so a redelivered request is recognized after later
+ * requests have advanced the revision.
+ *
  * @category models
  * @since 0.4.0
  */
-export type CommitResult = CommitResult.Committed | CommitResult.Duplicate
+export type CommitResult = CommitResult.Committed | CommitResult.Duplicate | CommitResult.RevisionConflict
 
 /**
  * Constructors and types for Cluster machine commit results.
@@ -81,6 +103,7 @@ export type CommitResult = CommitResult.Committed | CommitResult.Duplicate
 export const CommitResult: {
   Committed: () => CommitResult.Committed
   Duplicate: () => CommitResult.Duplicate
+  RevisionConflict: () => CommitResult.RevisionConflict
 } = Protocol.CommitResult
 
 /**
@@ -92,6 +115,7 @@ export const CommitResult: {
 export declare namespace CommitResult {
   /**
    * Indicates that the request id and checkpoint were committed atomically.
+   * The checkpoint directly followed the stored one.
    *
    * @category models
    * @since 0.4.0
@@ -101,13 +125,25 @@ export declare namespace CommitResult {
   }
 
   /**
-   * Indicates that the request id was already committed.
+   * Indicates that the request id was already committed, whatever the revision
+   * of the checkpoint. Nothing was written.
    *
    * @category models
    * @since 0.4.0
    */
   export interface Duplicate {
     readonly _tag: "Duplicate"
+  }
+
+  /**
+   * Indicates that the request id was not committed, and that the stored
+   * checkpoint is not the one this commit replaces. Nothing was written.
+   *
+   * @category models
+   * @since 0.48.0
+   */
+  export interface RevisionConflict {
+    readonly _tag: "RevisionConflict"
   }
 }
 
@@ -117,9 +153,37 @@ export declare namespace CommitResult {
  * **When to use**
  *
  * Use to connect `ClusterMachine` to a durable checkpoint store that can
- * atomically deduplicate request ids and replace the current checkpoint.
+ * atomically deduplicate request ids and compare-and-set the current
+ * checkpoint.
+ *
+ * **Details**
+ *
+ * `load` returns the latest checkpoint of an entity and whether a request id
+ * was already committed for it.
+ *
+ * `commit` decides and writes atomically, in this order:
+ *
+ * 1. `Duplicate` when `checkpoint.requestId` was already committed, whatever
+ *    the revision.
+ * 2. `RevisionConflict` when the stored revision is not exactly
+ *    `checkpoint.revision - 1`. An entity without a checkpoint has revision
+ *    `0`, so its first checkpoint has revision `1`.
+ * 3. `Committed` otherwise. The checkpoint replaces the stored one, and the
+ *    request id is recorded with it.
+ *
+ * Each live entity loads its checkpoint once and keeps the decoded state in
+ * memory, so most requests only call `commit`. Storage remains the truth:
+ * memory advances only after the whole transaction succeeded, and is loaded
+ * again after any other outcome. Before a request is rejected, `load` is called
+ * to recognize a redelivery that was already committed.
  *
  * **Gotchas**
+ *
+ * The revision check is what stops an entity that lost its shard, and still
+ * holds an older state, from overwriting a newer checkpoint. It must be part of
+ * the same atomic write, such as an update conditional on the stored revision
+ * together with an insert that fails when a checkpoint exists. Comparing in a
+ * separate read is not enough.
  *
  * For checkpoint and emitted-message persistence to commit atomically, this
  * service must join the transaction opened through the configured
@@ -145,6 +209,12 @@ export { Accepted }
 /**
  * Schema for reasons a Cluster machine request can be rejected without
  * advancing its checkpoint.
+ *
+ * **Details**
+ *
+ * `PersistenceFailure` reports storage that failed. `RevisionConflict` reports
+ * storage that worked and refused the request, because another instance of the
+ * entity advanced the checkpoint both times the request was applied.
  *
  * @category models
  * @since 0.4.0
@@ -191,9 +261,9 @@ type MachineEmits<M extends Machine.Machine.Any> = Machine.Machine.EmittedEvents
  *
  * **Details**
  *
- * The adapter exposes one persisted `send` RPC. Entity requests are serialized
- * by the normal Cluster entity concurrency and every accepted request advances
- * the checkpoint at most once.
+ * The adapter exposes one persisted `send` RPC. Each live entity keeps one
+ * machine instance in memory, which applies requests one at a time, and every
+ * accepted request advances the checkpoint at most once.
  *
  * @category models
  * @since 0.4.0
@@ -296,7 +366,8 @@ type EnsureJsonEncoded<
  * **Gotchas**
  *
  * This store is not durable and does not provide rollback with the in-memory
- * `MessageStorage` transaction marker.
+ * `MessageStorage` transaction marker. A request rejected as `EmissionFailure`
+ * keeps the checkpoint it had already committed.
  *
  * @category constructors
  * @since 0.4.0
@@ -327,7 +398,20 @@ export const layerMemory: Layer.Layer<Storage> = internal.layerMemory
  * requests as no-ops. The stable bridge identity is `machine.id` when present,
  * otherwise the Cluster entity type.
  *
+ * A live entity loads its checkpoint for the first request and then keeps the
+ * decoded state in memory until the entity is passivated or restarted. Storage
+ * remains the truth. A request whose state turns out to be behind storage is
+ * applied again to the stored state, and is rejected as `RevisionConflict` when
+ * storage has moved again.
+ *
  * **Gotchas**
+ *
+ * A request redelivered to a live entity is planned again before storage
+ * recognizes it. The plan is discarded, but its resolvers have run again, so
+ * they must not perform effects.
+ *
+ * A checkpoint changed outside the bridge while an entity is live is noticed
+ * through its revision, so such a change must also advance the revision.
  *
  * Invoked processes, spawned children, action-time `runtime.raise`, timers,
  * subscriptions, and other process-local state are not durable and are
