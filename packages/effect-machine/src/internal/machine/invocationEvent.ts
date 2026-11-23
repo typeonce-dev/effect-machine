@@ -14,11 +14,11 @@ export const GenerationId: unique symbol = Symbol("effect/Machine/InvocationEven
 /**
  * One activation of an invoking state.
  *
- * The owned child runtime begins a generation when the state is entered and
- * retires it when the state exits, so `current` is mutable by contract. Every
- * outcome of an invocation started during that activation carries the
- * generation, which lets the planner discard outcomes that were queued before
- * the state exited, even after the same path and id are entered again.
+ * The host begins a generation when the state is entered and retires it when
+ * the state exits, so `current` is mutable by contract. Every outcome of an
+ * invocation started during that activation carries the generation, which lets
+ * the planner discard outcomes that were queued before the state exited, even
+ * after the same path and id are entered again.
  *
  * @internal
  */

@@ -121,6 +121,61 @@ test("enforces semantic boundaries for each runtime strategy and shared protocol
   }
 })
 
+test("keeps host-neutral invocation modules independent of the local runtime", () => {
+  for (const module of ["invocationGeneration", "invocationOutcome", "invocationResolution"]) {
+    for (
+      const local of [
+        "childRegistry",
+        "commandRuntime",
+        "inspectionRuntime",
+        "invocation",
+        "process",
+        "runtime",
+        "runtimeCompiled",
+        "runtimeGeneric",
+        "runtimeProtocol"
+      ]
+    ) {
+      const root = makeProject({
+        [`src/internal/machine/${module}.ts`]: `import type { Local } from "./${local}.js"\nexport type Neutral = Local`,
+        [`src/internal/machine/${local}.ts`]: "export type Local = 1"
+      })
+      assert.deepEqual(rules(root), ["ARCH014"])
+    }
+  }
+})
+
+test("follows transitive dependencies of host-neutral modules and stops at public modules", () => {
+  const transitive = makeProject({
+    "src/internal/machine/invocationResolution.ts": 'import { helper } from "./helper.js"\nexport const resolve = helper',
+    "src/internal/machine/helper.ts": 'export { local as helper } from "./process.js"',
+    "src/internal/machine/process.ts": "export const local = 1"
+  })
+  assert.deepEqual(checkArchitecture({ rootDirectory: transitive }).map(({ message, rule }) => ({ message, rule })), [{
+    rule: "ARCH014",
+    message: "Host-neutral module depends on the local runtime through " +
+      "src/internal/machine/helper.ts -> src/internal/machine/process.ts"
+  }])
+
+  const throughPublicTypes = makeProject({
+    "src/Machine.ts": 'import * as internal from "./internal/machine/machine.js"\nexport interface Machine {}\nexport const make: () => Machine = internal.make',
+    "src/internal/machine/machine.ts": 'export { make } from "./process.js"',
+    "src/internal/machine/process.ts": "export const make = () => ({})",
+    "src/internal/machine/invocationResolution.ts": 'import type { Machine } from "../../Machine.js"\nexport type Resolve = (machine: Machine) => void'
+  })
+  assert.deepEqual(rules(throughPublicTypes), [])
+})
+
+test("keeps the halves split out of the invocation host outside inner layers", () => {
+  const root = makeProject({
+    "src/internal/machine/planner.ts": 'import type { Outcome } from "./invocationOutcome.js"\nexport type Planned = Outcome',
+    "src/internal/machine/runtimeProtocol.ts": 'import type { Outcome } from "./invocationOutcome.js"\nimport type { Generations } from "./invocationGeneration.js"\nexport type Runtime = [Outcome, Generations]',
+    "src/internal/machine/invocationOutcome.ts": "export type Outcome = 1",
+    "src/internal/machine/invocationGeneration.ts": "export type Generations = 1"
+  })
+  assert.deepEqual(rules(root), ["ARCH005", "ARCH006"])
+})
+
 test("detects runtime cycles while permitting type-only cycles", () => {
   const cyclic = makeProject({
     "src/a.ts": 'import { b } from "./b.js"\nexport const a = b',

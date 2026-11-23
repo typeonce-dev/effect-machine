@@ -13,7 +13,7 @@ import * as Option from "effect/Option"
 import type { ChildMachine, ChildOwner, Machine, RuntimeSnapshot } from "../../Machine.js"
 import * as Configuration from "./configuration.js"
 import { StoppedError } from "./errors.js"
-import * as InvocationDefinition from "./invocationDefinition.js"
+import * as InvocationResolution from "./invocationResolution.js"
 import * as Planner from "./planner.js"
 import * as Serialization from "./serialization.js"
 
@@ -80,28 +80,25 @@ export const planInvokedChild = (
   try {
     const machine = parent.machine
     const configuration = Configuration.normalizeConfigurationSync(machine, parent.snapshot.state)
-    for (const path of Configuration.getInitialEntryPaths(machine, configuration)) {
-      const handlers = Configuration.getStateConfigByPath(machine, path)
-      for (const definition of InvocationDefinition.definitions(handlers?.invoke)) {
+    const groups = InvocationResolution.resolve(
+      machine,
+      configuration,
+      Configuration.getInitialEntryPaths(machine, configuration),
+      Planner.InitialEvent,
+      {
+        ...(Configuration.getMachineReferences(configuration) ??
+          Planner.resolveMachineReferences(machine, configuration)),
+        children: unavailableChildren
+      }
+    )
+    for (const group of groups) {
+      for (const invocation of group.invocations) {
         if (
-          !("child" in definition) || definition.child.id !== descriptor.id ||
-          definition.child.machine !== descriptor.machine
+          invocation._tag !== "Child" || invocation.child.id !== descriptor.id ||
+          invocation.child.machine !== descriptor.machine
         ) continue
         const child = descriptor.machine
-        let input: unknown = undefined
-        if ("input" in definition) {
-          input = typeof definition.input === "function"
-            ? definition.input({
-              ...(Configuration.getMachineReferences(configuration) ??
-                Planner.resolveMachineReferences(machine, configuration)),
-              children: unavailableChildren,
-              state: configuration.values.get(path),
-              containingState: Configuration.getParentValue(machine, configuration, path),
-              ancestors: Configuration.getParentValues(machine, configuration, path),
-              event: Planner.InitialEvent
-            })
-            : definition.input
-        }
+        const input = invocation.input?.()
         const planned = planStart(child, child.input === undefined ? [] : [input])
         return planned === undefined ? undefined : Option.some(planned)
       }
