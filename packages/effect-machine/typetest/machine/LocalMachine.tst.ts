@@ -67,15 +67,18 @@ describe("LocalMachine", () => {
     expect(LocalMachine.resume).type.not.toBeCallableWith(machine, { path: "missing" })
   })
 
-  it("removes only the capability a local machine provides", () => {
+  it("removes only the capabilities a local machine provides", () => {
     expect<LocalMachine.RequiredServices<Machine.MachineRuntime | Database>>().type.toBe<Database>()
+    expect<
+      LocalMachine.RequiredServices<Machine.InvocationSupport<Machine.InvocationSupport.Kind> | Database>
+    >().type.toBe<Database>()
     expect<LocalMachine.RequiredServices<Machine.Machine.Services<typeof machine>>>().type.toBe<Database>()
   })
 })
 
 describe("MachineRuntime", () => {
-  it("is in the services of every machine that invokes work, whether or not the work uses it", () => {
-    expect<Machine.Machine.Services<typeof machine>>().type.toBe<Machine.MachineRuntime | Database>()
+  it("is not in the services of a machine whose work does not use it", () => {
+    expect<Machine.Machine.Services<typeof machine>>().type.toBe<Database>()
     const idle = Machine.make({ root: Machine.state({ states: { Idle: {} } }), events: Machine.events({}) })
       .handle({ initial: { target: "Idle" } })
     expect<Machine.Machine.Services<typeof idle>>().type.toBe<never>()

@@ -17,4 +17,4 @@ The others described values that no API produces or accepts:
 - `Machine.Machine.InvokeOwned` and `InvokeSource`. Use `Machine.Machine.Invocation`.
 - `Machine.Machine.EventTransitionReturn`, `EventHandlerReturn`, `AlwaysReturn`, `DoneReturn`, `ChoiceReturn`, and `InvokeOutcomeReturn`. They have no replacement.
 
-`LocalMachine.RequiredServices<R>`, which replaces `Machine.ExecutionServices<R>`, is `Exclude<R, Machine.MachineRuntime>`. The errors of a machine whose requirements are `any` are listed exactly instead of as `unknown`.
+`LocalMachine.RequiredServices<R>`, which replaces `Machine.ExecutionServices<R>`, only removes the requirements that a local machine provides. The errors of a machine whose requirements are `any` are listed exactly instead of as `unknown`.

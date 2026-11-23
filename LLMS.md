@@ -354,6 +354,13 @@ const LoadMachine = Machine.make({
 implemented machine type, so the runtime must provide them when it starts the
 machine.
 
+The same requirements say what a machine needs of the host that runs it.
+`Machine.InvocationSupport<"Stream">`, `<"Logic">`, and `<"Child">` mark a machine
+whose states invoke that kind, and `Machine.MachineRuntime` marks one whose work
+uses `Machine.spawn`, `Machine.sendTo`, or `Machine.stopChild`. `LocalMachine` and
+`AtomMachine` run all of them. `ClusterMachine.make` runs Effects and timers, and
+does not compile for any other machine. Its error lists what to replace.
+
 Model a per-instance capability, such as a router or a callback owned by a UI
 component, as such a service. Do not put functions in state data or startup
 input: snapshots must remain encodable. A React owner provides the capability

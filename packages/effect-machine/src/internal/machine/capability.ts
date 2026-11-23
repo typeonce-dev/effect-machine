@@ -31,13 +31,15 @@ import type {
  * The model declares this capability, and a host provides it to the work it
  * runs. `LocalMachine` provides it, also when `AtomMachine` hosts the machine.
  *
- * `Machine.Machine.Services` contains it for every machine that invokes work,
- * whether or not that work uses it. `LocalMachine.RequiredServices` removes it.
+ * `Machine.Machine.Services` contains it when the Effect, Stream, or `Logic` that
+ * a state invokes requires it, or when the machine of an invoked child does. A
+ * host that provides it runs every process that the work spawns, whatever that
+ * process invokes. `LocalMachine.RequiredServices` removes it.
  *
  * **Gotchas**
  *
- * `ClusterMachine` does not provide it. Its types accept a machine whose work
- * uses the capability, and that work fails the machine with a missing service.
+ * `ClusterMachine` does not provide it, so `ClusterMachine.make` does not compile
+ * for a machine whose services contain it.
  *
  * Only the type is public: hosts of this library provide the service, and it
  * cannot be constructed elsewhere.
