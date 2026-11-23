@@ -15,7 +15,9 @@
  * - begin one generation for each returned group, through
  *   `InvocationGenerations`, and start the group's invocations in order;
  * - call each lazy source at most once per start, inside its own startup failure
- *   boundary, after the previous invocation has started;
+ *   boundary, after the previous invocation has started. A host that stores when
+ *   a timer is due evaluates its duration earlier, and reports a failure of that
+ *   where the timer would have started;
  * - route everything the work reports through `InvocationOutcome` with the
  *   group's generation, and plan a delivered event in a later turn than the one
  *   that started the work.

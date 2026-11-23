@@ -1,5 +1,5 @@
 import { assert, describe, it } from "@effect/vitest"
-import { Cause, Context, Deferred, Effect, Exit, Fiber, Latch, Layer, Option, Schema, Scope } from "effect"
+import { Cause, Context, Deferred, Effect, Exit, Fiber, Latch, Layer, Option, Schema, Scope, Stream } from "effect"
 import {
   ClusterSchema,
   Entity,
@@ -278,12 +278,12 @@ describe("ClusterInstance", () => {
       assert.instanceOf(yield* counter.apply(input(1)), Accepted)
       const Invoking = Machine.make({
         id: "Counter",
-        timers: { wait: "1 second" },
+        streams: { numbers: Stream.make(1) },
         root: Machine.state({ states: { Count: { fields: { value: Schema.Number } } } }),
         events: Machine.eventsFromSchemas(Increment)
       }).handle({
         initial: { target: "Count", data: { value: 0 } },
-        states: { Count: { invoke: { src: "wait", onDone: { stay: true } } } }
+        states: { Count: { invoke: { src: "numbers", onElement: { stay: true }, onDone: { stay: true } } } }
       })
       const invoking = yield* harness.make({ machine: Invoking })
       assert.instanceOf(yield* invoking.apply(input(1)), Accepted)
@@ -678,6 +678,119 @@ describe("ClusterInstance with work", () => {
       assert.strictEqual(runs.length, 1)
       assert.strictEqual(switches.at(-1), false)
     }))
+
+  describe("with timers", () => {
+    const makeWaiting = () =>
+      Machine.make({
+        id: "Counter",
+        root: Machine.state({ states: { Idle: {}, Waiting: {}, Expired: {} } }),
+        events: Machine.eventsFromSchemas(Go, Back),
+        timers: { wait: "10 seconds" }
+      }).handle({
+        initial: { target: "Idle" },
+        states: {
+          Idle: { on: { Go: { target: "Waiting" } } },
+          Waiting: {
+            invoke: { src: "wait", onDone: { target: "Expired" } },
+            on: { Go: { stay: true }, Back: { target: "Idle" } }
+          },
+          Expired: {}
+        }
+      })
+    const dueAtOf = (harness: Effect.Success<typeof makeHarness>) =>
+      Effect.map(harness.memory.load(address), (stored) => {
+        const { status } = Option.getOrThrow(stored)
+        const progress = status._tag === "Active" ? status.invocations["Waiting"]?.["wait"] : undefined
+        return progress?._tag === "Waiting" ? progress.dueAt : undefined
+      })
+
+    it.effect("starts the timer of a step whose caller was interrupted after its commit", () =>
+      Effect.gen(function*() {
+        const harness = yield* makeHarness
+        let acknowledge: Effect.Effect<void> = Effect.void
+        const switches: Array<boolean> = []
+        const instance = yield* harness.make({
+          machine: makeWaiting(),
+          withTransaction: (effect) => Effect.tap(effect, () => acknowledge),
+          keepAlive: (enabled) => Effect.sync(() => void switches.push(enabled))
+        })
+        yield* settle
+        acknowledge = Effect.never
+        const fiber = yield* Effect.forkChild(instance.apply(go(1)), { startImmediately: true })
+        yield* settle
+        yield* TestClock.adjust("4 seconds")
+        acknowledge = Effect.void
+        yield* Fiber.interrupt(fiber)
+        yield* settle
+        assert.deepStrictEqual(switches, [false, true])
+        assert.strictEqual(yield* dueAtOf(harness), 10_000)
+        yield* TestClock.adjust(5999)
+        assert.strictEqual(yield* harness.revision, 1)
+        yield* TestClock.adjust(1)
+        yield* settle
+        assert.strictEqual(yield* harness.revision, 2)
+        assert.deepStrictEqual(switches, [false, true, false])
+      }))
+
+    it.effect("applies no completion that waits for its turn when the instance ends", () =>
+      Effect.gen(function*() {
+        const harness = yield* makeHarness
+        const scope = yield* Scope.make()
+        let hold: Effect.Effect<void> = Effect.void
+        const instance = yield* Scope.provide(
+          harness.make({ machine: makeWaiting(), withTransaction: (effect) => Effect.andThen(hold, effect) }),
+          scope
+        )
+        assert.instanceOf(yield* instance.apply(go(1)), Accepted)
+        hold = Effect.never
+        const fiber = yield* Effect.forkChild(instance.apply(go(2)), { startImmediately: true })
+        yield* settle
+        yield* TestClock.adjust("10 seconds")
+        yield* settle
+        yield* Scope.close(scope, Exit.void)
+        hold = Effect.void
+        yield* Fiber.interrupt(fiber)
+        yield* settle
+        yield* TestClock.adjust("1 minute")
+        assert.strictEqual(yield* harness.revision, 1)
+        assert.strictEqual(harness.counts.commits, 1)
+      }))
+
+    it.effect("lets one of two instances fire a timer that both wait for", () =>
+      Effect.gen(function*() {
+        const harness = yield* makeHarness
+        const first = yield* harness.make({ machine: makeWaiting() })
+        assert.instanceOf(yield* first.apply(go(1)), Accepted)
+        yield* TestClock.adjust("3 seconds")
+        // The new owner waits for the same instant while the previous one still drains.
+        yield* harness.make({ machine: makeWaiting() })
+        yield* TestClock.adjust(6999)
+        assert.strictEqual(yield* harness.revision, 1)
+        yield* TestClock.adjust(1)
+        yield* settle
+        assert.strictEqual(yield* harness.revision, 2)
+        yield* TestClock.adjust("1 minute")
+        assert.strictEqual(yield* harness.revision, 2)
+        assert.strictEqual(yield* dueAtOf(harness), undefined)
+      }))
+
+    it.effect("stops a wait whose state it can no longer read", () =>
+      Effect.gen(function*() {
+        const harness = yield* makeHarness
+        const instance = yield* harness.make({ machine: makeWaiting() })
+        assert.instanceOf(yield* instance.apply(go(1)), Accepted)
+        const stored = Option.getOrThrow(yield* harness.memory.load(address))
+        yield* harness.memory.commit(address, { ...stored, revision: 2, version: "2", origin: { _tag: "Timers" } })
+        const rejected = yield* instance.apply(go(2))
+        assert.instanceOf(rejected, Rejected)
+        assert.strictEqual(rejected.reason, "VersionMismatch")
+        yield* settle
+        const commits = harness.counts.commits
+        yield* TestClock.adjust("1 minute")
+        assert.strictEqual(harness.counts.commits, commits)
+        assert.strictEqual(yield* harness.revision, 2)
+      }))
+  })
 
   it.effect("stops its work and starts it again when a defect restarts its handlers", () => {
     const { machine, runs } = makeLoader()

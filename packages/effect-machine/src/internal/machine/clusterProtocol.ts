@@ -35,7 +35,7 @@ export class Storage extends Context.Service<Storage, {
    * Replaces the checkpoint of an entity in one atomic decision:
    *
    * 1. `Duplicate` when the origin is a request whose id was already committed,
-   *    whatever the revision. A checkpoint from an invocation is never a
+   *    whatever the revision. A checkpoint of any other origin is never a
    *    duplicate.
    * 2. `RevisionConflict` when the stored revision is not exactly
    *    `checkpoint.revision - 1`, where no stored checkpoint counts as `0`.

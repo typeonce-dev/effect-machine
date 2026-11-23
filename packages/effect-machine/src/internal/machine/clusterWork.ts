@@ -1,5 +1,6 @@
 /**
- * The invoked effects that one live Cluster instance runs.
+ * The invocations that one live Cluster instance runs: effects, and timers that
+ * wait for their stored due time.
  *
  * @since 0.48.0
  */
@@ -12,6 +13,8 @@ import * as Fiber from "effect/Fiber"
 import * as Scope from "effect/Scope"
 import type { ChildOwner, MachineTarget } from "../../Machine.js"
 import type { Checkpoint } from "../../unstable/cluster/ClusterMachine.js"
+import * as ClusterProgress from "./clusterProgress.js"
+import * as ClusterTimer from "./clusterTimer.js"
 import { ProcessLocalError } from "./errors.js"
 import * as InvocationDefinition from "./invocationDefinition.js"
 import type { Generation } from "./invocationEvent.js"
@@ -56,18 +59,21 @@ export const makeCapabilities = (machineId: string): InvocationResolution.Invoca
   children: refusedChildren
 })
 
-/** @internal */
-export const sameKey = (left: Checkpoint.InvocationKey, right: Checkpoint.InvocationKey): boolean =>
+/** An invocation this host runs. */
+type HostedInvocation = InvocationResolution.EffectInvocation | InvocationResolution.TimerInvocation
+
+const sameKey = (left: Checkpoint.InvocationKey, right: Checkpoint.InvocationKey): boolean =>
   left.path === right.path && left.id === right.id
 
 /**
- * One effect this host runs, from its start until its outcome is applied or its
- * state exits.
+ * One invocation this host runs, from its start until its outcome is applied or
+ * its state exits. A timer is work whose fiber waits, so everything that stops,
+ * retires, or reports work holds for it too.
  *
  * @internal
  */
 export interface Work {
-  readonly invocation: InvocationResolution.EffectInvocation
+  readonly invocation: HostedInvocation
   readonly generation: Generation
   readonly fiber: Fiber.Fiber<unknown, unknown>
 
@@ -88,6 +94,13 @@ export interface StartFailure {
   readonly cause: Cause.Cause<never>
 }
 
+/**
+ * What a stored state says about the work it owns.
+ *
+ * @internal
+ */
+export type Stored = ClusterTimer.Schedule
+
 /** @internal */
 export interface Options<R> {
   readonly machineId: string
@@ -104,10 +117,10 @@ export interface Options<R> {
 }
 
 /**
- * Owns every fiber that runs work, the fibers that report how it ended, and the
- * generations of invoking states. All fibers live in one private scope that only
- * `close` closes, so `close` can declare the work stopped before the first
- * interruption reaches it.
+ * Owns every fiber that runs work, including the waits of timers, the fibers that
+ * report how it ended, and the generations of invoking states. All fibers live in
+ * one private scope that only `close` closes, so `close` can declare the work
+ * stopped before the first interruption reaches it.
  *
  * Nothing here is synchronized. Every method except `close` runs inside a turn
  * of the instance.
@@ -145,19 +158,20 @@ export class ClusterWork<R> {
 
   /**
    * Starts groups in order, one generation per group, leaving out settled
-   * invocations. The first source that cannot be constructed ends the start.
+   * invocations. A timer waits for its stored due time, or ends at once when that
+   * has passed. The first source that cannot be constructed ends the start.
    */
   readonly start = Effect.fnUntraced(function*<R>(
     this: ClusterWork<R>,
     groups: ReadonlyArray<InvocationResolution.InvocationGroup>,
-    settled: ReadonlyArray<Checkpoint.InvocationKey>
+    stored: Stored
   ): Effect.fn.Return<StartFailure | undefined> {
     for (const group of groups) {
       if (this.isClosed) return undefined
       const generation = this.generations.beginGeneration(group.path)
       for (const invocation of group.invocations) {
-        if (settled.some((key) => sameKey(key, invocation))) continue
-        const exit = yield* Effect.exit(Effect.sync(() => construct(invocation)))
+        if (ClusterProgress.get(stored.progress, invocation)?._tag === "Settled") continue
+        const exit = yield* Effect.exit(construct(invocation, stored))
         if (Exit.isFailure(exit)) {
           return { key: { path: invocation.path, id: invocation.id }, cause: exit.cause }
         }
@@ -217,7 +231,7 @@ export class ClusterWork<R> {
   }
 
   private run(
-    invocation: InvocationResolution.EffectInvocation,
+    invocation: HostedInvocation,
     effect: Effect.Effect<unknown, unknown, unknown>,
     generation: Generation
   ): Effect.Effect<void> {
@@ -256,11 +270,46 @@ export class ClusterWork<R> {
   }
 }
 
-const construct = (invocation: InvocationResolution.ResolvedInvocation) => {
-  if (invocation._tag !== "Effect") {
-    throw new Error(`Unexpected ${invocation._tag} invocation "${invocation.id}" of a supported machine`)
+interface Constructed {
+  readonly invocation: HostedInvocation
+  readonly effect: Effect.Effect<unknown, unknown, unknown>
+}
+
+// The duration of a timer was evaluated before its state was stored. A failure
+// of that is reported here, where the local runtime would have evaluated it.
+const constructTimer = (
+  invocation: InvocationResolution.TimerInvocation,
+  { progress, unscheduled }: Stored
+): Effect.Effect<Constructed> => {
+  const waiting = ClusterProgress.get(progress, invocation)
+  if (waiting?._tag === "Waiting") {
+    return Effect.succeed({ invocation, effect: ClusterTimer.waitUntil(waiting.dueAt) })
   }
-  return { invocation, effect: invocation.effect() }
+  const failed = unscheduled.find(({ key }) => sameKey(key, invocation))
+  if (failed === undefined) {
+    return Effect.die(new Error(`Timer "${invocation.id}" of state "${invocation.path}" has no due time`))
+  }
+  return failed.stage === "Source"
+    ? Effect.failCause(failed.cause)
+    : Effect.succeed({ invocation, effect: Effect.failCause(failed.cause) })
+}
+
+const construct = (
+  invocation: InvocationResolution.ResolvedInvocation,
+  stored: Stored
+): Effect.Effect<Constructed> => {
+  switch (invocation._tag) {
+    case "Effect":
+      return Effect.sync(() => ({ invocation, effect: invocation.effect() }))
+    case "Timer":
+      return constructTimer(invocation, stored)
+    case "Stream":
+    case "Logic":
+    case "Child":
+      return Effect.die(
+        new Error(`Unexpected ${invocation._tag} invocation "${invocation.id}" of a supported machine`)
+      )
+  }
 }
 
 /**
@@ -276,13 +325,12 @@ export const outcomeOf = (work: Work, outcome: InvocationOutcome.Outcome): Invoc
 export type Support =
   /** The machine invokes nothing. */
   | { readonly _tag: "Idle" }
-  /** Every invocation of the machine is an effect. */
-  | { readonly _tag: "Effects" }
+  /** Every invocation of the machine is an effect or a timer. */
+  | { readonly _tag: "Hosted" }
   | { readonly _tag: "Unsupported"; readonly message: string }
 
-const sourceKind = (definition: InvocationDefinition.InvocationDefinition): string | undefined => {
-  if ("effect" in definition) return undefined
-  if ("after" in definition) return "Timer"
+const unsupportedKind = (definition: InvocationDefinition.InvocationDefinition): string | undefined => {
+  if ("effect" in definition || "after" in definition) return undefined
   if ("stream" in definition) return "Stream"
   if ("logic" in definition) return "Logic"
   return "Child"
@@ -298,7 +346,7 @@ export const supportOf = (handlers: Readonly<Record<string, { readonly invoke?: 
   let support: Support = { _tag: "Idle" }
   for (const path of Object.keys(handlers)) {
     for (const definition of InvocationDefinition.definitions(handlers[path]?.invoke)) {
-      const kind = sourceKind(definition)
+      const kind = unsupportedKind(definition)
       if (kind !== undefined) {
         const id = InvocationDefinition.lifecycleId(definition)
         return {
@@ -306,7 +354,7 @@ export const supportOf = (handlers: Readonly<Record<string, { readonly invoke?: 
           message: `${kind} invocation "${id}" of state "${path}" is process-local and is not supported`
         }
       }
-      support = { _tag: "Effects" }
+      support = { _tag: "Hosted" }
     }
   }
   return support
