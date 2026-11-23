@@ -14,7 +14,8 @@ const ruleDescriptions = {
   ARCH009: "Production runtime imports must be acyclic",
   ARCH011: "Internal directories may not use barrel modules",
   ARCH012: "Internal filenames must describe their responsibility without a machine prefix",
-  ARCH013: "Public implementation bindings must declare their API signature"
+  ARCH013: "Public implementation bindings must declare their API signature",
+  ARCH014: "Host-neutral modules may not depend on the local runtime, directly or transitively"
 }
 
 const normalizePath = (path) => path.split(sep).join("/")
@@ -177,6 +178,32 @@ const collectCycleDiagnostics = (program, rootDirectory, runtimeEdges) => {
   return diagnostics
 }
 
+// Type-only edges count, because a host-neutral contract may not name a local
+// runtime type either. Public modules end the search: internals refer back to
+// them for types, and those types describe every host.
+const findInternalPath = (edges, source, targets) => {
+  const adjacency = new Map()
+  for (const edge of edges) {
+    if (!edge.source.startsWith("src/internal/") || !edge.target.startsWith("src/internal/")) continue
+    const next = adjacency.get(edge.source) ?? []
+    next.push(edge.target)
+    adjacency.set(edge.source, next)
+  }
+  const queue = [[source]]
+  const visited = new Set([source])
+  while (queue.length > 0) {
+    const path = queue.shift()
+    const last = path[path.length - 1]
+    if (targets.has(last)) return path
+    for (const next of adjacency.get(last) ?? []) {
+      if (visited.has(next)) continue
+      visited.add(next)
+      queue.push([...path, next])
+    }
+  }
+  return undefined
+}
+
 const readProject = (rootDirectory, tsconfigPath) => {
   const configPath = resolve(rootDirectory, tsconfigPath)
   const configFile = ts.readConfigFile(configPath, ts.sys.readFile)
@@ -212,6 +239,19 @@ export const checkArchitecture = ({
     "src/internal/machine/runtimeProtocol.ts",
     "src/internal/machine/runtimeGeneric.ts",
     "src/internal/machine/runtimeCompiled.ts"
+  ])
+  const hostNeutralModules = new Set([
+    "src/internal/machine/invocationGeneration.ts",
+    "src/internal/machine/invocationOutcome.ts",
+    "src/internal/machine/invocationResolution.ts"
+  ])
+  const localRuntimeModules = new Set([
+    ...runtimeModules,
+    "src/internal/machine/childRegistry.ts",
+    "src/internal/machine/commandRuntime.ts",
+    "src/internal/machine/inspectionRuntime.ts",
+    "src/internal/machine/invocation.ts",
+    "src/internal/machine/process.ts"
   ])
   const diagnostics = []
   const entrypoints = new Set([
@@ -303,9 +343,24 @@ export const checkArchitecture = ({
     if (forbidden.has("src/internal/machine/runtime.ts")) {
       for (const module of runtimeModules) forbidden.add(module)
     }
+    if (forbidden.has("src/internal/machine/invocation.ts")) {
+      for (const module of hostNeutralModules) forbidden.add(module)
+    }
   }
 
   for (const edge of edges) {
+    if (hostNeutralModules.has(edge.source)) {
+      const path = findInternalPath(edges, edge.target, localRuntimeModules)
+      if (path !== undefined) {
+        diagnostics.push(diagnostic(
+          "ARCH014",
+          edge.sourceFile,
+          edge.node,
+          edge.source,
+          `Host-neutral module depends on the local runtime through ${path.join(" -> ")}`
+        ))
+      }
+    }
     if (entrypoints.has(edge.source) && edge.target.includes("/internal/")) {
       diagnostics.push(diagnostic(
         "ARCH001",
@@ -377,6 +432,8 @@ export const checkArchitecture = ({
         "src/internal/machine/configuration.ts",
         "src/internal/machine/executionPlan.ts",
         "src/internal/machine/invocation.ts",
+        "src/internal/machine/invocationOutcome.ts",
+        "src/internal/machine/invocationResolution.ts",
         "src/internal/machine/planner.ts",
         "src/internal/machine/process.ts"
       ].includes(edge.target)

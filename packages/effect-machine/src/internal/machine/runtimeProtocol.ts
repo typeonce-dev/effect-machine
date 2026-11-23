@@ -35,6 +35,7 @@ import {
 import { ChildAlreadyExistsError, StoppedError } from "./errors.js"
 import * as InspectionRuntime from "./inspectionRuntime.js"
 import type * as InvocationEvent from "./invocationEvent.js"
+import { InvocationGenerations } from "./invocationGeneration.js"
 import { type ChildMachineLogicSlot, ChildMachineLogicTypeId } from "./symbols.js"
 
 /** @internal */
@@ -831,15 +832,10 @@ export interface ChildRuntime {
   readonly owned: OwnedChildRuntime
 }
 
-class OwnedChildRuntimeImpl implements OwnedChildRuntime {
+// Extends the generation bookkeeping so a running machine retains one object for
+// both.
+class OwnedChildRuntimeImpl extends InvocationGenerations implements OwnedChildRuntime {
   private scopedServices: Context.Context<any> | undefined
-  // The current generation of each active invoking state path. Most
-  // configurations have one such path, held inline; further paths use the map.
-  // Entries are removed when their state exits, so neither outgrows the active
-  // configuration.
-  private generationPath: string | undefined
-  private generation: InvocationEvent.Generation | undefined
-  private generations: Map<string, InvocationEvent.Generation> | undefined
 
   constructor(
     private readonly registry: ChildRegistry,
@@ -849,7 +845,9 @@ class OwnedChildRuntimeImpl implements OwnedChildRuntime {
     private readonly sendAcknowledged?: (
       event: unknown
     ) => Effect.Effect<AcknowledgedDelivery<unknown>, unknown | StoppedError>
-  ) {}
+  ) {
+    super()
+  }
 
   private has(key: string): boolean {
     for (const entry of this.registry.children.values()) {
@@ -957,46 +955,9 @@ class OwnedChildRuntimeImpl implements OwnedChildRuntime {
     })
   }
 
-  beginGeneration(path: string): InvocationEvent.Generation {
-    this.retireGeneration(path)
-    const generation: InvocationEvent.Generation = { current: true }
-    if (this.generationPath === undefined) {
-      this.generationPath = path
-      this.generation = generation
-    } else {
-      ;(this.generations ??= new Map()).set(path, generation)
-    }
-    return generation
-  }
-
-  private retireGeneration(path: string): void {
-    const inline = this.generation
-    if (inline !== undefined && this.generationPath === path) {
-      inline.current = false
-      this.generationPath = undefined
-      this.generation = undefined
-      return
-    }
-    const generations = this.generations
-    const generation = generations?.get(path)
-    if (generations !== undefined && generation !== undefined) {
-      generation.current = false
-      generations.delete(path)
-    }
-  }
-
   stopAll(): Effect.Effect<void> {
     return Effect.suspend(() => {
-      if (this.generation !== undefined) {
-        this.generation.current = false
-        this.generationPath = undefined
-        this.generation = undefined
-      }
-      const generations = this.generations
-      if (generations !== undefined && generations.size > 0) {
-        for (const generation of generations.values()) generation.current = false
-        generations.clear()
-      }
+      this.retireAllGenerations()
       const effects: Array<Effect.Effect<void>> = []
       for (const entry of this.registry.children.values()) {
         if (entry.ownerActive) effects.push(this.stopEntry(entry))
@@ -1011,9 +972,7 @@ class OwnedChildRuntimeImpl implements OwnedChildRuntime {
 
   stopPaths(paths: ReadonlyArray<string>): Effect.Effect<void> | undefined {
     if (paths.length === 0) return undefined
-    if (this.generation !== undefined || (this.generations !== undefined && this.generations.size > 0)) {
-      for (const path of paths) this.retireGeneration(path)
-    }
+    this.retireGenerations(paths)
     const pathSet = new Set(paths)
     const effects: Array<Effect.Effect<void>> = []
     for (const entry of this.registry.children.values()) {
