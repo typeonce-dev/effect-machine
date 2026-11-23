@@ -574,6 +574,12 @@ export const layerMemory: Layer.Layer<Storage> = internal.layerMemory
  * A storage or `enqueue` failure never fails the machine. An outcome that cannot
  * be stored is retried for as long as the entity lives.
  *
+ * The keep-alive request of an entity is replaced every five minutes. Message
+ * storage delivers a request again once its claim expires, and a live entity
+ * answers a keep-alive request that is delivered again, which would leave
+ * nothing to bring the entity up after a crash. A crash during the few
+ * milliseconds of a replacement leaves the entity down until its next request.
+ *
  * Timers, streams, process logic, child machines, spawned children, action-time
  * `runtime.raise`, machine commands, subscriptions, and other process-local
  * state are not durable and are rejected. A machine that declares an unsupported
