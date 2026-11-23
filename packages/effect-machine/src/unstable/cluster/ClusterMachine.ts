@@ -643,7 +643,7 @@ export const layerMemory: Layer.Layer<Storage> = internal.layerMemory
  * applies the completion as a step of its own. An entity that comes up again,
  * here or on another runner, waits only for the time that remains, and completes
  * a timer whose time has passed at once. Leaving the state cancels the timer, and
- * entering it again stores a new due time. `Machine.resume` differs: it starts the
+ * entering it again stores a new due time. `LocalMachine.resume` differs: it starts the
  * full duration again.
  *
  * The duration of a timer is evaluated after the step that enters its state is

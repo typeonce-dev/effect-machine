@@ -4330,7 +4330,7 @@ describe("ClusterMachine", () => {
               )
               // The local runtime evaluates the duration in start order instead.
               const localOrder: Array<string> = []
-              const ref = yield* Machine.start(makeBroken(makeWork(), localOrder, duration))
+              const ref = yield* LocalMachine.start(makeBroken(makeWork(), localOrder, duration))
               yield* ref.send(Events.Load({ id: "a" }))
               assert.isTrue(Exit.hasDies(yield* Effect.exit(ref.join)))
               const local = yield* ref.snapshot
@@ -5210,7 +5210,7 @@ describe("ClusterMachine", () => {
             Effect.gen(function*() {
               const localMachine = machine()
               const localStates: Array<readonly [string, unknown]> = []
-              const ref = yield* Machine.start(localMachine as any) as Effect.Effect<
+              const ref = yield* LocalMachine.start(localMachine as any) as Effect.Effect<
                 Machine.MachineRef<any, any, any, any>
               >
               const observer = yield* Effect.forkChild(
@@ -5238,16 +5238,16 @@ describe("ClusterMachine", () => {
             }))
         }
 
-        it.effect("differs from Machine.resume, which starts the full duration again", () =>
+        it.effect("differs from LocalMachine.resume, which starts the full duration again", () =>
           Effect.gen(function*() {
             const machine = makeTimer()
-            const local = yield* Machine.start(machine)
+            const local = yield* LocalMachine.start(machine)
             yield* local.send(TimerEvents.Wait({ seconds: 60 }))
             yield* advance("40 seconds")
             const { state } = yield* local.snapshot
             yield* local.stop
             yield* advance("10 seconds")
-            const resumed = yield* Machine.resume(machine, state)
+            const resumed = yield* LocalMachine.resume(machine, state)
             const localPath = Effect.map(resumed.snapshot, ({ state }) => state.state.path)
             yield* advance("59 seconds")
             assert.strictEqual(yield* localPath, "Waiting")
