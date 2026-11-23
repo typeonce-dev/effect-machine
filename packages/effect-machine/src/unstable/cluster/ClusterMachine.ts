@@ -27,7 +27,7 @@ type Snowflake = Snowflake.Snowflake
  *
  * **Details**
  *
- * Machine identity and deployment version are stored around the generic
+ * The definition id and deployment version are stored around the generic
  * encoded snapshot. The origin records the input that produced the checkpoint.
  * The revision orders the checkpoints of one entity and decides which
  * checkpoint a commit may replace. The status says whether the machine failed.
@@ -43,8 +43,11 @@ type Snowflake = Snowflake.Snowflake
  * @since 0.4.0
  */
 export interface Checkpoint {
-  /** Stable identity of the machine definition that produced the snapshot. */
-  readonly machineId: string
+  /**
+   * Stable id of the machine definition that produced the snapshot: `machine.id`
+   * when present, otherwise the Cluster entity type.
+   */
+  readonly definitionId: string
 
   /** Application-controlled deployment or migration version. */
   readonly version: string
@@ -427,9 +430,11 @@ export { Accepted }
  *
  * **Details**
  *
- * `PersistenceFailure` reports storage that failed. `RevisionConflict` reports
- * storage that worked and refused the request, because another instance of the
- * entity advanced the checkpoint both times the request was applied.
+ * `DefinitionIdMismatch` reports a checkpoint whose `definitionId` is not the id
+ * of the machine that loaded it. `PersistenceFailure` reports storage that
+ * failed. `RevisionConflict` reports storage that worked and refused the request,
+ * because another instance of the entity advanced the checkpoint both times the
+ * request was applied.
  * `MachineFailed` reports a machine whose stored status is `Failed`, and its
  * message is the stored failure. A request that was committed before the
  * failure is still answered as accepted.
@@ -614,9 +619,9 @@ export const layerMemory: Layer.Layer<Storage> = internal.layerMemory
  * **Details**
  *
  * A missing checkpoint runs initial planning before the first event. Existing
- * checkpoints are identity-checked, version-checked, decoded, and resumed
- * without rerunning initial entry behavior. Final checkpoints accept later
- * requests as no-ops. The stable bridge identity is `machine.id` when present,
+ * checkpoints are checked for their definition id and version, decoded, and
+ * resumed without rerunning initial entry behavior. Final checkpoints accept
+ * later requests as no-ops. The definition id is `machine.id` when present,
  * otherwise the Cluster entity type.
  *
  * A live entity loads its checkpoint when it comes up, or for its first request

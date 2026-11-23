@@ -2,9 +2,9 @@ import * as Effect from "effect/Effect"
 import * as Result from "effect/Result"
 import type { Diagnostic } from "../../DevToolsProtocol.js"
 import type {
-  Activity as VisualizationActivity,
   Branch as VisualizationBranch,
   InputSchema,
+  Invocation as VisualizationInvocation,
   MachineDocument as VisualizationDocument,
   Transition as VisualizationTransition,
   Trigger
@@ -163,37 +163,37 @@ const renderIncomingTransition = (
   return card
 }
 
-const activityTitle = (activity: VisualizationActivity): string => {
-  switch (activity.type) {
+const invocationTitle = (invocation: VisualizationInvocation): string => {
+  switch (invocation.type) {
     case "process":
     case "effect":
     case "timer":
     case "stream":
-      return activity.lifecycleId
+      return invocation.lifecycleId
     case "machine":
-      return `${activity.lifecycleId} → ${activity.child.machineId ?? activity.child.id}`
+      return `${invocation.lifecycleId} → ${invocation.child.machineId ?? invocation.child.id}`
   }
 }
 
-const renderActivity = (activity: VisualizationActivity, navigate: StateNavigator): HTMLElement => {
-  const card = createElement("article", "inspection-card activity-card")
+const renderInvocation = (invocation: VisualizationInvocation, navigate: StateNavigator): HTMLElement => {
+  const card = createElement("article", "inspection-card invocation-card")
   const header = createElement("div", "card-header")
   const title = createElement("div", "card-title")
-  title.append(createElement("strong", undefined, activityTitle(activity)))
+  title.append(createElement("strong", undefined, invocationTitle(invocation)))
   const flags = createElement("div", "card-flags")
-  flags.append(badge(activity.type, `activity badge-activity-${activity.type}`))
+  flags.append(badge(invocation.type, `invocation badge-invocation-${invocation.type}`))
   header.append(title, flags)
   card.append(header)
 
   const details: Array<readonly [string, MetadataValue]> = [
-    ["Owner", stateLink(activity.source, activity.source, navigate)]
+    ["Owner", stateLink(invocation.source, invocation.source, navigate)]
   ]
-  if (activity.type === "timer") details.push(["Duration", activity.duration])
-  if (activity.type === "effect") {
-    details.push(["Success", activity.outcomes.success], ["Failure", activity.outcomes.failure])
+  if (invocation.type === "timer") details.push(["Duration", invocation.duration])
+  if (invocation.type === "effect") {
+    details.push(["Success", invocation.outcomes.success], ["Failure", invocation.outcomes.failure])
   }
-  if (activity.type === "machine") {
-    details.push(["Child address", activity.child.id], ["Machine", activity.child.machineId ?? "dynamic"])
+  if (invocation.type === "machine") {
+    details.push(["Child address", invocation.child.id], ["Machine", invocation.child.machineId ?? "dynamic"])
   }
   card.append(metadata(details))
   return card
@@ -581,11 +581,11 @@ export const renderVisualizer = (
       )
       inspectorContent.append(incoming)
     }
-    if (inspection.activities.length > 0) {
-      const activities = createElement("section", "inspector-section")
-      activities.append(inspectionSection("Invoked", inspection.activities.length))
-      inspection.activities.forEach((activity) => activities.append(renderActivity(activity, navigateToState)))
-      inspectorContent.append(activities)
+    if (inspection.invocations.length > 0) {
+      const invocations = createElement("section", "inspector-section")
+      invocations.append(inspectionSection("Invoked", inspection.invocations.length))
+      inspection.invocations.forEach((invocation) => invocations.append(renderInvocation(invocation, navigateToState)))
+      inspectorContent.append(invocations)
     }
   }
 

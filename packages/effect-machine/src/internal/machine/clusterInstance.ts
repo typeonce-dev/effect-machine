@@ -15,6 +15,7 @@ import type * as Scope from "effect/Scope"
 import * as Semaphore from "effect/Semaphore"
 import type * as Machine from "../../Machine.js"
 import type { Checkpoint } from "../../unstable/cluster/ClusterMachine.js"
+import * as CapturedInvocation from "./capturedInvocation.js"
 import { renderFailure } from "./clusterFailure.js"
 import { ClusterKeepAlive, untilDone } from "./clusterKeepAlive.js"
 import * as ClusterProgress from "./clusterProgress.js"
@@ -24,7 +25,6 @@ import * as ClusterWork from "./clusterWork.js"
 import * as Configuration from "./configuration.js"
 import { toImpl } from "./implementation.js"
 import * as InvocationChanges from "./invocationChanges.js"
-import * as InvocationDefinition from "./invocationDefinition.js"
 import type { InvocationEvent } from "./invocationEvent.js"
 import * as InvocationOutcome from "./invocationOutcome.js"
 import * as InvocationResolution from "./invocationResolution.js"
@@ -108,7 +108,7 @@ export interface ClusterInstance<R> {
 /** @internal */
 export interface Options<R> {
   readonly machine: Machine.Machine.Any
-  readonly machineId: string
+  readonly definitionId: string
   readonly version: string
   /** Arguments for the initial plan of an entity without a checkpoint. */
   readonly input: ReadonlyArray<unknown>
@@ -270,11 +270,11 @@ const accepted = new Accepted({})
 /** @internal */
 export const make = <R>(options: Options<R>): Effect.Effect<ClusterInstance<R>, never, R | Scope.Scope> =>
   Effect.gen(function*() {
-    const { address, enqueue, machine, machineId, messageStorage, storage, version } = options
+    const { address, definitionId, enqueue, machine, messageStorage, storage, version } = options
     const context = yield* Effect.context<R>()
     const support = ClusterWork.supportOf(toImpl(machine).handlers)
     const hostsWork = support._tag === "Hosted"
-    const capabilities = ClusterWork.makeCapabilities(machineId)
+    const capabilities = ClusterWork.makeCapabilities(definitionId)
     const clock = yield* Clock.Clock
     const semaphore = Semaphore.makeUnsafe(1)
 
@@ -283,7 +283,7 @@ export const make = <R>(options: Options<R>): Effect.Effect<ClusterInstance<R>, 
     let recovering = false
 
     const work = new ClusterWork.ClusterWork<R>({
-      machineId,
+      definitionId,
       address,
       context,
       onEnd: (ended, exit) => untilDone(deliver(ended, exit))
@@ -294,7 +294,7 @@ export const make = <R>(options: Options<R>): Effect.Effect<ClusterInstance<R>, 
       turn: (effect) => turn((restore) => restore(effect))
     })
 
-    const annotate = Effect.annotateLogs({ module: "ClusterMachine", machineId, address })
+    const annotate = Effect.annotateLogs({ module: "ClusterMachine", definitionId, address })
 
     const serialized = <A, E, R1>(run: (restore: Restore) => Effect.Effect<A, E, R1>): Effect.Effect<A, E, R1> =>
       Effect.uninterruptibleMask(run).pipe(Semaphore.withPermit(semaphore))
@@ -339,10 +339,10 @@ export const make = <R>(options: Options<R>): Effect.Effect<ClusterInstance<R>, 
     const decode = Effect.fnUntraced(function*(
       checkpoint: Checkpoint
     ): Effect.fn.Return<Memory, Rejected, R> {
-      if (checkpoint.machineId !== machineId) {
+      if (checkpoint.definitionId !== definitionId) {
         return yield* fail(
-          "MachineIdMismatch",
-          `Expected machine id ${machineId}, received ${checkpoint.machineId}`
+          "DefinitionIdMismatch",
+          `Expected machine definition id ${definitionId}, received ${checkpoint.definitionId}`
         )
       }
       if (checkpoint.version !== version) {
@@ -375,7 +375,7 @@ export const make = <R>(options: Options<R>): Effect.Effect<ClusterInstance<R>, 
     })
 
     const declaresTimer = ({ id, path }: Checkpoint.InvocationKey): boolean =>
-      InvocationDefinition.definitions(Configuration.getStateConfigByPath(machine, path)?.invoke).some((definition) =>
+      CapturedInvocation.list(Configuration.getStateConfigByPath(machine, path)?.invoke).some((definition) =>
         "after" in definition && definition.id === id
       )
 
@@ -492,7 +492,7 @@ export const make = <R>(options: Options<R>): Effect.Effect<ClusterInstance<R>, 
         planned,
         unscheduled,
         checkpoint: {
-          machineId,
+          definitionId,
           version,
           revision,
           origin: input._tag === "Request"

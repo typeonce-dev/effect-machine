@@ -123,11 +123,11 @@ describe("Machine live inspection", () => {
       ])
       assert.deepStrictEqual(Array.from(yield* Stream.runCollect(prepared.inspection)), [])
     })))
-  it.effect("represents Effect invokes as owned activities rather than child machines", () =>
+  it.effect("represents Effect invokes as owned program invocations rather than child machines", () =>
     Effect.scoped(Effect.gen(function*() {
       const active = Machine.make({
         effects: { source1: Effect.suspend(() => Effect.never) },
-        id: "activity-root",
+        id: "invocation-root",
         root: states,
         events: Machine.eventsFromSchemas()
       }).handle({
@@ -155,14 +155,14 @@ describe("Machine live inspection", () => {
       assert.deepStrictEqual(records.map(({ _tag }) => _tag), [
         "Created",
         "Initialized",
-        "ActivityStarted",
-        "ActivityStopped",
+        "ProgramInvocationStarted",
+        "ProgramInvocationStopped",
         "Terminated"
       ])
-      const started = records.find((record) => record._tag === "ActivityStarted")
-      assert.ok(started !== undefined && started._tag === "ActivityStarted")
-      if (started?._tag === "ActivityStarted") {
-        assert.deepStrictEqual(started.activity, {
+      const started = records.find((record) => record._tag === "ProgramInvocationStarted")
+      assert.ok(started !== undefined && started._tag === "ProgramInvocationStarted")
+      if (started?._tag === "ProgramInvocationStarted") {
+        assert.deepStrictEqual(started.invocation, {
           id: "worker",
           sessionId: "machine:1",
           owner: started.subject,
@@ -170,20 +170,58 @@ describe("Machine live inspection", () => {
           kind: "Effect"
         })
       }
-      const stopped = records.find((record) => record._tag === "ActivityStopped")
-      assert.ok(stopped !== undefined && stopped._tag === "ActivityStopped")
-      if (stopped?._tag === "ActivityStopped") {
+      const stopped = records.find((record) => record._tag === "ProgramInvocationStopped")
+      assert.ok(stopped !== undefined && stopped._tag === "ProgramInvocationStopped")
+      if (stopped?._tag === "ProgramInvocationStopped") {
         assert.ok(Exit.isFailure(stopped.exit))
         if (Exit.isFailure(stopped.exit)) {
           assert.ok(Cause.hasInterruptsOnly(stopped.exit.cause))
         }
       }
     })))
-  it.effect("represents Stream invokes as owned Stream activities", () =>
+  it.effect("attributes the delivered outcome of a program invocation to its run", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const active = Machine.make({
+        effects: { source1: Effect.succeed("result") },
+        root: states,
+        events: Machine.eventsFromSchemas()
+      }).handle({
+        initial: {
+          target: "Idle",
+          decoded: true,
+          data: new Idle({})
+        },
+        states: {
+          Idle: {
+            invoke: { src: "source1", id: "worker", onDone: { stay: true } }
+          }
+        }
+      })
+      const prepared = yield* LocalMachine.prepare(active)
+      const collected = yield* prepared.inspection.pipe(
+        Stream.runCollect,
+        Effect.forkScoped({ startImmediately: true })
+      )
+      yield* Effect.yieldNow
+      const ref = yield* prepared.start
+      yield* Effect.yieldNow
+      yield* Effect.yieldNow
+      yield* ref.stop
+      const records = Array.from(yield* Fiber.join(collected))
+      const started = records.find((record) => record._tag === "ProgramInvocationStarted")
+      assert.ok(started !== undefined && started._tag === "ProgramInvocationStarted")
+      const delivered = records.find((record) => record._tag === "EventSent")
+      assert.ok(delivered !== undefined && delivered._tag === "EventSent")
+      assert.deepStrictEqual(delivered.causedBy, {
+        _tag: "ProgramInvocation",
+        invocationSessionId: started.invocation.sessionId
+      })
+    })))
+  it.effect("represents Stream invokes as owned Stream program invocations", () =>
     Effect.scoped(Effect.gen(function*() {
       const active = Machine.make({
         streams: { source1: Stream.suspend(() => Stream.never) },
-        id: "stream-activity-root",
+        id: "stream-invocation-root",
         root: states,
         events: Machine.eventsFromSchemas()
       }).handle({
@@ -208,12 +246,12 @@ describe("Machine live inspection", () => {
       yield* Effect.yieldNow
       yield* ref.stop
       const records = Array.from(yield* Fiber.join(collected))
-      const started = records.find((record) => record._tag === "ActivityStarted")
-      assert.ok(started !== undefined && started._tag === "ActivityStarted")
-      if (started?._tag === "ActivityStarted") {
-        assert.strictEqual(started.activity.kind, "Stream")
-        assert.strictEqual(started.activity.id, "updates")
-        assert.strictEqual(started.activity.ownerPath, "Idle")
+      const started = records.find((record) => record._tag === "ProgramInvocationStarted")
+      assert.ok(started !== undefined && started._tag === "ProgramInvocationStarted")
+      if (started?._tag === "ProgramInvocationStarted") {
+        assert.strictEqual(started.invocation.kind, "Stream")
+        assert.strictEqual(started.invocation.id, "updates")
+        assert.strictEqual(started.invocation.ownerPath, "Idle")
       }
     })))
   it.effect("correlates an explicit child-to-parent send with both local subjects", () =>

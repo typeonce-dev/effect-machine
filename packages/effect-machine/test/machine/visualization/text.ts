@@ -1,4 +1,4 @@
-import type { ActivityDefinition, InspectionApi, MachineValue, StateNode, TransitionDefinition } from "./model.js"
+import type { InspectionApi, InvocationDefinition, MachineValue, StateNode, TransitionDefinition } from "./model.js"
 
 const nodeLabel = (node: StateNode, active: ReadonlySet<string>): string => {
   const status = active.has(node.path) ? "●" : "○"
@@ -57,7 +57,7 @@ const triggerLabels = (definitions: ReadonlyArray<TransitionDefinition>): Readon
     return [{ trigger, branches }]
   })
 
-const activityLabel = (definition: ActivityDefinition): string => {
+const invocationLabel = (definition: InvocationDefinition): string => {
   switch (definition.type) {
     case "process":
       return `◆ process: ${definition.id}`
@@ -92,7 +92,7 @@ export const makeTextRenderer = <Machine extends MachineValue, Snapshot>(
   )
   const children = new Map<string | undefined, Array<StateNode>>()
   const transitions = new Map<string, Array<TransitionDefinition>>()
-  const activities = new Map<string, Array<ActivityDefinition>>()
+  const invocations = new Map<string, Array<InvocationDefinition>>()
 
   for (const node of nodes) {
     const siblings = children.get(node.parent) ?? []
@@ -105,28 +105,28 @@ export const makeTextRenderer = <Machine extends MachineValue, Snapshot>(
     registrations.push(definition)
     transitions.set(definition.source, registrations)
   }
-  for (const definition of inspection.activityDefinitions?.(machine) ?? []) {
-    const registrations = activities.get(definition.source) ?? []
+  for (const definition of inspection.invocationDefinitions?.(machine) ?? []) {
+    const registrations = invocations.get(definition.source) ?? []
     registrations.push(definition)
-    activities.set(definition.source, registrations)
+    invocations.set(definition.source, registrations)
   }
 
   const lines = [
     machine.id ?? "Machine",
-    activities.size === 0
+    invocations.size === 0
       ? "● active  ○ inactive  ◇ transition  ┄ branch → target"
-      : "● active  ○ inactive  ◇ transition  ┄ branch → target  ◆ activity",
+      : "● active  ○ inactive  ◇ transition  ┄ branch → target  ◆ invocation",
     ""
   ]
   const visit = (node: StateNode, prefix: string, isLast: boolean): void => {
     lines.push(`${prefix}${isLast ? "└─" : "├─"} ${nodeLabel(node, active)}`)
     const descendants = children.get(node.path) ?? []
     const registrations = transitions.get(node.path) ?? []
-    const ownedActivities = activities.get(node.path) ?? []
+    const ownedInvocations = invocations.get(node.path) ?? []
     const childPrefix = `${prefix}${isLast ? "   " : "│  "}`
     const transitionLabels = triggerLabels(registrations)
-    const activityLabels = ownedActivities.map(activityLabel)
-    const itemCount = transitionLabels.length + activityLabels.length + descendants.length
+    const invocationLabels = ownedInvocations.map(invocationLabel)
+    const itemCount = transitionLabels.length + invocationLabels.length + descendants.length
     transitionLabels.forEach((label, index) => {
       const isLastItem = index === itemCount - 1
       lines.push(`${childPrefix}${isLastItem ? "└─" : "├─"} ${label.trigger}`)
@@ -135,12 +135,12 @@ export const makeTextRenderer = <Machine extends MachineValue, Snapshot>(
         lines.push(`${branchPrefix}${branchIndex === label.branches.length - 1 ? "└┄" : "├┄"} ${branch}`)
       })
     })
-    activityLabels.forEach((label, index) => {
+    invocationLabels.forEach((label, index) => {
       const itemIndex = transitionLabels.length + index
       lines.push(`${childPrefix}${itemIndex === itemCount - 1 ? "└─" : "├─"} ${label}`)
     })
     descendants.forEach((child, index) => {
-      visit(child, childPrefix, transitionLabels.length + activityLabels.length + index === itemCount - 1)
+      visit(child, childPrefix, transitionLabels.length + invocationLabels.length + index === itemCount - 1)
     })
   }
 

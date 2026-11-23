@@ -628,7 +628,7 @@ describe("ClusterMachine", () => {
       const firstId = Snowflake.Snowflake(1)
       const secondId = Snowflake.Snowflake(2)
       const first: ClusterMachine.Checkpoint = {
-        machineId: "Counter",
+        definitionId: "Counter",
         version: "1",
         revision: 1,
         origin: request(firstId),
@@ -660,25 +660,25 @@ describe("ClusterMachine", () => {
     Effect.gen(function*() {
       const cases: ReadonlyArray<{
         readonly entityType: string
-        readonly machineId: string
+        readonly definitionId: string
         readonly version: string
         readonly snapshot: Machine.Machine.EncodedSnapshot
         readonly reason: ClusterMachine.RejectionReason
       }> = [
         {
           entityType: "WrongMachineCounter",
-          machineId: "Other",
+          definitionId: "Other",
           version: "1",
           snapshot: {
             version: 2,
             _tag: "MachineSnapshot",
             active: [{ path: "" }, { path: "Count" as const, value: { _tag: "Count", value: "0" } }]
           },
-          reason: "MachineIdMismatch"
+          reason: "DefinitionIdMismatch"
         },
         {
           entityType: "WrongVersionCounter",
-          machineId: "Counter",
+          definitionId: "Counter",
           version: "0",
           snapshot: {
             version: 2,
@@ -689,7 +689,7 @@ describe("ClusterMachine", () => {
         },
         {
           entityType: "InvalidSnapshotCounter",
-          machineId: "Counter",
+          definitionId: "Counter",
           version: "1",
           snapshot: {
             version: 2,
@@ -705,7 +705,7 @@ describe("ClusterMachine", () => {
         const bridge = ClusterMachine.make(testCase.entityType, makeCounter(state), { version: "1" })
         const storage = makeTestStorage()
         const checkpoint = {
-          machineId: testCase.machineId,
+          definitionId: testCase.definitionId,
           version: testCase.version,
           revision: 1,
           origin: request(Snowflake.Snowflake(0)),
@@ -934,7 +934,7 @@ describe("ClusterMachine", () => {
         const storage = makeTestStorage()
         const key = storageKey("UncachedCounter", "counter-1")
         const stored: ClusterMachine.Checkpoint = {
-          machineId: "Counter",
+          definitionId: "Counter",
           version: "1",
           revision: 4,
           origin: request(Snowflake.Snowflake(0)),
@@ -949,7 +949,7 @@ describe("ClusterMachine", () => {
           assertRejected(yield* client.send(increment()), "PersistenceFailure")
           assert.strictEqual(storage.loads, 1)
           const incompatible: ReadonlyArray<[ClusterMachine.Checkpoint, ClusterMachine.RejectionReason]> = [
-            [{ ...valid, machineId: "Other" }, "MachineIdMismatch"],
+            [{ ...valid, definitionId: "Other" }, "DefinitionIdMismatch"],
             [{ ...valid, version: "0" }, "VersionMismatch"],
             [stored, "InvalidCheckpoint"],
             [{ ...valid, revision: 0 }, "InvalidCheckpoint"],
@@ -1202,7 +1202,7 @@ describe("ClusterMachine", () => {
             storage.entries.set(
               key,
               withCount(10)({
-                machineId: "Counter",
+                definitionId: "Counter",
                 version: "1",
                 revision: 1,
                 origin: request(Snowflake.Snowflake(0)),
@@ -1511,7 +1511,7 @@ describe("ClusterMachine", () => {
       } as any
       const { Committed, Duplicate, RevisionConflict } = ClusterMachine.CommitResult
       const checkpoint = (revision: number, requestId: number): ClusterMachine.Checkpoint => ({
-        machineId: "Counter",
+        definitionId: "Counter",
         version: "1",
         revision,
         origin: request(Snowflake.Snowflake(requestId)),
@@ -2353,7 +2353,7 @@ describe("ClusterMachine", () => {
           yield* run(makeLoader(work), {}, ({ key, send, storage, stored }) =>
             Effect.gen(function*() {
               storage.entries.set(key, {
-                machineId: "Loader",
+                definitionId: "Loader",
                 version: "1",
                 revision: 1,
                 origin: request(Snowflake.Snowflake(0)),
@@ -5006,7 +5006,7 @@ describe("ClusterMachine", () => {
               const inWaiting = snapshot({ path: "Waiting", value: { _tag: "Waiting", seconds: 0, notes: 0 } })
               const write = (snapshot: ClusterMachine.Checkpoint["snapshot"], invocations: unknown) =>
                 storage.entries.set(key, {
-                  machineId: "Validated",
+                  definitionId: "Validated",
                   version: "1",
                   revision: 1,
                   origin: request(Snowflake.Snowflake(0)),
@@ -5283,7 +5283,7 @@ describe("ClusterMachine", () => {
             revision: number,
             origin: ClusterMachine.Checkpoint.Origin
           ): ClusterMachine.Checkpoint => ({
-            machineId: "Worker",
+            definitionId: "Worker",
             version: "1",
             revision,
             origin,
@@ -5314,7 +5314,7 @@ describe("ClusterMachine", () => {
           revision: number,
           origin: ClusterMachine.Checkpoint.Origin
         ): ClusterMachine.Checkpoint => ({
-          machineId: "Worker",
+          definitionId: "Worker",
           version: "1",
           revision,
           origin,

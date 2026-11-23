@@ -52,7 +52,7 @@ const chartNode = (
   children,
   active: false,
   initial,
-  activities: []
+  invocations: []
 })
 
 const chartEdge = (
@@ -71,7 +71,7 @@ const chartEdge = (
   accessibleLabel: label,
   badges: [],
   trigger: { type: "event", event: label },
-  activityKind: null,
+  invocationKind: null,
   reenter: false,
   acceptance: "required"
 })
@@ -241,7 +241,7 @@ describe("Static chart", () => {
       children: [],
       active: false,
       initial: path === "Idle",
-      activities: []
+      invocations: []
     })
     const model: ChartModel = {
       machineId: "layout-policy",
@@ -259,7 +259,7 @@ describe("Static chart", () => {
           accessibleLabel: "Advance",
           badges: [],
           trigger: { type: "event", event: "Advance" },
-          activityKind: null,
+          invocationKind: null,
           reenter: false,
           acceptance: "required"
         },
@@ -274,7 +274,7 @@ describe("Static chart", () => {
           accessibleLabel: "Return",
           badges: [],
           trigger: { type: "event", event: "Return" },
-          activityKind: null,
+          invocationKind: null,
           reenter: false,
           acceptance: "required"
         },
@@ -289,7 +289,7 @@ describe("Static chart", () => {
           accessibleLabel: "Refresh",
           badges: [],
           trigger: { type: "event", event: "Refresh" },
-          activityKind: null,
+          invocationKind: null,
           reenter: false,
           acceptance: "required"
         }
@@ -336,7 +336,7 @@ describe("Static chart", () => {
       children,
       active: false,
       initial: path === "Workflow" || path === "Workflow.Idle",
-      activities: []
+      invocations: []
     })
     const edges: ChartModel["edges"] = [
       {
@@ -350,7 +350,7 @@ describe("Static chart", () => {
         accessibleLabel: "Enter",
         badges: [],
         trigger: { type: "event", event: "Enter" },
-        activityKind: null,
+        invocationKind: null,
         reenter: false,
         acceptance: "required"
       },
@@ -365,7 +365,7 @@ describe("Static chart", () => {
         accessibleLabel: "Leave",
         badges: [],
         trigger: { type: "event", event: "Leave" },
-        activityKind: null,
+        invocationKind: null,
         reenter: false,
         acceptance: "required"
       }
@@ -444,7 +444,7 @@ describe("Static chart", () => {
     const model = makeChartModel(document)
     const working = model.nodes.find((node) => node.path === "Working")
 
-    assert.deepStrictEqual(working?.activities.map(({ kind, label }) => ({ kind, label })), [
+    assert.deepStrictEqual(working?.invocations.map(({ kind, label }) => ({ kind, label })), [
       { kind: "effect", label: "monitor-job" }
     ])
     assert.deepStrictEqual(
@@ -465,18 +465,18 @@ describe("Static chart", () => {
     assert.deepStrictEqual(model.initials.map(({ target }) => target), ["", "Idle"])
   })
 
-  it("links invoke outcome edges to their declared activity type", () => {
+  it("links invoke outcome edges to their declared invocation type", () => {
     const model = makeChartModel(MachineDocument.make(invokeOutcomesMachine))
-    const activities = new Map(
+    const invocations = new Map(
       model.edges.flatMap((edge) =>
-        edge.trigger.type === "invoke" && edge.activityKind !== null
-          ? [[edge.trigger.id, edge.activityKind] as const]
+        edge.trigger.type === "invoke" && edge.invocationKind !== null
+          ? [[edge.trigger.id, edge.invocationKind] as const]
           : []
       )
     )
 
     assert.deepStrictEqual(
-      activities,
+      invocations,
       new Map([
         ["load-document", "effect"],
         ["document-updates", "stream"],
@@ -724,7 +724,7 @@ describe("Static chart", () => {
     const parent = layout.nodes.find(({ node }) => node.path === source?.parent)
     if (parent === undefined) assert.fail("Expected the packing parent state")
 
-    assert.strictEqual(edge.edge.activityKind, "timer")
+    assert.strictEqual(edge.edge.invocationKind, "timer")
     assert.isAtMost(edge.label.y + edge.labelHeight / 2, parent.y + parent.height)
   })
 
@@ -959,7 +959,7 @@ describe("Static chart", () => {
       children: [],
       active: false,
       initial,
-      activities: []
+      invocations: []
     })
     const model: ChartModel = {
       machineId: "unconnected-region",

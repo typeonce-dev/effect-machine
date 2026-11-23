@@ -1,12 +1,12 @@
 import type {
-  Activity as VisualizationActivity,
   Branch as VisualizationBranch,
+  Invocation as VisualizationInvocation,
   MachineDocument as VisualizationDocument,
   State as VisualizationState,
   Transition as VisualizationTransition
 } from "../../MachineDocument.js"
 
-export type TreeItemKind = "state" | "transition" | "branch" | "activity"
+export type TreeItemKind = "state" | "transition" | "branch" | "invocation"
 
 export interface TreeItemDetail {
   readonly label: string
@@ -73,7 +73,7 @@ const branchLabel = (branch: VisualizationBranch): string | undefined => {
     : `[${branch.key}] → ${target}${updates}`
 }
 
-const activityLabel = (definition: VisualizationActivity): string => {
+const invocationLabel = (definition: VisualizationInvocation): string => {
   switch (definition.type) {
     case "process":
       return `◆ process: ${definition.lifecycleId}`
@@ -90,7 +90,7 @@ const activityLabel = (definition: VisualizationActivity): string => {
   }
 }
 
-const activityDetails = (definition: VisualizationActivity): ReadonlyArray<TreeItemDetail> => {
+const invocationDetails = (definition: VisualizationInvocation): ReadonlyArray<TreeItemDetail> => {
   const common: Array<TreeItemDetail> = [
     { label: "Owner", value: definition.source },
     { label: "Lifecycle id", value: definition.lifecycleId },
@@ -108,7 +108,7 @@ export const visualizationDocumentToTextTree = (document: VisualizationDocument)
   const active = new Set(document.snapshot?.activePaths ?? [])
   const states = new Map(document.states.map((state) => [state.path, state]))
   const transitions = new Map(document.transitions.map((transition) => [transition.id, transition]))
-  const activities = new Map(document.activities.map((activity) => [activity.id, activity]))
+  const invocations = new Map(document.invocations.map((invocation) => [invocation.id, invocation]))
   const children = new Map<string | null, Array<VisualizationState>>()
 
   for (const state of document.states) {
@@ -151,13 +151,13 @@ export const visualizationDocumentToTextTree = (document: VisualizationDocument)
         children: branchItems
       }]
     })
-    const activityItems = state.activityIds.flatMap((activityId): ReadonlyArray<TreeItem> => {
-      const definition = activities.get(activityId)
+    const invocationItems = state.invocationIds.flatMap((invocationId): ReadonlyArray<TreeItem> => {
+      const definition = invocations.get(invocationId)
       return definition === undefined ? [] : [{
         id: definition.id,
-        kind: "activity",
-        label: activityLabel(definition),
-        details: activityDetails(definition),
+        kind: "invocation",
+        label: invocationLabel(definition),
+        details: invocationDetails(definition),
         children: []
       }]
     })
@@ -175,15 +175,15 @@ export const visualizationDocumentToTextTree = (document: VisualizationDocument)
         { label: "Initial", value: state.initial ?? "none" },
         { label: "Children", value: String(state.children.length) }
       ],
-      children: [...transitionItems, ...activityItems, ...descendantItems]
+      children: [...transitionItems, ...invocationItems, ...descendantItems]
     }
   }
 
   return {
     machineId: document.machineId,
-    legend: document.activities.length === 0
+    legend: document.invocations.length === 0
       ? "● active  ○ inactive  ◇ transition  ┄ branch → target"
-      : "● active  ○ inactive  ◇ transition  ┄ branch → target  ◆ activity",
+      : "● active  ○ inactive  ◇ transition  ┄ branch → target  ◆ invocation",
     roots: document.roots.flatMap((path): ReadonlyArray<TreeItem> => {
       const state = states.get(path)
       return state === undefined ? [] : [visit(state)]

@@ -196,7 +196,7 @@ describe("Interactive text visualization", () => {
       roots: [],
       states: [],
       transitions: [],
-      activities: [],
+      invocations: [],
       snapshot: null
     })
 

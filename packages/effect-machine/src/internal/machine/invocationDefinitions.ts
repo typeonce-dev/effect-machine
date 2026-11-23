@@ -1,5 +1,5 @@
 /**
- * Serializable structural metadata for state-owned machine activities.
+ * Serializable structural metadata for state-owned machine invocations.
  *
  * @since 0.4.0
  */
@@ -7,7 +7,7 @@
 import * as Duration from "effect/Duration"
 
 /** @internal */
-export type StaticActivityMetadata =
+export type InvocationMetadata =
   | {
     readonly type: "process"
   }
@@ -34,10 +34,10 @@ export type StaticActivityMetadata =
   }
 
 /** @internal */
-export type ActivityDefinition<Source extends string = string> = {
+export type InvocationDefinition<Source extends string = string> = {
   readonly source: Source
   readonly id: string
-} & StaticActivityMetadata
+} & InvocationMetadata
 
 interface InspectableMachine {
   readonly handlers: unknown
@@ -54,7 +54,7 @@ const isObject = (value: unknown): value is object =>
 const getProperty = (value: unknown, key: PropertyKey): unknown => isObject(value) ? Reflect.get(value, key) : undefined
 
 const appendStaticDefinition = (
-  definitions: Array<ActivityDefinition>,
+  definitions: Array<InvocationDefinition>,
   source: string,
   descriptor: unknown
 ): void => {
@@ -107,15 +107,15 @@ const appendStaticDefinition = (
 }
 
 /**
- * Collects state-owned activity descriptions without executing user code.
+ * Collects state-owned invocation descriptions without executing user code.
  *
  * Source factories are inspected without execution. Static descriptors are
  * returned in state definition order and descriptor array order.
  *
  * @internal
  */
-export const activityDefinitions = (machine: InspectableMachine): ReadonlyArray<ActivityDefinition> => {
-  const definitions: Array<ActivityDefinition> = []
+export const invocationDefinitions = (machine: InspectableMachine): ReadonlyArray<InvocationDefinition> => {
+  const definitions: Array<InvocationDefinition> = []
   for (const node of machine.stateNodes.byPath.values()) {
     const invoke = getProperty(getProperty(machine.handlers, node.path), "invoke")
     if (Array.isArray(invoke)) {

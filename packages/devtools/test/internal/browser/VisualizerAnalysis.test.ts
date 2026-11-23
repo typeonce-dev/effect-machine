@@ -32,7 +32,7 @@ describe("Visualizer analysis", () => {
           parent: "Disabled",
           children: [],
           transitionIds: [],
-          activityIds: []
+          invocationIds: []
         }
       ]
     })

@@ -135,7 +135,7 @@ describe("chart route endpoints", () => {
             children: [],
             active: false,
             initial: false,
-            activities: []
+            invocations: []
           })),
           edges: [{
             id: "edge",
@@ -148,7 +148,7 @@ describe("chart route endpoints", () => {
             accessibleLabel: "go",
             badges: [],
             trigger: { type: "event", event: "go" },
-            activityKind: null,
+            invocationKind: null,
             reenter: false,
             acceptance: "required"
           }],
