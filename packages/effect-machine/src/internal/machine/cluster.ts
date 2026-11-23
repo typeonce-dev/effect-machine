@@ -34,11 +34,12 @@ const addressKey = (address: EntityAddress): string => `${address.entityType}\u0
 
 export const makeMemory: Effect.Effect<Storage["Service"]> = Effect.sync(() => {
   const entries = new Map<string, {
-    checkpoint: Checkpoint
+    readonly checkpoint: Checkpoint
     readonly requests: Set<Snowflake>
   }>()
   return Storage.of({
-    load: (address, requestId) =>
+    load: (address) => Effect.sync(() => Option.fromNullishOr(entries.get(addressKey(address))?.checkpoint)),
+    loadForRequest: (address, requestId) =>
       Effect.sync(() => {
         const entry = entries.get(addressKey(address))
         return {
@@ -49,28 +50,36 @@ export const makeMemory: Effect.Effect<Storage["Service"]> = Effect.sync(() => {
     commit: (address, checkpoint) =>
       Effect.sync(() => {
         const key = addressKey(address)
-        const entry = entries.get(key)
-        if (entry?.requests.has(checkpoint.requestId)) {
+        const { origin, revision } = checkpoint
+        const stored = entries.get(key)
+        if (origin._tag === "Request" && stored?.requests.has(origin.requestId)) {
           return CommitResult.Duplicate()
         }
-        if (checkpoint.revision !== (entry?.checkpoint.revision ?? 0) + 1) {
+        if (revision !== (stored?.checkpoint.revision ?? 0) + 1) {
           return CommitResult.RevisionConflict()
         }
-        if (entry === undefined) {
-          entries.set(key, {
-            checkpoint,
-            requests: new Set([checkpoint.requestId])
-          })
-        } else {
-          entry.checkpoint = checkpoint
-          entry.requests.add(checkpoint.requestId)
+        const requests = stored?.requests ?? new Set()
+        if (origin._tag === "Request") {
+          requests.add(origin.requestId)
         }
+        entries.set(key, { checkpoint, requests })
         return CommitResult.Committed()
       })
   })
 })
 
 export const layerMemory: Layer.Layer<Storage> = Layer.effect(Storage, makeMemory)
+
+// `Entity.keepAlive` does nothing where Cluster provides no latch, as in
+// `Entity.makeTestClient`, which has no crash to recover from either.
+const makeKeepAlive = Effect.gen(function*() {
+  const context = yield* Effect.context<Sharding.Sharding | Entity.CurrentAddress>()
+  const latch = yield* Effect.serviceOption(Entity.KeepAliveLatch)
+  return (enabled: boolean): Effect.Effect<void> =>
+    enabled && Option.isNone(latch)
+      ? Effect.logWarning("This Cluster runner cannot keep a machine alive, so its work is not recovered after a crash")
+      : Effect.provideContext(Entity.keepAlive(enabled), context)
+})
 
 export const make = <
   const Type extends string,
@@ -187,7 +196,8 @@ export const make = <
           address: yield* Entity.CurrentAddress,
           storage: yield* Storage,
           messageStorage: yield* MessageStorage.MessageStorage,
-          enqueue: layerOptions?.enqueue
+          enqueue: layerOptions?.enqueue,
+          keepAlive: yield* makeKeepAlive
         })
         return entity.of({
           send: (request) => instance.apply({ requestId: request.requestId, event: request.payload })

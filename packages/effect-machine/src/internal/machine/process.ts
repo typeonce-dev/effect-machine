@@ -13,6 +13,7 @@ import { failPlanning, toStartupFailure } from "./errors.js"
 import * as ExecutionPlan from "./executionPlan.js"
 import { type CapturedStateConfig, toImpl } from "./implementation.js"
 import * as Invocation from "./invocation.js"
+import * as InvocationChanges from "./invocationChanges.js"
 import * as internalPlanner from "./planner.js"
 import * as internalRuntime from "./runtime.js"
 import * as internalRuntimeProtocol from "./runtimeProtocol.js"
@@ -312,27 +313,15 @@ const makeInvokingCompiledDrain = (
         return loop
       }
 
-      const changed = planned.microsteps.some((step) => step.changed)
-      const exitPaths = changed ? planned.microsteps.flatMap((step) => step.exitPaths) : []
-      const entryEvents = new Map<string, Machine.LifecycleEvent<any>>()
-      if (changed) {
-        for (const step of planned.microsteps) {
-          if (step.changed) {
-            for (const path of step.entryPaths) {
-              entryEvents.set(path, step.event)
-            }
-          }
-        }
-      }
-
+      const changes = InvocationChanges.fromMicrosteps(planned.microsteps)
       const activeConfiguration = executionPlan.toConfiguration(planned.next)
       const next = executionPlan.snapshot(planned.next)
       const beforeCommit: Array<Effect.Effect<void, any, any>> = []
       if (planned.commands.length > 0) {
         beforeCommit.push(CommandRuntime.runCommands(planned.commands, scope))
       }
-      if (changed) {
-        const stopping = context.ownedChildren.stopPaths(exitPaths)
+      if (changes !== undefined) {
+        const stopping = context.ownedChildren.stopPaths(changes.exited)
         if (stopping !== undefined) beforeCommit.push(stopping)
       }
       const afterCommit: Array<Effect.Effect<void, any, any>> = []
@@ -346,8 +335,8 @@ const makeInvokingCompiledDrain = (
       }
       if (planned.done) {
         afterCommit.push(context.ownedChildren.stopAll())
-      } else if (changed) {
-        for (const [path, entryEvent] of entryEvents) {
+      } else if (changes !== undefined) {
+        for (const [path, entryEvent] of changes.entered) {
           const starting = Invocation.startAll(
             machine,
             scope,
@@ -659,21 +648,11 @@ const makeProcessLogic = (
               }
               configuration = planned.next
               if (planned.microsteps.length > 0) {
-                const changed = planned.microsteps.some((step) => step.changed)
-                const exitPaths = planned.microsteps.flatMap((step) => step.exitPaths)
-                const entryEvents = new Map<string, Machine.LifecycleEvent<any>>()
-                for (const step of planned.microsteps) {
-                  if (step.changed) {
-                    for (const path of step.entryPaths) {
-                      entryEvents.set(path, step.event)
-                    }
-                  }
-                }
-
+                const changes = InvocationChanges.fromMicrosteps(planned.microsteps)
                 const next = Configuration.snapshotFromConfiguration(machine, planned.next)
                 yield* CommandRuntime.runCommands(planned.commands, context)
-                if (changed) {
-                  yield* stopInvokes(exitPaths)
+                if (changes !== undefined) {
+                  yield* stopInvokes(changes.exited)
                 }
                 yield* setState(next)
                 current = next
@@ -687,8 +666,8 @@ const makeProcessLogic = (
                 if (planned.done) {
                   terminal = { output: planned.output }
                   yield* ownedChildren.stopAll()
-                } else if (changed) {
-                  for (const [path, entryEvent] of entryEvents) {
+                } else if (changes !== undefined) {
+                  for (const [path, entryEvent] of changes.entered) {
                     yield* startInvokes(planned.next, [path], entryEvent)
                   }
                 }

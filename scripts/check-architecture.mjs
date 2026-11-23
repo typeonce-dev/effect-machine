@@ -241,6 +241,7 @@ export const checkArchitecture = ({
     "src/internal/machine/runtimeCompiled.ts"
   ])
   const hostNeutralModules = new Set([
+    "src/internal/machine/invocationChanges.ts",
     "src/internal/machine/invocationGeneration.ts",
     "src/internal/machine/invocationOutcome.ts",
     "src/internal/machine/invocationResolution.ts"

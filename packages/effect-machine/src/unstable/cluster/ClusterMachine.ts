@@ -1,9 +1,10 @@
 /**
  * Runs Effect machines as persisted Cluster entities.
  *
- * Each live entity keeps one machine instance in memory. {@link Storage} holds
- * the truth: every accepted request commits a checkpoint to it, and an entity
- * that comes up anywhere continues from that checkpoint.
+ * Each live entity keeps one machine instance in memory, which applies requests
+ * and runs the effects invoked by active states. {@link Storage} holds the
+ * truth: every step commits a checkpoint to it, and an entity that comes up
+ * anywhere continues from that checkpoint.
  *
  * @since 0.4.0
  */
@@ -28,14 +29,15 @@ type Snowflake = Snowflake.Snowflake
  * **Details**
  *
  * Machine identity and deployment version are stored around the generic
- * encoded snapshot. The request id records the request that produced the
- * checkpoint. The revision orders the checkpoints of one entity and decides
- * which checkpoint a commit may replace.
+ * encoded snapshot. The origin records the input that produced the checkpoint.
+ * The revision orders the checkpoints of one entity and decides which
+ * checkpoint a commit may replace. The status says whether the machine failed.
  *
  * **Gotchas**
  *
- * Store and return the revision unchanged. The bridge assigns it and rejects a
- * checkpoint whose revision is not a positive integer as `InvalidCheckpoint`.
+ * Store and return every field unchanged. The bridge assigns them all, and
+ * rejects a checkpoint whose revision is not a positive integer, or whose
+ * status it does not know, as `InvalidCheckpoint`.
  *
  * @category models
  * @since 0.4.0
@@ -53,11 +55,131 @@ export interface Checkpoint {
    */
   readonly revision: number
 
-  /** Cluster request whose accepted transition produced this checkpoint. */
-  readonly requestId: Snowflake
+  /** Input whose accepted step produced this checkpoint. */
+  readonly origin: Checkpoint.Origin
 
-  /** Encoded logical machine state and completed outputs. */
+  /**
+   * Encoded logical machine state and completed outputs. For a failed machine,
+   * the last state before the failure.
+   */
   readonly snapshot: Machine.Machine.EncodedSnapshot
+
+  /** Whether the machine can still take steps, or failed. */
+  readonly status: Checkpoint.Status
+}
+
+/**
+ * Types of the parts of a Cluster machine {@link Checkpoint}.
+ *
+ * @category models
+ * @since 0.48.0
+ */
+export declare namespace Checkpoint {
+  /**
+   * Input that produced a checkpoint.
+   *
+   * **Details**
+   *
+   * Only a request has an id to deduplicate. A checkpoint that came from an
+   * invocation is guarded by its revision alone.
+   *
+   * @category models
+   * @since 0.48.0
+   */
+  export type Origin = Origin.Request | Origin.Invocation
+
+  /**
+   * Types for the input that produced a checkpoint.
+   *
+   * @category models
+   * @since 0.48.0
+   */
+  export namespace Origin {
+    /**
+     * A Cluster request.
+     *
+     * @category models
+     * @since 0.48.0
+     */
+    export interface Request {
+      readonly _tag: "Request"
+
+      /** Id that `Storage.commit` deduplicates. */
+      readonly requestId: Snowflake
+    }
+
+    /**
+     * The end of an invocation, or its failure to start.
+     *
+     * @category models
+     * @since 0.48.0
+     */
+    export interface Invocation extends InvocationKey {
+      readonly _tag: "Invocation"
+    }
+  }
+
+  /**
+   * Names one invocation of a machine.
+   *
+   * @category models
+   * @since 0.48.0
+   */
+  export interface InvocationKey {
+    /** Path of the state that owns the invocation. */
+    readonly path: string
+
+    /** Id of the invocation within its state. */
+    readonly id: string
+  }
+
+  /**
+   * Whether the machine can still take steps, or failed.
+   *
+   * @category models
+   * @since 0.48.0
+   */
+  export type Status = Status.Active | Status.Failed
+
+  /**
+   * Types for the status of a checkpoint.
+   *
+   * @category models
+   * @since 0.48.0
+   */
+  export namespace Status {
+    /**
+     * The machine has not failed. A machine in a final state is active too: its
+     * snapshot says that it is final.
+     *
+     * @category models
+     * @since 0.48.0
+     */
+    export interface Active {
+      readonly _tag: "Active"
+
+      /**
+       * Invocations that ended while their state stayed active. Their work does
+       * not run again when the machine is recovered. An entry is removed when
+       * its state exits.
+       */
+      readonly settled: ReadonlyArray<InvocationKey>
+    }
+
+    /**
+     * The machine failed. It is terminal, runs no work, and rejects every later
+     * request as `MachineFailed`.
+     *
+     * @category models
+     * @since 0.48.0
+     */
+    export interface Failed {
+      readonly _tag: "Failed"
+
+      /** Human-readable rendering of the failure, of bounded length. */
+      readonly failure: string
+    }
+  }
 }
 
 /**
@@ -67,7 +189,8 @@ export interface Checkpoint {
  *
  * `processed` reports whether the exact Cluster request id was already
  * committed. Storage implementations must retain enough request ids to detect
- * redelivery even after later requests have advanced the checkpoint.
+ * redelivery even after later requests and invocations have advanced the
+ * checkpoint.
  *
  * @category models
  * @since 0.4.0
@@ -81,13 +204,14 @@ export interface LoadResult {
 }
 
 /**
- * Result of atomically committing a Cluster machine request.
+ * Result of atomically committing a Cluster machine checkpoint.
  *
  * **Details**
  *
  * The results are ordered. `Duplicate` takes precedence over
  * `RevisionConflict`, so a redelivered request is recognized after later
- * requests have advanced the revision.
+ * checkpoints have advanced the revision. Only a checkpoint whose origin is a
+ * request can be a `Duplicate`.
  *
  * @category models
  * @since 0.4.0
@@ -114,8 +238,9 @@ export const CommitResult: {
  */
 export declare namespace CommitResult {
   /**
-   * Indicates that the request id and checkpoint were committed atomically.
-   * The checkpoint directly followed the stored one.
+   * Indicates that the checkpoint was committed, atomically with the request id
+   * of its origin when it has one. The checkpoint directly followed the stored
+   * one.
    *
    * @category models
    * @since 0.4.0
@@ -136,8 +261,8 @@ export declare namespace CommitResult {
   }
 
   /**
-   * Indicates that the request id was not committed, and that the stored
-   * checkpoint is not the one this commit replaces. Nothing was written.
+   * Indicates that the origin was not a request committed before, and that the
+   * stored checkpoint is not the one this commit replaces. Nothing was written.
    *
    * @category models
    * @since 0.48.0
@@ -158,24 +283,27 @@ export declare namespace CommitResult {
  *
  * **Details**
  *
- * `load` returns the latest checkpoint of an entity and whether a request id
- * was already committed for it.
+ * `loadForRequest` returns the latest checkpoint of an entity and whether a
+ * request id was already committed for it. `load` returns the checkpoint alone,
+ * for the inputs that are not requests: an entity that wakes up, and the end of
+ * an invocation.
  *
  * `commit` decides and writes atomically, in this order:
  *
- * 1. `Duplicate` when `checkpoint.requestId` was already committed, whatever
- *    the revision.
+ * 1. `Duplicate` when `checkpoint.origin` is a request whose id was already
+ *    committed, whatever the revision. A checkpoint whose origin is an
+ *    invocation is never a duplicate.
  * 2. `RevisionConflict` when the stored revision is not exactly
  *    `checkpoint.revision - 1`. An entity without a checkpoint has revision
  *    `0`, so its first checkpoint has revision `1`.
  * 3. `Committed` otherwise. The checkpoint replaces the stored one, and the
- *    request id is recorded with it.
+ *    request id of its origin, when it has one, is recorded with it.
  *
  * Each live entity loads its checkpoint once and keeps the decoded state in
- * memory, so most requests only call `commit`. Storage remains the truth:
- * memory advances only after the whole transaction succeeded, and is loaded
- * again after any other outcome. Before a request is rejected, `load` is called
- * to recognize a redelivery that was already committed.
+ * memory, so most inputs only call `commit`. Storage remains the truth: memory
+ * advances only after the whole transaction succeeded, and is loaded again
+ * after any other outcome. Before a request is rejected, `loadForRequest` is
+ * called to recognize a redelivery that was already committed.
  *
  * **Gotchas**
  *
@@ -191,6 +319,9 @@ export declare namespace CommitResult {
  * request id with the checkpoint makes a redelivery recover that reply without
  * applying the transition again. A separate transaction or database cannot
  * provide checkpoint-and-emission atomicity.
+ *
+ * A failed operation never fails the machine. An input that is not a request is
+ * retried for as long as the entity lives.
  *
  * @category services
  * @since 0.4.0
@@ -215,6 +346,9 @@ export { Accepted }
  * `PersistenceFailure` reports storage that failed. `RevisionConflict` reports
  * storage that worked and refused the request, because another instance of the
  * entity advanced the checkpoint both times the request was applied.
+ * `MachineFailed` reports a machine whose stored status is `Failed`, and its
+ * message is the stored failure. A request that was committed before the
+ * failure is still answered as accepted.
  *
  * @category models
  * @since 0.4.0
@@ -262,8 +396,9 @@ type MachineEmits<M extends Machine.Machine.Any> = Machine.Machine.EmittedEvents
  * **Details**
  *
  * The adapter exposes one persisted `send` RPC. Each live entity keeps one
- * machine instance in memory, which applies requests one at a time, and every
- * accepted request advances the checkpoint at most once.
+ * machine instance in memory, which applies requests and the outcomes of invoked
+ * effects one at a time. Every accepted request advances the checkpoint at most
+ * once.
  *
  * @category models
  * @since 0.4.0
@@ -289,6 +424,10 @@ export interface ClusterMachine<
    * arbitrary external effects are not atomic with the checkpoint. The reply
    * is persisted after commit and recovered through request-id deduplication if
    * delivery is interrupted. Machines that never emit may omit `enqueue`.
+   *
+   * An `enqueue` that fails rejects the request that emitted. An event emitted
+   * by the outcome of an invoked effect has no request to reject, so that step
+   * is retried until it is stored. Without `enqueue`, it fails the machine.
    *
    * @since 0.4.0
    */
@@ -367,7 +506,8 @@ type EnsureJsonEncoded<
  *
  * This store is not durable and does not provide rollback with the in-memory
  * `MessageStorage` transaction marker. A request rejected as `EmissionFailure`
- * keeps the checkpoint it had already committed.
+ * keeps the checkpoint it had already committed. The outcome of an invoked
+ * effect whose `enqueue` fails keeps it too, so it is not applied again.
  *
  * @category constructors
  * @since 0.4.0
@@ -398,13 +538,56 @@ export const layerMemory: Layer.Layer<Storage> = internal.layerMemory
  * requests as no-ops. The stable bridge identity is `machine.id` when present,
  * otherwise the Cluster entity type.
  *
- * A live entity loads its checkpoint for the first request and then keeps the
- * decoded state in memory until the entity is passivated or restarted. Storage
- * remains the truth. A request whose state turns out to be behind storage is
- * applied again to the stored state, and is rejected as `RevisionConflict` when
- * storage has moved again.
+ * A live entity loads its checkpoint when it comes up, or for its first request
+ * when the machine invokes nothing, and then keeps the decoded state in memory
+ * until the entity is passivated or restarted. Storage remains the truth. A
+ * request whose state turns out to be behind storage is applied again to the
+ * stored state, and is rejected as `RevisionConflict` when storage has moved
+ * again.
+ *
+ * Effects invoked by active states run in the live entity. Work starts once the
+ * step that entered its state is stored, and stops once the step that exited it
+ * is stored. The end of the work is applied as a step of its own, in order with
+ * requests, and only the state it leads to is stored, never the result itself.
+ * While work should run the entity is kept alive, so it is not passivated, and
+ * Cluster brings it up on another runner after a crash.
+ *
+ * An entity that comes up starts the work of its stored state again. Input
+ * mappers run again against that state, with `Machine.InitialEvent` as their
+ * event, as they do for `Machine.resume`. An invocation that ended while its
+ * state stayed active is not started again until its state is entered again.
+ *
+ * Work that ends in a way the model does not handle, an outcome that cannot be
+ * applied, and a source that cannot be constructed fail the machine, as they do
+ * locally. The failure is stored with the last state, and every later request is
+ * rejected as `MachineFailed`. There is no retry of failed work: a model that
+ * recovers declares `onFailure`.
  *
  * **Gotchas**
+ *
+ * Work runs at least once and must be safe to repeat. It runs again after a
+ * crash, a move to another runner, a restart of the entity, and when another
+ * instance advanced the checkpoint, and it can run twice at the same time while
+ * a shard moves. One result is applied. Results are not stored, so a result that
+ * was not applied before a crash is computed again.
+ *
+ * A storage or `enqueue` failure never fails the machine. An outcome that cannot
+ * be stored is retried for as long as the entity lives.
+ *
+ * Timers, streams, process logic, child machines, spawned children, action-time
+ * `runtime.raise`, machine commands, subscriptions, and other process-local
+ * state are not durable and are rejected. A machine that declares an unsupported
+ * invocation in any state rejects every request as `UnsupportedProcessLocal`.
+ * Planning-time raised events remain part of the current macrostep.
+ *
+ * Machines cannot address each other yet. Input mappers receive a `self` whose
+ * `id` names the machine, no `parent`, and a `children` owner. Work that uses
+ * `self.send`, `self.sessionId`, an operation of `children`, or an operation that
+ * requires the runtime of a local machine, such as `Machine.sendTo`, fails the
+ * machine.
+ *
+ * A deployment that adds an invocation to a state does not wake the entities
+ * that are already in it. Their work starts when they come up.
  *
  * A request redelivered to a live entity is planned again before storage
  * recognizes it. The plan is discarded, but its resolvers have run again, so
@@ -413,14 +596,12 @@ export const layerMemory: Layer.Layer<Storage> = internal.layerMemory
  * A checkpoint changed outside the bridge while an entity is live is noticed
  * through its revision, so such a change must also advance the revision.
  *
- * Invoked processes, spawned children, action-time `runtime.raise`, timers,
- * subscriptions, and other process-local state are not durable and are
- * rejected. Planning-time raised events remain part of the current macrostep.
  * Arbitrary action effects may run again after a crash before checkpoint
  * commit, so the bridge does not provide exactly-once external effects.
  * State values, completion outputs, and public input events must declare
- * JSON-compatible encoded representations. Local and internal event protocols
- * remain unrestricted because they do not cross the Cluster boundary.
+ * JSON-compatible encoded representations. Local and internal event protocols,
+ * and the inputs, outputs, and errors of invoked effects, remain unrestricted
+ * because they do not cross the Cluster boundary.
  *
  * **Example** (Adapting a machine to an entity)
  *
@@ -438,6 +619,52 @@ export const layerMemory: Layer.Layer<Storage> = internal.layerMemory
  * const adapter = ClusterMachine.make("IdleMachine", machine, { version: "1" })
  *
  * adapter.entity.type // => "IdleMachine"
+ * ```
+ *
+ * **Example** (Running an invoked effect in an entity)
+ *
+ * ```ts import.meta.vitest
+ * import { Machine } from "@typeonce/effect-machine"
+ * import { ClusterMachine } from "@typeonce/effect-machine/cluster"
+ * import { Effect, Schema } from "effect"
+ *
+ * const machine = Machine.make({
+ *   id: "Invoice",
+ *   root: Machine.state({
+ *     states: {
+ *       Draft: {},
+ *       Sending: { fields: { invoiceId: Schema.String } },
+ *       Sent: { fields: { receipt: Schema.String } },
+ *       Rejected: { fields: { reason: Schema.String } }
+ *     }
+ *   }),
+ *   events: Machine.events({ Send: { invoiceId: Schema.String } }),
+ *   effects: {
+ *     // Can run more than once, so the invoice id makes it safe to repeat.
+ *     send: (invoiceId: string) =>
+ *       invoiceId === "" ? Effect.fail({ reason: "No invoice" }) : Effect.succeed(`receipt-${invoiceId}`)
+ *   }
+ * }).handle({
+ *   initial: { target: "Draft" },
+ *   states: {
+ *     Draft: { on: { Send: { target: "Sending", data: ({ event }) => ({ invoiceId: event.invoiceId }) } } },
+ *     Sending: {
+ *       invoke: {
+ *         src: "send",
+ *         input: ({ state }) => state.invoiceId,
+ *         onDone: { target: "Sent", data: ({ output }) => ({ receipt: output }) },
+ *         onFailure: { target: "Rejected", data: ({ error }) => ({ reason: error.reason }) }
+ *       }
+ *     }
+ *   }
+ * })
+ *
+ * const adapter = ClusterMachine.make("Invoice", machine, { version: "1" })
+ *
+ * // Provide the layer with a Cluster runner and a durable `ClusterMachine.Storage`.
+ * const layer = adapter.toLayer()
+ *
+ * adapter.entity.type // => "Invoice"
  * ```
  *
  * @category constructors

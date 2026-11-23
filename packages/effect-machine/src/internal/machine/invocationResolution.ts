@@ -9,7 +9,7 @@
  * A host must:
  *
  * - resolve against the configuration the step settled in, with the lifecycle
- *   event that last entered each path;
+ *   event that last entered each path, as `InvocationChanges` reads them;
  * - stop the work and retire the generations of exited paths before it starts
  *   the work of entered ones;
  * - begin one generation for each returned group, through
