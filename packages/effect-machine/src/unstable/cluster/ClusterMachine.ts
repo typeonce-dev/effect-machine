@@ -2,8 +2,8 @@
  * Runs Effect machines as persisted Cluster entities.
  *
  * Each live entity keeps one machine instance in memory, which applies requests
- * and runs the effects invoked by active states. {@link Storage} holds the
- * truth: every step commits a checkpoint to it, and an entity that comes up
+ * and runs the effects and timers invoked by active states. {@link Storage} holds
+ * the truth: every step commits a checkpoint to it, and an entity that comes up
  * anywhere continues from that checkpoint.
  *
  * @since 0.4.0
@@ -36,7 +36,8 @@ type Snowflake = Snowflake.Snowflake
  *
  * Store and return every field unchanged. The bridge assigns them all, and
  * rejects a checkpoint whose revision is not a positive integer, or whose
- * status it does not know, as `InvalidCheckpoint`.
+ * status it does not know or contradicts the snapshot or the machine, as
+ * `InvalidCheckpoint`.
  *
  * @category models
  * @since 0.4.0
@@ -54,7 +55,7 @@ export interface Checkpoint {
    */
   readonly revision: number
 
-  /** Input whose accepted step produced this checkpoint. */
+  /** What produced this checkpoint from the one before it. */
   readonly origin: Checkpoint.Origin
 
   /**
@@ -75,20 +76,20 @@ export interface Checkpoint {
  */
 export declare namespace Checkpoint {
   /**
-   * Input that produced a checkpoint.
+   * What produced a checkpoint.
    *
    * **Details**
    *
-   * Only a request has an id to deduplicate. A checkpoint that came from an
-   * invocation is guarded by its revision alone.
+   * Only a request has an id to deduplicate. A checkpoint of any other origin is
+   * guarded by its revision alone.
    *
    * @category models
    * @since 0.48.0
    */
-  export type Origin = Origin.Request | Origin.Invocation
+  export type Origin = Origin.Request | Origin.Invocation | Origin.Timers
 
   /**
-   * Types for the input that produced a checkpoint.
+   * Types for what produced a checkpoint.
    *
    * @category models
    * @since 0.48.0
@@ -116,6 +117,22 @@ export declare namespace Checkpoint {
     export interface Invocation extends InvocationKey {
       readonly _tag: "Invocation"
     }
+
+    /**
+     * Due times for timers of the state that was stored without one.
+     *
+     * **Details**
+     *
+     * No step was taken, and the snapshot is the one before it. This origin
+     * occurs when an entity comes up in a state that was stored before the
+     * machine declared one of its timers.
+     *
+     * @category models
+     * @since 0.48.0
+     */
+    export interface Timers {
+      readonly _tag: "Timers"
+    }
   }
 
   /**
@@ -130,6 +147,68 @@ export declare namespace Checkpoint {
 
     /** Id of the invocation within its state. */
     readonly id: string
+  }
+
+  /**
+   * Progress of the invocations of active states, by the path of the state and
+   * then by the id of the invocation within it.
+   *
+   * **Details**
+   *
+   * An effect that should run has no entry. A timer has an entry from the step
+   * that enters its state, unless its duration cannot be evaluated, which fails
+   * the machine. An entry is removed when its state exits, and no entry is
+   * `Waiting` once the machine is final.
+   *
+   * @category models
+   * @since 0.48.0
+   */
+  export interface Invocations {
+    readonly [path: string]: { readonly [id: string]: Progress }
+  }
+
+  /**
+   * How far one invocation of an active state has come.
+   *
+   * @category models
+   * @since 0.48.0
+   */
+  export type Progress = Progress.Settled | Progress.Waiting
+
+  /**
+   * Types for the progress of an invocation.
+   *
+   * @category models
+   * @since 0.48.0
+   */
+  export namespace Progress {
+    /**
+     * The invocation ended while its state stayed active. It does not run again
+     * until that state is entered again.
+     *
+     * @category models
+     * @since 0.48.0
+     */
+    export interface Settled {
+      readonly _tag: "Settled"
+    }
+
+    /**
+     * The invocation is a timer that has not completed.
+     *
+     * @category models
+     * @since 0.48.0
+     */
+    export interface Waiting {
+      readonly _tag: "Waiting"
+
+      /**
+       * When the timer completes, in milliseconds since the Unix epoch. An
+       * integer that a date can name, which is the last such instant for a
+       * duration that ends later or never.
+       */
+      readonly dueAt: number
+    }
   }
 
   /**
@@ -158,11 +237,10 @@ export declare namespace Checkpoint {
       readonly _tag: "Active"
 
       /**
-       * Invocations that ended while their state stayed active. Their work does
-       * not run again when the machine is recovered. An entry is removed when
-       * its state exits.
+       * Timers that wait, and invocations that ended while their state stayed
+       * active.
        */
-      readonly settled: ReadonlyArray<InvocationKey>
+      readonly invocations: Invocations
     }
 
     /**
@@ -290,8 +368,8 @@ export declare namespace CommitResult {
  * `commit` decides and writes atomically, in this order:
  *
  * 1. `Duplicate` when `checkpoint.origin` is a request whose id was already
- *    committed, whatever the revision. A checkpoint whose origin is an
- *    invocation is never a duplicate.
+ *    committed, whatever the revision. A checkpoint of any other origin is never
+ *    a duplicate.
  * 2. `RevisionConflict` when the stored revision is not exactly
  *    `checkpoint.revision - 1`. An entity without a checkpoint has revision
  *    `0`, so its first checkpoint has revision `1`.
@@ -303,6 +381,13 @@ export declare namespace CommitResult {
  * advances only after the whole transaction succeeded, and is loaded again
  * after any other outcome. Before a request is rejected, `loadForRequest` is
  * called to recognize a redelivery that was already committed.
+ *
+ * The due time of a timer is part of the checkpoint that enters its state, so
+ * storing the checkpoint whole is all that timers require. An entity that loads a
+ * state with a timer without a due time, which an earlier deployment can leave
+ * behind, commits one more checkpoint before it starts any work. Its origin is
+ * `Checkpoint.Origin.Timers`, and `commit` treats it as any origin that is not a
+ * request.
  *
  * **Gotchas**
  *
@@ -396,8 +481,8 @@ type MachineEmits<M extends Machine.Machine.Any> = Machine.Machine.EmittedEvents
  *
  * The adapter exposes one persisted `send` RPC. Each live entity keeps one
  * machine instance in memory, which applies requests and the outcomes of invoked
- * effects one at a time. Every accepted request advances the checkpoint at most
- * once.
+ * effects and timers one at a time. Every accepted request advances the
+ * checkpoint at most once.
  *
  * @category models
  * @since 0.4.0
@@ -425,8 +510,9 @@ export interface ClusterMachine<
    * delivery is interrupted. Machines that never emit may omit `enqueue`.
    *
    * An `enqueue` that fails rejects the request that emitted. An event emitted
-   * by the outcome of an invoked effect has no request to reject, so that step
-   * is retried until it is stored. Without `enqueue`, it fails the machine.
+   * by the outcome of an invoked effect or timer has no request to reject, so
+   * that step is retried until it is stored. Without `enqueue`, it fails the
+   * machine.
    *
    * @since 0.4.0
    */
@@ -502,7 +588,7 @@ type EnsureJsonEncoded<
  * This store is not durable and does not provide rollback with the in-memory
  * `MessageStorage` transaction marker. A request rejected as `EmissionFailure`
  * keeps the checkpoint it had already committed. The outcome of an invoked
- * effect whose `enqueue` fails keeps it too, so it is not applied again.
+ * effect or timer whose `enqueue` fails keeps it too, so it is not applied again.
  *
  * @category constructors
  * @since 0.4.0
@@ -552,6 +638,21 @@ export const layerMemory: Layer.Layer<Storage> = internal.layerMemory
  * event, as they do for `LocalMachine.resume`. An invocation that ended while its
  * state stayed active is not started again until its state is entered again.
  *
+ * A timer is stored as the time at which it is due, in the same checkpoint as the
+ * step that enters its state. The live entity waits for that time and then
+ * applies the completion as a step of its own. An entity that comes up again,
+ * here or on another runner, waits only for the time that remains, and completes
+ * a timer whose time has passed at once. Leaving the state cancels the timer, and
+ * entering it again stores a new due time. `Machine.resume` differs: it starts the
+ * full duration again.
+ *
+ * The duration of a timer is evaluated after the step that enters its state is
+ * planned and before that step is stored, and not again while its due time is
+ * stored. The local runtime evaluates it once the state is entered, in order with
+ * the other invocations of the state. A duration that cannot be evaluated does
+ * not reject the request. The step is stored, and the machine then fails as it
+ * does locally.
+ *
  * Work that ends in a way the model does not handle, an outcome that cannot be
  * applied, and a source that cannot be constructed fail the machine, as they do
  * locally. The failure is stored with the last state, and every later request is
@@ -575,7 +676,18 @@ export const layerMemory: Layer.Layer<Storage> = internal.layerMemory
  * nothing to bring the entity up after a crash. A crash during the few
  * milliseconds of a replacement leaves the entity down until its next request.
  *
- * Timers, streams, process logic, child machines, spawned children, action-time
+ * An entity stays in memory while a timer waits, so a very long timer holds
+ * memory for as long as it waits. Due times are read from the wall clock of the
+ * runner, so runners whose clocks differ complete a timer that moves between them
+ * that much earlier or later.
+ *
+ * A state that was stored before the machine declared one of its timers has no
+ * due time for it. The entity evaluates the duration when it comes up, with
+ * `Machine.InitialEvent`, and stores the due time before it starts any work. A
+ * state that was stored with a timer the machine no longer declares is rejected
+ * as `InvalidCheckpoint`, so migrate such checkpoints.
+ *
+ * Streams, process logic, child machines, spawned children, action-time
  * `runtime.raise`, machine commands, subscriptions, and other process-local
  * state are not durable and are rejected. A machine that declares an unsupported
  * invocation in any state rejects every request as `UnsupportedProcessLocal`.
@@ -591,8 +703,9 @@ export const layerMemory: Layer.Layer<Storage> = internal.layerMemory
  * that are already in it. Their work starts when they come up.
  *
  * A request redelivered to a live entity is planned again before storage
- * recognizes it. The plan is discarded, but its resolvers have run again, so
- * they must not perform effects.
+ * recognizes it. The plan is discarded, but its resolvers have run again, and so
+ * have the input mappers and sources of the timers it enters, so they must not
+ * perform effects.
  *
  * A checkpoint changed outside the bridge while an entity is live is noticed
  * through its revision, so such a change must also advance the revision.
@@ -601,7 +714,7 @@ export const layerMemory: Layer.Layer<Storage> = internal.layerMemory
  * commit, so the bridge does not provide exactly-once external effects.
  * State values, completion outputs, and public input events must declare
  * JSON-compatible encoded representations. Local and internal event protocols,
- * and the inputs, outputs, and errors of invoked effects, remain unrestricted
+ * and the inputs, outputs, and errors of invoked work, remain unrestricted
  * because they do not cross the Cluster boundary.
  *
  * **Example** (Adapting a machine to an entity)
@@ -666,6 +779,40 @@ export const layerMemory: Layer.Layer<Storage> = internal.layerMemory
  * const layer = adapter.toLayer()
  *
  * adapter.entity.type // => "Invoice"
+ * ```
+ *
+ * **Example** (Waiting for a timer that survives its runner)
+ *
+ * ```ts import.meta.vitest
+ * import { Machine } from "@typeonce/effect-machine"
+ * import { ClusterMachine } from "@typeonce/effect-machine/cluster"
+ * import { Schema } from "effect"
+ *
+ * const machine = Machine.make({
+ *   id: "Trial",
+ *   root: Machine.state({
+ *     states: {
+ *       Inactive: {},
+ *       Running: { fields: { days: Schema.Number } },
+ *       Expired: {}
+ *     }
+ *   }),
+ *   events: Machine.events({ Start: { days: Schema.Number }, Cancel: {} }),
+ *   timers: { trial: (days: number) => ({ days }) }
+ * }).handle({
+ *   initial: { target: "Inactive" },
+ *   states: {
+ *     Inactive: { on: { Start: { target: "Running", data: ({ event }) => ({ days: event.days }) } } },
+ *     Running: {
+ *       invoke: { src: "trial", input: ({ state }) => state.days, onDone: { target: "Expired" } },
+ *       on: { Cancel: { target: "Inactive" } }
+ *     }
+ *   }
+ * })
+ *
+ * const adapter = ClusterMachine.make("Trial", machine, { version: "1" })
+ *
+ * adapter.entity.type // => "Trial"
  * ```
  *
  * @category constructors
