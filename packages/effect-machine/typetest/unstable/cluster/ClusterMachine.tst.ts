@@ -29,12 +29,16 @@ describe("ClusterMachine", () => {
   })
   it("identifies a request only for a checkpoint that came from one", () => {
     expect<ClusterMachine.Checkpoint["origin"]>().type.toBe<
-      ClusterMachine.Checkpoint.Origin.Request | ClusterMachine.Checkpoint.Origin.Invocation
+      | ClusterMachine.Checkpoint.Origin.Request
+      | ClusterMachine.Checkpoint.Origin.Invocation
+      | ClusterMachine.Checkpoint.Origin.Timers
     >()
     expect<Extract<ClusterMachine.Checkpoint.Origin, { readonly _tag: "Request" }>["requestId"]>().type.toBe<
       Snowflake.Snowflake
     >()
     expect<ClusterMachine.Checkpoint.Origin.Invocation>().type.not.toHaveProperty("requestId")
+    expect<ClusterMachine.Checkpoint.Origin.Timers>().type.not.toHaveProperty("requestId")
+    expect<ClusterMachine.Checkpoint.Origin.Timers>().type.not.toHaveProperty("path")
     type Service = ClusterMachine.Storage["Service"]
     expect<Parameters<Service["load"]>["length"]>().type.toBe<1>()
     expect<Effect.Success<ReturnType<Service["load"]>>>().type.toBe<Option.Option<ClusterMachine.Checkpoint>>()
@@ -44,10 +48,17 @@ describe("ClusterMachine", () => {
   it("keeps the parts of an active and of a failed status apart", () => {
     expect<ClusterMachine.Checkpoint["status"]["_tag"]>().type.toBe<"Active" | "Failed">()
     expect<ClusterMachine.Checkpoint.Status.Active>().type.not.toHaveProperty("failure")
-    expect<ClusterMachine.Checkpoint.Status.Failed>().type.not.toHaveProperty("settled")
-    expect<{ readonly _tag: "Active"; readonly settled: readonly []; readonly failure: string }>().type.not
+    expect<ClusterMachine.Checkpoint.Status.Failed>().type.not.toHaveProperty("invocations")
+    expect<{ readonly _tag: "Active"; readonly invocations: {}; readonly failure: string }>().type.not
       .toBe<ClusterMachine.Checkpoint.Status>()
     expect<{ readonly _tag: "Failed" }>().type.not.toBeAssignableTo<ClusterMachine.Checkpoint.Status>()
+  })
+  it("gives an invocation one progress, and only a waiting timer a due time", () => {
+    type Invocations = ClusterMachine.Checkpoint.Invocations
+    expect<Invocations[string][string]["_tag"]>().type.toBe<"Settled" | "Waiting">()
+    expect<ClusterMachine.Checkpoint.Progress.Settled>().type.not.toHaveProperty("dueAt")
+    expect<ClusterMachine.Checkpoint.Progress.Waiting["dueAt"]>().type.toBe<number>()
+    expect<{ readonly _tag: "Waiting" }>().type.not.toBeAssignableTo<ClusterMachine.Checkpoint.Progress>()
   })
   class Count extends Schema.TaggedClass<Count>("Count")("Count", {
     value: Schema.Number

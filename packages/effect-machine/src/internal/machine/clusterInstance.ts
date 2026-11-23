@@ -4,6 +4,7 @@
  * @since 0.48.0
  */
 import * as Cause from "effect/Cause"
+import * as Clock from "effect/Clock"
 import type { EntityAddress, MessageStorage, Snowflake } from "effect/cluster"
 import * as Data from "effect/Data"
 import * as Effect from "effect/Effect"
@@ -16,11 +17,14 @@ import type * as Machine from "../../Machine.js"
 import type { Checkpoint } from "../../unstable/cluster/ClusterMachine.js"
 import { renderFailure } from "./clusterFailure.js"
 import { ClusterKeepAlive, untilDone } from "./clusterKeepAlive.js"
+import * as ClusterProgress from "./clusterProgress.js"
 import { Accepted, Rejected, type RejectionReason, type Storage } from "./clusterProtocol.js"
+import * as ClusterTimer from "./clusterTimer.js"
 import * as ClusterWork from "./clusterWork.js"
 import * as Configuration from "./configuration.js"
 import { toImpl } from "./implementation.js"
 import * as InvocationChanges from "./invocationChanges.js"
+import * as InvocationDefinition from "./invocationDefinition.js"
 import type { InvocationEvent } from "./invocationEvent.js"
 import * as InvocationOutcome from "./invocationOutcome.js"
 import * as InvocationResolution from "./invocationResolution.js"
@@ -72,6 +76,13 @@ export interface Input {
  *   means against the state of that moment, so an outcome whose state exited is
  *   ignored.
  * - Work that this instance stops never reports an outcome, whatever stops it.
+ * - A timer is work that waits for the due time stored with its state. A step
+ *   stores the due times of the timers it enters, so work that starts finds
+ *   them. A loaded state can lack one, when the deployment that stored it did
+ *   not declare the timer. Its due time is stored as a checkpoint of its own
+ *   before any work of that state starts.
+ * - A duration that cannot be evaluated does not refuse its step. It fails the
+ *   machine once the step is stored, when the timer would have started.
  * - An outcome the model does not handle, or that cannot be applied, stores the
  *   machine as failed. A failure of `Storage`, of its transaction, or of
  *   `enqueue` is retried for as long as the instance lives.
@@ -117,7 +128,7 @@ type Memory =
     readonly _tag: "Active"
     readonly revision: number
     readonly state: Snapshot
-    readonly settled: ReadonlyArray<Checkpoint.InvocationKey>
+    readonly progress: ClusterProgress.Progress
   }
   | { readonly _tag: "Failed"; readonly revision: number; readonly failure: string }
 
@@ -139,6 +150,9 @@ interface PlannedStep {
 interface StoredStep {
   readonly base: number
   readonly changes: InvocationChanges.InvocationChanges | undefined
+
+  /** Timers of the state it led to that could not be given a due time. */
+  readonly unscheduled: ReadonlyArray<ClusterTimer.Unscheduled>
 }
 
 /** What a step leaves behind once the transaction around it has succeeded. */
@@ -231,22 +245,22 @@ const refuse = (options: {
         })
       ))
 
-const isKey = (value: unknown): value is Checkpoint.InvocationKey =>
-  Predicate.hasProperty(value, "path") && Predicate.isString(value.path) &&
-  Predicate.hasProperty(value, "id") && Predicate.isString(value.id)
+/** The status of a checkpoint, in the form memory holds it. */
+type ReadStatus =
+  | { readonly _tag: "Active"; readonly progress: ClusterProgress.Progress }
+  | { readonly _tag: "Failed"; readonly failure: string }
 
 /** Reads the status of a checkpoint, whose store may hold anything. */
-const readStatus = (status: unknown): Checkpoint.Status | undefined => {
+const readStatus = (status: unknown): ReadStatus | undefined => {
   if (!Predicate.hasProperty(status, "_tag")) return undefined
   if (status._tag === "Failed") {
     return Predicate.hasProperty(status, "failure") && Predicate.isString(status.failure)
       ? { _tag: "Failed", failure: status.failure }
       : undefined
   }
-  return status._tag === "Active" && Predicate.hasProperty(status, "settled") && Array.isArray(status.settled) &&
-      status.settled.every(isKey)
-    ? { _tag: "Active", settled: status.settled }
-    : undefined
+  if (status._tag !== "Active" || !Predicate.hasProperty(status, "invocations")) return undefined
+  const progress = ClusterProgress.fromStored(status.invocations)
+  return progress && { _tag: "Active", progress }
 }
 
 const absent: Memory = { _tag: "Absent", revision: 0 }
@@ -259,8 +273,9 @@ export const make = <R>(options: Options<R>): Effect.Effect<ClusterInstance<R>, 
     const { address, enqueue, machine, machineId, messageStorage, storage, version } = options
     const context = yield* Effect.context<R>()
     const support = ClusterWork.supportOf(toImpl(machine).handlers)
-    const hostsWork = support._tag === "Effects"
+    const hostsWork = support._tag === "Hosted"
     const capabilities = ClusterWork.makeCapabilities(machineId)
+    const clock = yield* Clock.Clock
     const semaphore = Semaphore.makeUnsafe(1)
 
     // Owned by the running turn.
@@ -352,18 +367,33 @@ export const make = <R>(options: Options<R>): Effect.Effect<ClusterInstance<R>, 
       const state: Snapshot = yield* internalMachine.decodeSnapshot(machine, checkpoint.snapshot).pipe(
         Effect.mapError((error) => reject("InvalidCheckpoint", String(error.cause)))
       )
-      if (status.settled.length > 0) {
-        const { active } = Configuration.normalizeConfigurationSync(machine, state)
-        const inactive = status.settled.find(({ path }) => !active.has(path))
-        if (inactive !== undefined) {
-          return yield* fail(
-            "InvalidCheckpoint",
-            `Expected settled invocations of active states, received state ${inactive.path}`
-          )
-        }
+      const contradiction = contradictionOf(state, status.progress)
+      if (contradiction !== undefined) {
+        return yield* fail("InvalidCheckpoint", contradiction)
       }
-      return { _tag: "Active", revision: checkpoint.revision, state, settled: status.settled }
+      return { _tag: "Active", revision: checkpoint.revision, state, progress: status.progress }
     })
+
+    const declaresTimer = ({ id, path }: Checkpoint.InvocationKey): boolean =>
+      InvocationDefinition.definitions(Configuration.getStateConfigByPath(machine, path)?.invoke).some((definition) =>
+        "after" in definition && definition.id === id
+      )
+
+    // What makes progress impossible for a state of this machine.
+    const contradictionOf = (state: Snapshot, progress: ClusterProgress.Progress): string | undefined => {
+      if (progress.size === 0) return undefined
+      const { active } = Configuration.normalizeConfigurationSync(machine, state)
+      const inactive = Array.from(progress.keys()).find((path) => !active.has(path))
+      if (inactive !== undefined) {
+        return `Expected invocations of active states, received state ${inactive}`
+      }
+      const waiting = ClusterProgress.entries(progress).filter(([, { _tag }]) => _tag === "Waiting")
+      if (waiting.length > 0 && internalMachine.isFinal(machine, state)) {
+        return "Expected no timer to wait in a final state"
+      }
+      const unknown = waiting.find(([key]) => !declaresTimer(key))
+      return unknown && `Expected only timers to wait, received invocation ${unknown[0].id} of state ${unknown[0].path}`
+    }
 
     const plan = Effect.fnUntraced(function*(base: Base, event: unknown): Effect.fn.Return<PlannedStep, unknown> {
       const emitted: Array<unknown> = []
@@ -391,16 +421,47 @@ export const make = <R>(options: Options<R>): Effect.Effect<ClusterInstance<R>, 
       return { state, emitted, changes }
     })
 
-    // An invocation stays settled until its state exits, which includes the exit
-    // its own outcome causes.
-    const settledAfter = (
+    // Gives a due time to the timers of a state that have none, from now on.
+    const schedule = (
+      state: Snapshot,
+      progress: ClusterProgress.Progress,
+      changes: InvocationChanges.InvocationChanges | undefined
+    ): ClusterTimer.Schedule => {
+      if (!hostsWork) return { progress, unscheduled: [] }
+      if (internalMachine.isFinal(machine, state)) {
+        return { progress: ClusterProgress.cancelTimers(progress), unscheduled: [] }
+      }
+      const configuration = Configuration.normalizeConfigurationSync(machine, state)
+      return ClusterTimer.schedule({
+        machine,
+        configuration,
+        paths: entryPaths(configuration),
+        eventOf: (path) => entryEvent(changes, path),
+        capabilities,
+        progress,
+        now: clock.currentTimeMillisUnsafe()
+      })
+    }
+
+    const entryPaths = (configuration: Configuration.ActiveConfiguration): ReadonlyArray<string> =>
+      Planner.sortEntryPaths(machine, Configuration.getInitialEntryPaths(machine, configuration))
+
+    // A state that no step of this instance entered counts as entered initially.
+    const entryEvent = (
+      changes: InvocationChanges.InvocationChanges | undefined,
+      path: string
+    ): Machine.Machine.LifecycleEvent<any> => changes?.entered.get(path) ?? Planner.InitialEvent
+
+    // An invocation keeps its progress until its state exits, which includes the
+    // exit its own outcome causes.
+    const progressAfter = (
       base: Base,
       input: StepInput,
-      changes: InvocationChanges.InvocationChanges | undefined
-    ): ReadonlyArray<Checkpoint.InvocationKey> => {
-      const before = base._tag === "Active" ? base.settled : []
-      const settled = input._tag === "Invocation" ? [...before, input.key] : before
-      return changes === undefined ? settled : settled.filter(({ path }) => !changes.exited.includes(path))
+      { changes, state }: PlannedStep
+    ): ClusterTimer.Schedule => {
+      const before = base._tag === "Active" ? base.progress : ClusterProgress.empty
+      const ended = input._tag === "Invocation" ? ClusterProgress.settle(before, input.key) : before
+      return schedule(state, changes === undefined ? ended : ClusterProgress.exit(ended, changes.exited), changes)
     }
 
     // Everything a step decides before it changes `Storage`.
@@ -408,7 +469,12 @@ export const make = <R>(options: Options<R>): Effect.Effect<ClusterInstance<R>, 
       base: Base,
       input: StepInput
     ): Effect.fn.Return<
-      { readonly planned: PlannedStep; readonly checkpoint: Checkpoint; readonly next: Memory },
+      {
+        readonly planned: PlannedStep
+        readonly checkpoint: Checkpoint
+        readonly next: Memory
+        readonly unscheduled: ReadonlyArray<ClusterTimer.Unscheduled>
+      },
       unknown,
       R
     > {
@@ -420,9 +486,11 @@ export const make = <R>(options: Options<R>): Effect.Effect<ClusterInstance<R>, 
         return yield* fail("EmissionFailure", "No durable enqueue handler was configured")
       }
       const revision = base.revision + 1
-      const settled = settledAfter(base, input, planned.changes)
+      // Last, so a step that is refused evaluates no duration.
+      const { progress, unscheduled } = yield* Effect.sync(() => progressAfter(base, input, planned))
       return {
         planned,
+        unscheduled,
         checkpoint: {
           machineId,
           version,
@@ -431,9 +499,9 @@ export const make = <R>(options: Options<R>): Effect.Effect<ClusterInstance<R>, 
             ? { _tag: "Request", requestId: input.requestId }
             : { _tag: "Invocation", path: input.key.path, id: input.key.id },
           snapshot,
-          status: { _tag: "Active", settled }
+          status: { _tag: "Active", invocations: ClusterProgress.toStored(progress) }
         },
-        next: { _tag: "Active", revision, state: planned.state, settled }
+        next: { _tag: "Active", revision, state: planned.state, progress }
       }
     })
 
@@ -447,7 +515,7 @@ export const make = <R>(options: Options<R>): Effect.Effect<ClusterInstance<R>, 
         readonly confirm: boolean
       }
     ): Effect.fn.Return<StepResult, Refused | Conflicted, R> {
-      const { checkpoint, next, planned } = yield* prepare(base, input).pipe(
+      const { checkpoint, next, planned, unscheduled } = yield* prepare(base, input).pipe(
         refuse({ memory: base, confirm: options.confirm, stage: "Decision" })
       )
       const committed = yield* storage.commit(address, checkpoint).pipe(
@@ -469,7 +537,7 @@ export const make = <R>(options: Options<R>): Effect.Effect<ClusterInstance<R>, 
               refuse({ memory: undefined, confirm: false, stage: "Infrastructure" })
             )
           }
-          return { memory: next, stored: { base: base.revision, changes: planned.changes } }
+          return { memory: next, stored: { base: base.revision, changes: planned.changes, unscheduled } }
         }
       }
     })
@@ -616,16 +684,54 @@ export const make = <R>(options: Options<R>): Effect.Effect<ClusterInstance<R>, 
     const align = (restore: Restore, stored: StoredStep | undefined): Effect.Effect<void> =>
       Effect.suspend(() => {
         if (!hostsWork || work.closed || memory === undefined) return Effect.void
-        return Effect.flatMap(alignWork(memory, stored), (failure) =>
-          failure === undefined
-            // A request is answered after this, so a crash in between redelivers it.
-            ? restore(keepAlive.switchTo(work.pending)).pipe(annotate)
-            : Effect.asVoid(storeFailure(restore, failure.key, renderFailure(failure.cause))))
+        return Effect.flatMap(
+          stored === undefined ? scheduleLoaded(restore, memory) : Effect.succeed(stored.unscheduled),
+          (unscheduled) => {
+            if (memory === undefined) return Effect.void
+            return Effect.flatMap(alignWork(memory, stored, unscheduled), (failure) =>
+              failure === undefined
+                // A request is answered after this, so a crash in between redelivers it.
+                ? restore(keepAlive.switchTo(work.pending)).pipe(annotate)
+                : Effect.asVoid(storeFailure(restore, failure.key, renderFailure(failure.cause))))
+          }
+        )
+      })
+
+    // Stores the due times that a loaded state lacks, as a checkpoint of its own.
+    // Memory is left unknown when that fails.
+    const scheduleLoaded = (
+      restore: Restore,
+      loaded: Memory
+    ): Effect.Effect<ReadonlyArray<ClusterTimer.Unscheduled>> =>
+      Effect.suspend(() => {
+        if (
+          loaded._tag !== "Active" || work.revision === loaded.revision ||
+          internalMachine.isFinal(machine, loaded.state)
+        ) {
+          return Effect.succeed([])
+        }
+        const { progress, unscheduled } = schedule(loaded.state, loaded.progress, undefined)
+        if (progress === loaded.progress) return Effect.succeed(unscheduled)
+        return amend(restore, {
+          origin: { _tag: "Timers" },
+          status: { _tag: "Active", invocations: ClusterProgress.toStored(progress) }
+        }).pipe(
+          Effect.matchCauseEffect({
+            onFailure: (cause) => notDone("Could not store the due times of a Cluster machine", cause),
+            onSuccess: (revision) =>
+              Effect.sync(() => {
+                memory = { ...loaded, revision, progress }
+              })
+          }),
+          annotate,
+          Effect.as(unscheduled)
+        )
       })
 
     const alignWork = (
       current: Memory,
-      stored: StoredStep | undefined
+      stored: StoredStep | undefined,
+      unscheduled: ReadonlyArray<ClusterTimer.Unscheduled>
     ): Effect.Effect<ClusterWork.StartFailure | undefined> =>
       Effect.suspend(() => {
         if (work.revision === current.revision) return Effect.succeed(undefined)
@@ -636,9 +742,7 @@ export const make = <R>(options: Options<R>): Effect.Effect<ClusterInstance<R>, 
         const continues = stored !== undefined && work.revision === stored.base
         const entered = continues
           ? Array.from(stored.changes?.entered ?? [])
-          : Planner.sortEntryPaths(machine, Configuration.getInitialEntryPaths(machine, configuration)).map((path) =>
-            [path, stored?.changes?.entered.get(path) ?? Planner.InitialEvent] as const
-          )
+          : entryPaths(configuration).map((path) => [path, entryEvent(stored?.changes, path)] as const)
         const stop = continues ? work.stopPaths(stored.changes?.exited ?? []) : work.stopAll
         return stop.pipe(
           Effect.andThen(Effect.suspend(() => {
@@ -646,19 +750,19 @@ export const make = <R>(options: Options<R>): Effect.Effect<ClusterInstance<R>, 
             const groups = entered.flatMap(([path, event]) =>
               InvocationResolution.resolve(machine, configuration, [path], event, capabilities)
             )
-            return work.start(groups, current.settled)
+            return work.start(groups, { progress: current.progress, unscheduled })
           })),
           Effect.tap((failure) => failure === undefined ? Effect.void : stopWork)
         )
       })
 
-    // Stores the machine as failed, in the state it has. The stored snapshot is
-    // kept as it is. The value is whether the failure is stored.
-    const storeFailure = (
+    // Replaces the stored checkpoint by one of the same state, whose snapshot is
+    // kept as it is. Memory is forgotten first, and the value is the revision that
+    // is stored.
+    const amend = (
       restore: Restore,
-      key: Checkpoint.InvocationKey,
-      failure: string
-    ): Effect.Effect<boolean> =>
+      amended: Pick<Checkpoint, "origin" | "status">
+    ): Effect.Effect<number, unknown> =>
       Effect.suspend(() => {
         const revision = memory?.revision
         memory = undefined
@@ -667,31 +771,38 @@ export const make = <R>(options: Options<R>): Effect.Effect<ClusterInstance<R>, 
           if (Option.isNone(loaded) || loaded.value.revision !== revision) {
             return yield* new Conflicted()
           }
-          const checkpoint: Checkpoint = {
-            ...loaded.value,
-            revision: revision + 1,
-            origin: { _tag: "Invocation", path: key.path, id: key.id },
-            status: { _tag: "Failed", failure }
-          }
+          const checkpoint: Checkpoint = { ...loaded.value, ...amended, revision: revision + 1 }
           const committed = yield* storage.commit(address, checkpoint)
           if (committed._tag !== "Committed") {
             return yield* new Conflicted()
           }
-          return { _tag: "Failed", revision: checkpoint.revision, failure } satisfies Memory
-        }))).pipe(
-          Effect.matchCauseEffect({
-            onFailure: (cause) => notDone("Could not store the failure of a Cluster machine", cause),
-            onSuccess: (failed) => {
-              memory = failed
-              return Effect.logError("A Cluster machine failed", failure).pipe(
-                Effect.andThen(align(restore, undefined)),
-                Effect.as(true)
-              )
-            }
-          }),
-          annotate
-        )
+          return checkpoint.revision
+        })))
       })
+
+    // Stores the machine as failed, in the state it has. The value is whether the
+    // failure is stored.
+    const storeFailure = (
+      restore: Restore,
+      key: Checkpoint.InvocationKey,
+      failure: string
+    ): Effect.Effect<boolean> =>
+      amend(restore, {
+        origin: { _tag: "Invocation", path: key.path, id: key.id },
+        status: { _tag: "Failed", failure }
+      }).pipe(
+        Effect.matchCauseEffect({
+          onFailure: (cause) => notDone("Could not store the failure of a Cluster machine", cause),
+          onSuccess: (revision) => {
+            memory = { _tag: "Failed", revision, failure }
+            return Effect.logError("A Cluster machine failed", failure).pipe(
+              Effect.andThen(align(restore, undefined)),
+              Effect.as(true)
+            )
+          }
+        }),
+        annotate
+      )
 
     // One attempt to apply the end of work. The value is whether nothing is left
     // to do.
