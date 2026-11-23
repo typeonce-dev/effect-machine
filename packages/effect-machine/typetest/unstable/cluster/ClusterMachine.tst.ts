@@ -1,5 +1,5 @@
-import { Context, Effect, type Layer, Schema, SchemaGetter } from "effect"
-import { type MessageStorage, type Sharding } from "effect/cluster"
+import { Context, Effect, type Layer, type Option, Schema, SchemaGetter } from "effect"
+import type { MessageStorage, Sharding, Snowflake } from "effect/cluster"
 import type { Rpc, RpcGroup } from "effect/rpc"
 import { describe, expect, it } from "tstyche"
 import { Machine } from "../../../src/index.js"
@@ -24,7 +24,30 @@ describe("ClusterMachine", () => {
       | "PersistenceFailure"
       | "RevisionConflict"
       | "EmissionFailure"
+      | "MachineFailed"
     >()
+  })
+  it("identifies a request only for a checkpoint that came from one", () => {
+    expect<ClusterMachine.Checkpoint["origin"]>().type.toBe<
+      ClusterMachine.Checkpoint.Origin.Request | ClusterMachine.Checkpoint.Origin.Invocation
+    >()
+    expect<Extract<ClusterMachine.Checkpoint.Origin, { readonly _tag: "Request" }>["requestId"]>().type.toBe<
+      Snowflake.Snowflake
+    >()
+    expect<ClusterMachine.Checkpoint.Origin.Invocation>().type.not.toHaveProperty("requestId")
+    type Service = ClusterMachine.Storage["Service"]
+    expect<Parameters<Service["load"]>["length"]>().type.toBe<1>()
+    expect<Effect.Success<ReturnType<Service["load"]>>>().type.toBe<Option.Option<ClusterMachine.Checkpoint>>()
+    expect<Parameters<Service["loadForRequest"]>[1]>().type.toBe<Snowflake.Snowflake>()
+    expect<Effect.Success<ReturnType<Service["loadForRequest"]>>>().type.toBe<ClusterMachine.LoadResult>()
+  })
+  it("keeps the parts of an active and of a failed status apart", () => {
+    expect<ClusterMachine.Checkpoint["status"]["_tag"]>().type.toBe<"Active" | "Failed">()
+    expect<ClusterMachine.Checkpoint.Status.Active>().type.not.toHaveProperty("failure")
+    expect<ClusterMachine.Checkpoint.Status.Failed>().type.not.toHaveProperty("settled")
+    expect<{ readonly _tag: "Active"; readonly settled: readonly []; readonly failure: string }>().type.not
+      .toBe<ClusterMachine.Checkpoint.Status>()
+    expect<{ readonly _tag: "Failed" }>().type.not.toBeAssignableTo<ClusterMachine.Checkpoint.Status>()
   })
   class Count extends Schema.TaggedClass<Count>("Count")("Count", {
     value: Schema.Number
@@ -131,6 +154,21 @@ describe("ClusterMachine", () => {
     const layer = bridge.toLayer()
     expect<Layer.Services<typeof layer>>().type.toBe<
       ClusterMachine.Storage | MessageStorage.MessageStorage | Sharding.Sharding
+    >()
+  })
+  it("requires the services of invoked effects", () => {
+    const invoking = Machine.make({
+      id: "Invoking",
+      root: states,
+      events: Machine.eventsFromSchemas(Reset),
+      effects: { work: Effect.map(PlanningService, ({ value }) => value) }
+    }).handle({
+      initial: { target: "Count", decoded: true, data: new Count({ value: 0 }) },
+      states: { Count: { invoke: { src: "work", onDone: { stay: true } } } }
+    })
+    const layer = ClusterMachine.make("Invoking", invoking, { version: "1" }).toLayer()
+    expect<Layer.Services<typeof layer>>().type.toBe<
+      ClusterMachine.Storage | MessageStorage.MessageStorage | Sharding.Sharding | PlanningService
     >()
   })
   it("captures non-void machine input", () => {

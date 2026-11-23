@@ -122,7 +122,7 @@ test("enforces semantic boundaries for each runtime strategy and shared protocol
 })
 
 test("keeps host-neutral invocation modules independent of the local runtime", () => {
-  for (const module of ["invocationGeneration", "invocationOutcome", "invocationResolution"]) {
+  for (const module of ["invocationChanges", "invocationGeneration", "invocationOutcome", "invocationResolution"]) {
     for (
       const local of [
         "childRegistry",

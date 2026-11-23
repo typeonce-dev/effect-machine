@@ -2,6 +2,7 @@ import { assert, describe, it } from "@effect/vitest"
 import { Duration, Effect, Exit, Schema, Stream } from "effect"
 import { Machine } from "../../../src/index.js"
 import * as Configuration from "../../../src/internal/machine/configuration.js"
+import * as InvocationChanges from "../../../src/internal/machine/invocationChanges.js"
 import type * as InvocationEvent from "../../../src/internal/machine/invocationEvent.js"
 import { InvocationGenerations } from "../../../src/internal/machine/invocationGeneration.js"
 import * as InvocationOutcome from "../../../src/internal/machine/invocationOutcome.js"
@@ -78,16 +79,13 @@ class PlannedHost {
   send(event: object): ReadonlyArray<Started> {
     const planned = Planner.planConfiguration(this.machine, this.configuration, event)
     this.configuration = planned.next
-    const entered = new Map<string, Machine.Machine.LifecycleEvent<any>>()
-    for (const step of planned.microsteps) {
-      this.generations.retireGenerations(step.exitPaths)
-      for (const path of step.entryPaths) entered.set(path, step.event)
-    }
+    const changes = InvocationChanges.fromMicrosteps(planned.microsteps)
+    this.generations.retireGenerations(changes?.exited ?? [])
     if (planned.done) {
       this.generations.retireAllGenerations()
       return []
     }
-    return Array.from(entered).flatMap(([path, event]) => this.start([path], event))
+    return Array.from(changes?.entered ?? []).flatMap(([path, event]) => this.start([path], event))
   }
 
   /** Performs a decision and returns the invocations it starts. */
@@ -337,6 +335,29 @@ describe("a host that is not the local runtime", () => {
 
     host.send(ParallelEvents.Stop())
     assert.deepStrictEqual(started.map(({ generation }) => generation.current), [false, false, false])
+  })
+})
+
+describe("invocation changes", () => {
+  it("keeps the event that last entered each path, in entry order", () => {
+    const event = (tag: string) => ({ _tag: tag }) as any
+    const changes = InvocationChanges.fromMicrosteps([
+      { event: event("Go"), exitPaths: ["Idle"], entryPaths: ["Busy", "Busy.left"], changed: true },
+      { event: event("Ignored"), exitPaths: ["Busy"], entryPaths: ["Idle"], changed: false },
+      { event: event("Again"), exitPaths: ["Busy.left", "Busy"], entryPaths: ["Busy", "Busy.right"], changed: true }
+    ])
+    assert.deepStrictEqual(changes?.exited, ["Idle", "Busy.left", "Busy"])
+    assert.deepStrictEqual(Array.from(changes?.entered ?? []), [
+      ["Busy", event("Again")],
+      ["Busy.left", event("Go")],
+      ["Busy.right", event("Again")]
+    ])
+  })
+
+  it("reads no change from a step that stays in its states", () => {
+    const step = { event: { _tag: "Note" } as any, exitPaths: [], entryPaths: [], changed: false }
+    assert.strictEqual(InvocationChanges.fromMicrosteps([]), undefined)
+    assert.strictEqual(InvocationChanges.fromMicrosteps([step, step]), undefined)
   })
 })
 
