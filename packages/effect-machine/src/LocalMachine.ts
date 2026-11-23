@@ -19,6 +19,7 @@ import * as internal from "./internal/machine/process.js"
 import type { EnsureExecutable } from "./internal/machine/readiness.js"
 import type {
   InfiniteTransitionError,
+  InvocationSupport,
   Machine,
   MachineRef,
   MachineRuntime,
@@ -39,12 +40,17 @@ import type {
  * **Details**
  *
  * Removes `Machine.MachineRuntime` from the machine's requirements, because the
- * running machine provides it to the work it runs.
+ * running machine provides it to the work it runs, and every
+ * `Machine.InvocationSupport`, because a local machine runs every kind of
+ * invocation.
  *
  * @category utility types
  * @since 0.48.0
  */
-export type RequiredServices<Requirements> = Exclude<Requirements, MachineRuntime>
+export type RequiredServices<Requirements> = Exclude<
+  Requirements,
+  MachineRuntime | InvocationSupport<InvocationSupport.Kind>
+>
 
 /**
  * Live, root-scoped records describing one prepared machine tree.

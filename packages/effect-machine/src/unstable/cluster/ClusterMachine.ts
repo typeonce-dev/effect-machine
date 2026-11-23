@@ -529,7 +529,7 @@ export interface ClusterMachine<
 }
 
 type MachineServices<M extends Machine.Machine.Any> =
-  | Exclude<Machine.Machine.Services<M>, Machine.MachineRuntime>
+  | Machine.Machine.Services<M>
   | Machine.Machine.SnapshotDecodingServices<Machine.Machine.States<M>>
   | Machine.Machine.SnapshotEncodingServices<Machine.Machine.States<M>>
 
@@ -577,6 +577,21 @@ type EnsureJsonEncoded<
       readonly states: NonJsonState<States>
       readonly outputs: NonJsonOutput<States>
       readonly inputEvents: NonJsonInputEvent<InputEvents>
+    }
+  }
+
+type UnsupportedInvocation<R> = R extends Machine.InvocationSupport<infer Kind> ? Kind : never
+
+type UnsupportedCapability<R> = R extends Machine.MachineRuntime ? "MachineRuntime" : never
+
+// This host supports no kind that `InvocationSupport` names, so a kind added to
+// it is refused until this host states that it runs it.
+type EnsureSupported<R> = IsAny<R> extends true ? unknown
+  : [UnsupportedInvocation<R> | UnsupportedCapability<R>] extends [never] ? unknown
+  : {
+    readonly "~effect/ClusterMachine/UnsupportedProcessLocal": {
+      readonly invocations: UnsupportedInvocation<R>
+      readonly capabilities: UnsupportedCapability<R>
     }
   }
 
@@ -664,6 +679,14 @@ export const layerMemory: Layer.Layer<Storage> = internal.layerMemory
  * rejected as `MachineFailed`. There is no retry of failed work: a model that
  * recovers declares `onFailure`.
  *
+ * A machine that this host cannot run does not compile: one whose states invoke a
+ * Stream, a `Logic`, or a child machine, or whose invoked work requires
+ * `Machine.MachineRuntime`, as `Machine.spawn`, `Machine.sendTo`, and
+ * `Machine.stopChild` do. The error names the property
+ * `~effect/ClusterMachine/UnsupportedProcessLocal`, and lists there every
+ * invocation kind and capability to replace with an Effect or a timer. A source
+ * that is registered and never invoked is accepted.
+ *
  * **Gotchas**
  *
  * Work runs at least once and must be safe to repeat. It runs again after a
@@ -692,17 +715,21 @@ export const layerMemory: Layer.Layer<Storage> = internal.layerMemory
  * state that was stored with a timer the machine no longer declares is rejected
  * as `InvalidCheckpoint`, so migrate such checkpoints.
  *
- * Streams, process logic, child machines, spawned children, action-time
- * `runtime.raise`, machine commands, subscriptions, and other process-local
- * state are not durable and are rejected. A machine that declares an unsupported
- * invocation in any state rejects every request as `UnsupportedProcessLocal`.
- * Planning-time raised events remain part of the current macrostep.
+ * The compiler reads only the requirements of a machine, so these uses of a local
+ * process compile and fail at run time:
  *
- * Machines cannot address each other yet. Input mappers receive a `self` whose
- * `id` names the machine, no `parent`, and a `children` owner. Work that uses
- * `self.send`, `self.sessionId`, an operation of `children`, or an operation that
- * requires the runtime of a local machine, such as `Machine.sendTo`, fails the
- * machine.
+ * - A step whose plan contains a command, from `enqueue.sendTo` or
+ *   `enqueue.stop`, and an action-time `runtime.raise`. They reject the request as
+ *   `UnsupportedProcessLocal`, or fail the machine when the step applies an
+ *   outcome. Planning-time raised events remain part of the current macrostep.
+ * - Work that uses `self.send`, `self.sessionId`, or an operation of `children`
+ *   from the context of its input mapper. It fails the machine. Machines cannot
+ *   address each other yet: that `self` only names the machine, and there is no
+ *   `parent`.
+ * - A machine whose requirements are `any`, such as an erased one. When any of its
+ *   states declares an unsupported invocation, it rejects every request as
+ *   `UnsupportedProcessLocal`. Work of such a machine that requires
+ *   `Machine.MachineRuntime` fails the machine.
  *
  * A deployment that adds an invocation to a state does not wake the entities
  * that are already in it. Their work starts when they come up.
@@ -820,6 +847,44 @@ export const layerMemory: Layer.Layer<Storage> = internal.layerMemory
  * adapter.entity.type // => "Trial"
  * ```
  *
+ * **Example** (Refusing a machine that Cluster cannot run)
+ *
+ * ```ts import.meta.vitest
+ * import { Machine } from "@typeonce/effect-machine"
+ * import { ClusterMachine } from "@typeonce/effect-machine/cluster"
+ * import { Effect, Stream } from "effect"
+ *
+ * const definition = Machine.make({
+ *   id: "Sensor",
+ *   root: Machine.state({ states: { Reading: {}, Read: {} } }),
+ *   events: Machine.events({}),
+ *   effects: { read: Effect.succeed(20) },
+ *   streams: { readings: Stream.make(20, 21) }
+ * })
+ *
+ * const streaming = definition.handle({
+ *   initial: { target: "Reading" },
+ *   states: {
+ *     Reading: { invoke: { src: "readings", onElement: { stay: true }, onDone: { target: "Read" } } }
+ *   }
+ * })
+ *
+ * // @ts-expect-error Invokes a Stream: { invocations: "Stream"; capabilities: never }
+ * ClusterMachine.make("Sensor", streaming, { version: "1" })
+ *
+ * const reading = definition.handle({
+ *   initial: { target: "Reading" },
+ *   states: {
+ *     Reading: { invoke: { src: "read", onDone: { target: "Read" } } }
+ *   }
+ * })
+ *
+ * const adapter = ClusterMachine.make("Sensor", reading, { version: "1" })
+ *
+ * adapter.entity.type // => "Sensor"
+ * ```
+ *
+ * @see {@link Machine.InvocationSupport} for the requirement of each invocation kind.
  * @category constructors
  * @since 0.4.0
  */
@@ -856,7 +921,8 @@ export const make: <
     >
     & EnsureExecutable<States, UnhandledStates, OutputStates>
     & Machine.Machine.RootCompatible<ParentEvents>
-    & EnsureJsonEncoded<States, InputEvents>,
+    & EnsureJsonEncoded<States, InputEvents>
+    & EnsureSupported<R>,
   options: {
     readonly version: string
   },
@@ -877,7 +943,7 @@ export const make: <
     InputEvents,
     ParentEvents
   >,
-  | Exclude<R, Machine.MachineRuntime>
+  | R
   | Machine.Machine.SnapshotDecodingServices<States>
   | Machine.Machine.SnapshotEncodingServices<States>
 > = internal.make

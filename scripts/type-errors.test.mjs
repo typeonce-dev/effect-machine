@@ -7,8 +7,9 @@ import ts from "typescript"
 const projectRoot = path.resolve(import.meta.dirname, "../packages/effect-machine")
 const virtualFile = path.join(projectRoot, "type-errors.fixture.ts")
 const prelude = `
-import { Effect, Schema } from "effect"
+import { Effect, Schema, Stream } from "effect"
 import { Machine } from "./src/index.js"
+import { ClusterMachine } from "./src/unstable/cluster/index.js"
 const Root = Machine.state({
   fields: { count: Schema.Number },
   states: {
@@ -29,6 +30,25 @@ const Events = Machine.events({ Pay: { amount: Schema.Number } })
 const def = Machine.make({ root: Root, events: Events, effects: { load: Effect.succeed(1) } })
 const bare = Machine.make({ root: Root, events: Events })
 const base = { root: { count: 0 }, initial: { target: "Editing", data: { complete: false } } } as const
+const local = Machine.make({
+  root: Root,
+  events: Events,
+  effects: { stop: Machine.stopChild(Machine.childAddress<never>("worker")) },
+  streams: { ticks: Stream.make(1) }
+}).handle({
+  ...base,
+  states: {
+    Editing: { invoke: { src: "ticks", onElement: { stay: true }, onDone: { stay: true } } },
+    Checkout: {
+      initial: { target: "Checkout.Charging", data: { amount: 1 } },
+      history: { recent: { default: ({ target }) => target({ data: { count: 0 }, states: { Editing: { data: { complete: false } } } }) } },
+      states: {
+        Charging: { invoke: { src: "stop", onDone: { stay: true } } },
+        Route: { choice: { target: "Checkout.Paid" } }
+      }
+    }
+  }
+})
 `
 const cases = {
   "a misspelled target": [
@@ -94,6 +114,10 @@ const cases = {
   "a selected branch that is not declared": [
     `def.handle({ ...base, states: { Editing: { on: { Pay: { branches: [{ target: "Archived" }], resolve: ({ select }) => select.stay() } } } } })`,
     `resolve selects undeclared { stay: true }. Add it to branches`
+  ],
+  "a machine that Cluster cannot run": [
+    `ClusterMachine.make("Local", local, { version: "1" })`,
+    `"~effect/ClusterMachine/UnsupportedProcessLocal": { readonly invocations: "Stream"; readonly capabilities: "MachineRuntime"; }`
   ]
 }
 

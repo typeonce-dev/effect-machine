@@ -122,6 +122,20 @@ const scenarios = [
     maxMarginalInstantiations: 110_000
   },
   {
+    id: "invocation-kinds-control",
+    label: "invocation kinds control",
+    file: "invocation-kinds-control.ts",
+    hidden: true
+  },
+  {
+    id: "invocation-kinds",
+    label: "registered invocations (Stream, Logic, child)",
+    file: "invocation-kinds.ts",
+    control: "invocation-kinds-control",
+    maxInstantiations: 118_000,
+    maxMarginalInstantiations: 72_000
+  },
+  {
     id: "handle-depth-24-control",
     label: "machine.handle depth 24 control",
     file: "handle-depth-24-control.ts",

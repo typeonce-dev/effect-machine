@@ -313,7 +313,11 @@ const makeLayer = (
     Layer.provide(config(entityMaxIdleTime))
   )
 }
-/** Adapts a machine whose types do not matter to its test. */
+/**
+ * Adapts a machine whose types do not matter to its test. Erasing them also
+ * reaches the run-time check of a machine that `ClusterMachine.make` refuses at
+ * compile time, as an erased machine or a JavaScript caller does.
+ */
 const adapt = (type: string, machine: Machine.Machine.Any): ClusterMachine.ClusterMachine<any, any, never> =>
   (ClusterMachine.make as any)(type, machine, { version: "1" })
 const countOf = (storage: ReturnType<typeof makeTestStorage>, key: string) => {

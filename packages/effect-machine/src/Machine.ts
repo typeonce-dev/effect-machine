@@ -64,6 +64,7 @@ declare const EmittedEventConstructionTypeId: "~effect/Machine/EmittedEventConst
 declare const EventProtocolTypeId: "~effect/Machine/EventProtocol"
 declare const ParentModeTypeId: "~effect/Machine/ParentMode"
 declare const InvokeTypeId: "~effect/Machine/Invoke"
+declare const InvocationSupportTypeId: "~effect/Machine/InvocationSupport"
 declare const StateConstructionTypeId: "~effect/Machine/StateConstruction"
 declare const TargetSnapshotTypeId: "~effect/Machine/TargetSnapshot"
 declare const HistoryTargetTypeId: "~effect/Machine/HistoryTarget"
@@ -458,13 +459,15 @@ export type {
    * The model declares this capability, and a host provides it to the work it
    * runs. `LocalMachine` provides it, also when `AtomMachine` hosts the machine.
    *
-   * `Machine.Machine.Services` contains it for every machine that invokes work,
-   * whether or not that work uses it. `LocalMachine.RequiredServices` removes it.
+   * `Machine.Machine.Services` contains it when the Effect, Stream, or `Logic` that
+   * a state invokes requires it, or when the machine of an invoked child does. A
+   * host that provides it runs every process that the work spawns, whatever that
+   * process invokes. `LocalMachine.RequiredServices` removes it.
    *
    * **Gotchas**
    *
-   * `ClusterMachine` does not provide it. Its types accept a machine whose work
-   * uses the capability, and that work fails the machine with a missing service.
+   * `ClusterMachine` does not provide it, so `ClusterMachine.make` does not compile
+   * for a machine whose services contain it.
    *
    * Only the type is public: hosts of this library provide the service, and it
    * cannot be constructed elsewhere.
@@ -474,6 +477,57 @@ export type {
    */
   MachineRuntime
 } from "./internal/machine/capability.js"
+
+/**
+ * Requirement that a machine runs on a host which supports one kind of
+ * invocation.
+ *
+ * **When to use**
+ *
+ * Name this requirement when annotating a machine that invokes a Stream, a
+ * `Logic`, or a child machine, or when a host states in its types which
+ * invocations it runs.
+ *
+ * **Details**
+ *
+ * `Machine.Machine.Services` contains one for each kind that the states of a
+ * machine invoke. Registering a source without invoking it adds nothing. A
+ * machine that invokes a child machine also carries the requirements of that
+ * child.
+ *
+ * Every host runs Effects and timers, so no requirement stands for them.
+ * `LocalMachine` supports every kind, also when `AtomMachine` hosts the machine,
+ * and `LocalMachine.RequiredServices` removes them all. `ClusterMachine` supports
+ * none, and `ClusterMachine.make` does not compile for a machine that has one.
+ *
+ * **Gotchas**
+ *
+ * This exists in types only. Nothing constructs it, and it is not provided as a
+ * service.
+ *
+ * @category utility types
+ * @since 0.48.0
+ */
+export interface InvocationSupport<out Kind extends InvocationSupport.Kind> {
+  readonly [InvocationSupportTypeId]: Kind
+}
+
+/**
+ * Namespace containing type-level members associated with
+ * {@link InvocationSupport}.
+ *
+ * @category utility types
+ * @since 0.48.0
+ */
+export declare namespace InvocationSupport {
+  /**
+   * Kinds of invocation that a host may not support.
+   *
+   * @category models
+   * @since 0.48.0
+   */
+  export type Kind = "Stream" | "Logic" | "Child"
+}
 
 /**
  * Minimal typed target accepted by inter-machine send commands.
@@ -1205,7 +1259,8 @@ export interface MachineRef<out State, in Event, out Error = never, out Output =
  *
  * Logic describes a process by what it needs from a host: the capabilities of
  * `Logic.Scope` and `Logic.Context`. `LocalMachine` runs it as a process owned by
- * the machine. `ClusterMachine` rejects a machine that invokes it.
+ * the machine. `ClusterMachine.make` does not compile for a machine that invokes
+ * it.
  *
  * @category models
  * @since 0.4.0
@@ -1461,14 +1516,19 @@ export declare namespace ChildMachine {
     : never
 
   /**
-   * Services needed to initialize a spawned child machine, without those its host
-   * provides to every machine it runs.
+   * Services needed to initialize a spawned child machine, without
+   * {@link MachineRuntime} and {@link InvocationSupport}.
+   *
+   * **Details**
+   *
+   * The process that spawns the child already runs on a host that spawns, and such
+   * a host runs a child whatever that invokes.
    *
    * @category utility types
    * @since 0.20.0
    */
   export type StartRequirements<Child extends Any> = Child extends ChildMachine<string, infer M> ?
-    Exclude<Machine.Services<M>, MachineRuntime | Scope.Scope>
+    Exclude<Machine.Services<M>, MachineRuntime | InvocationSupport<InvocationSupport.Kind> | Scope.Scope>
     : never
 
   /**
@@ -1779,7 +1839,13 @@ export declare namespace Machine {
   export type Error<M extends Any> = M[typeof MachineTypeId]["error"]
 
   /**
-   * Extracts runtime service requirements carried by a machine definition.
+   * Extracts what a machine definition requires of the host that runs it.
+   *
+   * **Details**
+   *
+   * The requirements are the services of the work its states invoke,
+   * {@link MachineRuntime} when that work uses it, and one
+   * {@link InvocationSupport} for each invoked kind that not every host runs.
    *
    * @category utility types
    * @since 0.4.0
@@ -4040,7 +4106,7 @@ export declare namespace Machine {
       Snapshot<States<M>>,
       EventInput<InputEvent<M>>,
       Error<M> | InfiniteTransitionError | MachineSchemaDecodeError | StoppedError,
-      Exclude<Services<M>, MachineRuntime>,
+      Services<M>,
       Output<M>,
       | Error<M>
       | InfiniteTransitionError
@@ -4142,15 +4208,27 @@ export declare namespace Machine {
     :
       | InvokeCollisionError<InvokeReturn<Config>>
       | InvokeInitialError<InvokeReturn<Config>>
+  type InvokeSupport<Invoke> = IsAny<Invoke> extends true ? never
+    : Invoke extends { readonly stream: unknown } ? InvocationSupport<"Stream">
+    : Invoke extends { readonly logic: unknown } ? InvocationSupport<"Logic">
+    : Invoke extends { readonly child: unknown } ? InvocationSupport<"Child">
+    : never
   /**
-   * Extracts the parent service requirement contribution from invoked children.
+   * Extracts the requirements that the invocations of a state handler config add
+   * to its machine.
+   *
+   * **Details**
+   *
+   * The contribution contains the services of every invoked source, and one
+   * {@link InvocationSupport} for each invoked kind that not every host runs. An
+   * invoked child machine contributes all the requirements of its machine.
    *
    * @category utility types
    * @since 0.4.0
    */
   export type InvokeRequirements<Config> = [InvokeReturn<Config>] extends [never] ? never
     :
-      | MachineRuntime
+      | InvokeSupport<InvokeReturn<Config>>
       | InvokeServices<InvokeReturn<Config>>
   /**
    * Extracts all service requirements contributed by a state handler config.

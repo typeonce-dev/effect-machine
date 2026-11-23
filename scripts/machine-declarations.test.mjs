@@ -9,7 +9,7 @@ import ts from "typescript"
 const projectRoot = path.resolve(import.meta.dirname, "../packages/effect-machine")
 const virtualFile = path.join(projectRoot, "machine-declarations.fixture.ts")
 const source = `
-import { Effect, Schema } from "effect"
+import { Effect, Schema, Stream } from "effect"
 import { Machine } from "./src/index.js"
 
 const Root = Machine.state({ fields: { count: Schema.Number } })
@@ -71,6 +71,27 @@ export const Loader = Machine.make({
     Loaded: {}
   }
 })
+const Address = Machine.childAddress("worker")
+export const Local = Machine.make({
+  root: Machine.state({ states: { Idle: {} } }),
+  events: Machine.events({}),
+  effects: { stop: Machine.stopChild(Address) },
+  streams: { ticks: Stream.make(1) },
+  logic: { worker: Machine.logic({ initial: Effect.succeed(0), run: () => Effect.succeed(1) }) },
+  children: { editor: EditorChild }
+}).handle({
+  initial: { target: "Idle" },
+  states: {
+    Idle: {
+      invoke: [
+        { src: "stop", onDone: { stay: true } },
+        { src: "ticks", onElement: { stay: true }, onDone: { stay: true } },
+        { src: "worker", id: "worker", address: Address, onDone: { stay: true } },
+        { src: "editor", onDone: { stay: true } }
+      ]
+    }
+  }
+})
 `
 const config = ts.readConfigFile(path.join(projectRoot, "tsconfig.json"), ts.sys.readFile)
 const parsed = ts.parseJsonConfigFileContent(config.config, ts.sys, projectRoot)
@@ -115,7 +136,8 @@ for (const [name, prefix] of [
   ["Editor", "Machine.Machine<"],
   ["EditorChild", "Machine.ChildMachine<"],
   ["EditorChildren", "Machine.ChildMachine.Family<"],
-  ["Loader", "Machine.Machine<"]
+  ["Loader", "Machine.Machine<"],
+  ["Local", "Machine.Machine<"]
 ]) {
   test(`declares ${name} by its schemas and outcomes, without the handler config`, () => {
     const type = declared.get(name)
@@ -124,6 +146,17 @@ for (const [name, prefix] of [
     assert.ok(!type.includes("=>"), `expected no handler in the declaration of ${name}:\n${type.slice(0, 1200)}`)
   })
 }
+
+test("declares the capabilities a machine requires of its host, and no others", () => {
+  const capabilities = (name) => declared.get(name).match(/Machine\.(?:MachineRuntime|InvocationSupport<"\w+">)/g)?.sort()
+  assert.deepEqual(capabilities("Loader"), undefined)
+  assert.deepEqual(capabilities("Local"), [
+    `Machine.InvocationSupport<"Child">`,
+    `Machine.InvocationSupport<"Logic">`,
+    `Machine.InvocationSupport<"Stream">`,
+    "Machine.MachineRuntime"
+  ])
+})
 
 test("keeps the README counter's declaration small", () => {
   // The counter's declaration is about 550 bytes; printing its handler config tripled it.

@@ -133,7 +133,7 @@ export const make = <
     InputEvents,
     ParentEvents
   >,
-  | Exclude<R, Machine.MachineRuntime>
+  | R
   | Machine.Machine.SnapshotDecodingServices<States>
   | Machine.Machine.SnapshotEncodingServices<States>
 > => {
@@ -151,7 +151,7 @@ export const make = <
     InputEvents
   >
   type Services =
-    | Exclude<R, Machine.MachineRuntime>
+    | R
     | Machine.Machine.SnapshotDecodingServices<States>
     | Machine.Machine.SnapshotEncodingServices<States>
   const eventSchema = Schema.Union(Protocol.inputEventSchemas(machine) as MachineEvents<M>)
