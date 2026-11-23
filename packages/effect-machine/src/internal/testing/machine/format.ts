@@ -56,7 +56,7 @@ export const formatValue = (value: unknown): string => JSON.stringify(canonicali
 const formatConfiguration = (paths: ReadonlyArray<string>): string =>
   `[${paths.map((path) => path === "" ? "(root)" : path).join(", ")}]`
 
-const formatMicrosteps = <M extends AnyMachine>(microsteps: ReadonlyArray<Microstep<M, any>>): Array<string> =>
+const formatMicrosteps = <M extends AnyMachine>(microsteps: ReadonlyArray<Microstep<M>>): Array<string> =>
   microsteps.map((microstep, index) => {
     const transitions = microstep.transitions.map((transition) => ({
       source: transition.source,

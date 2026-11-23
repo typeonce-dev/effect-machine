@@ -262,11 +262,6 @@ const validateStateTree = (
   }
 }
 
-export const validateStateDefinitions = (
-  states: unknown,
-  boundary: StateDefinitionBoundary
-): void => validateStateTree(boundary, states, "", false)
-
 const captureAnnotations = (annotations: unknown): unknown =>
   typeof annotations === "object" && annotations !== null
     ? Object.freeze({ ...annotations })

@@ -8,10 +8,10 @@ import type { EventTransition } from "./transition.js"
 // state, event, error and service relationships are checked by the public builder.
 export type Context = Omit<Machine.InvokeContext<any, any, any, any>, "root">
 interface Outcomes {
-  readonly onDone?: EventTransition<any, any, any, any>
-  readonly onFailure?: EventTransition<any, any, any, any>
-  readonly onElement?: EventTransition<any, any, any, any>
-  readonly onSnapshot?: EventTransition<any, any, any, any>
+  readonly onDone?: EventTransition<any, any>
+  readonly onFailure?: EventTransition<any, any>
+  readonly onElement?: EventTransition<any, any>
+  readonly onSnapshot?: EventTransition<any, any>
 }
 
 export type InvocationDefinition =

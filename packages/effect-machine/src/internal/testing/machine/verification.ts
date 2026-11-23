@@ -464,7 +464,7 @@ export const coverage = <M extends AnyMachine>(
     }
   }
 
-  const observeMicrostep = (microstep: Microstep<M, any>): void => {
+  const observeMicrostep = (microstep: Microstep<M>): void => {
     transitionCoverage.observeMicrostep(microstep)
     microsteps += 1
     if (microstep.changed) changedMicrosteps += 1
@@ -597,7 +597,7 @@ interface SnapshotOccurrence<M extends AnyMachine> {
 
 interface GraphMicrostepDraft<M extends AnyMachine> {
   readonly nextOccurrence: number
-  readonly microstep: Microstep<M, any>
+  readonly microstep: Microstep<M>
 }
 
 type GraphEdgeDraftData<M extends AnyMachine> = ObservedGraphEdge<M> extends infer Edge
@@ -637,7 +637,7 @@ export const observedGraph: <M extends AnyMachine>(
     occurrences.push({ snapshot, role })
     return index
   }
-  const addMicrosteps = (microsteps: ReadonlyArray<Microstep<M, any>>): ReadonlyArray<GraphMicrostepDraft<M>> =>
+  const addMicrosteps = (microsteps: ReadonlyArray<Microstep<M>>): ReadonlyArray<GraphMicrostepDraft<M>> =>
     microsteps.map((microstep) => ({
       nextOccurrence: addOccurrence(microstep.next, "microstep"),
       microstep
@@ -1544,7 +1544,7 @@ export const verify = <M extends AnyMachine>(
     }
 
     const validateMicrostep = (
-      microstep: Microstep<M, any>,
+      microstep: Microstep<M>,
       before: SnapshotInspection,
       after: SnapshotInspection,
       location: VerificationLocation
