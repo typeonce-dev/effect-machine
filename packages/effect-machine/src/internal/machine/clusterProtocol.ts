@@ -13,14 +13,31 @@ export type CommitResult = Public.CommitResult
 
 export const CommitResult = {
   Committed: (): Public.CommitResult.Committed => ({ _tag: "Committed" }),
-  Duplicate: (): Public.CommitResult.Duplicate => ({ _tag: "Duplicate" })
+  Duplicate: (): Public.CommitResult.Duplicate => ({ _tag: "Duplicate" }),
+  RevisionConflict: (): Public.CommitResult.RevisionConflict => ({ _tag: "RevisionConflict" })
 }
 
 export class Storage extends Context.Service<Storage, {
+  /**
+   * Reads the latest checkpoint of an entity, and whether `requestId` was
+   * already committed for it.
+   */
   readonly load: (
     address: EntityAddress,
     requestId: Snowflake
   ) => Effect.Effect<LoadResult, PersistenceError>
+  /**
+   * Replaces the checkpoint of an entity and records `checkpoint.requestId`, in
+   * one atomic decision:
+   *
+   * 1. `Duplicate` when the request id was already committed, whatever the
+   *    revision.
+   * 2. `RevisionConflict` when the stored revision is not exactly
+   *    `checkpoint.revision - 1`, where no stored checkpoint counts as `0`.
+   * 3. `Committed` otherwise, with the checkpoint and the request id stored.
+   *
+   * Only `Committed` writes.
+   */
   readonly commit: (
     address: EntityAddress,
     checkpoint: Checkpoint
@@ -40,6 +57,7 @@ export const RejectionReason = Schema.Literals([
   "TransitionFailure",
   "SnapshotEncodeFailure",
   "PersistenceFailure",
+  "RevisionConflict",
   "EmissionFailure"
 ])
 

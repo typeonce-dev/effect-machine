@@ -8,6 +8,9 @@ describe("ClusterMachine", () => {
   it("preserves the public checkpoint and wire-schema contracts", () => {
     expect(ClusterMachine.CommitResult.Committed()).type.toBe<ClusterMachine.CommitResult.Committed>()
     expect(ClusterMachine.CommitResult.Duplicate()).type.toBe<ClusterMachine.CommitResult.Duplicate>()
+    expect(ClusterMachine.CommitResult.RevisionConflict()).type.toBe<ClusterMachine.CommitResult.RevisionConflict>()
+    expect<ClusterMachine.CommitResult["_tag"]>().type.toBe<"Committed" | "Duplicate" | "RevisionConflict">()
+    expect<ClusterMachine.Checkpoint["revision"]>().type.toBe<number>()
     expect<Schema.Schema.Type<typeof ClusterMachine.SendResult>>().type.toBe<
       ClusterMachine.Accepted | ClusterMachine.Rejected
     >()
@@ -19,6 +22,7 @@ describe("ClusterMachine", () => {
       | "TransitionFailure"
       | "SnapshotEncodeFailure"
       | "PersistenceFailure"
+      | "RevisionConflict"
       | "EmissionFailure"
     >()
   })
