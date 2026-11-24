@@ -5236,7 +5236,10 @@ export declare namespace Machine {
       /** Maps the owning state context to the registered source input. */
       readonly input?: never
     }
-  type ResolvedInvoke<R, K extends PropertyKey> = SourceKind<R, K> extends "effects" ?
+  // Distributes over the source names, so a state that picks its work by a
+  // condition keeps the requirements and outcomes of every name it can pick.
+  type ResolvedInvoke<R, K extends PropertyKey> = K extends PropertyKey ? ResolvedSource<R, K> : never
+  type ResolvedSource<R, K extends PropertyKey> = SourceKind<R, K> extends "effects" ?
     { readonly effect: () => InvokeResolvedSource<SourceValue<R, K>> }
     : SourceKind<R, K> extends "streams" ? { readonly stream: () => InvokeResolvedSource<SourceValue<R, K>> }
     : SourceKind<R, K> extends "timers" ? { readonly after: Duration.Input }
