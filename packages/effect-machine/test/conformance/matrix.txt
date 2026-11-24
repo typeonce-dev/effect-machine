@@ -1,0 +1,96 @@
+scenario                                                                                    | LocalMachine (generic) | LocalMachine (compiled) | AtomMachine | ClusterMachine               | planner only
+settles in its initial state before any event                                               | runs                   | runs                    | runs        | differs                      | runs
+starts from its input                                                                       | runs                   | runs                    | runs        | runs                         | runs
+moves between states and carries their data                                                 | runs                   | runs                    | runs        | runs                         | runs
+takes an event that a constructor of its protocol built                                     | runs                   | runs                    | runs        | OPEN                         | runs
+takes an event that no active state handles, and does nothing                               | runs                   | runs                    | runs        | runs                         | runs
+offers an event that a guard or a branch declines to the ancestor                           | runs                   | runs                    | runs        | runs                         | runs
+updates retained state, and exits and enters only what it is told to                        | runs                   | runs                    | runs        | runs                         | runs
+enters a compound state from its root and leaves it from its leaf                           | runs                   | runs                    | runs        | runs                         | runs
+handles an event in two regions as one step, unless a child stays                           | runs                   | runs                    | runs        | runs                         | runs
+lets the first of two regions win what both change                                          | runs                   | runs                    | runs        | runs                         | runs
+returns to what shallow and deep history remember                                           | runs                   | runs                    | runs        | runs                         | runs
+routes through choices without settling in one                                              | runs                   | runs                    | runs        | runs                         | runs
+settles after the eventless and completion transitions of a step                            | runs                   | runs                    | runs        | runs                         | runs
+plans raised events in the step that raises them, in order                                  | runs                   | runs                    | runs        | runs                         | runs
+emits the events of every kind of transition, in order                                      | runs                   | runs                    | runs        | runs                         | runs
+ends in a final state with its output, and takes no event after it                          | runs                   | runs                    | runs        | differs                      | runs
+ends at once when its initial state is final                                                | runs                   | runs                    | runs        | differs                      | runs
+refuses the payload of an event that its schema refuses                                     | runs                   | runs                    | runs        | OPEN                         | runs
+a transition throws                                                                         | runs                   | runs                    | runs        | differs                      | runs
+a step never settles                                                                        | runs                   | runs                    | runs        | differs                      | runs
+a transition leads to a state that its schema refuses                                       | runs                   | runs                    | runs        | differs                      | runs
+a transition emits an event that its schema refuses                                         | runs                   | runs                    | runs        | differs                      | runs
+cannot settle in its initial state                                                          | runs                   | runs                    | runs        | differs                      | runs
+handles the events of one sender in the order they were sent                                | runs                   | runs                    | runs        | runs                         | runs
+carries class instances and transformed fields in events and states                         | runs                   | runs                    | runs        | runs                         | runs
+names itself to its transitions and to its work                                             | runs                   | runs                    | runs        | runs                         | runs
+takes the event that its own command sends to it, in a later step                           | runs                   | runs                    | runs        | skipped: Commands            | skipped: Commands
+routes the output of an effect through onDone                                               | runs                   | runs                    | runs        | runs                         | runs
+routes the typed failure of an effect through onFailure                                     | runs                   | runs                    | runs        | runs                         | runs
+does not restart the work of a state that stays active                                      | runs                   | runs                    | runs        | runs                         | runs
+stops the work of a state it leaves, and starts it anew when it returns                     | runs                   | runs                    | runs        | runs                         | runs
+ignores a result that ends the work of a state while it is left                             | runs                   | runs                    | runs        | runs                         | runs
+ignores a typed failure that ends the work of a state while it is left                      | runs                   | runs                    | runs        | runs                         | runs
+ignores a defect that ends the work of a state while it is left                             | runs                   | runs                    | runs        | runs                         | runs
+fails after a typed failure without onFailure                                               | runs                   | runs                    | runs        | runs                         | runs
+fails after a defect of its work                                                            | runs                   | runs                    | runs        | runs                         | runs
+fails after an interruption of its work                                                     | runs                   | runs                    | runs        | runs                         | runs
+fails after an output without onDone                                                        | runs                   | runs                    | runs        | runs                         | runs
+fails when the result of work cannot be applied                                             | runs                   | runs                    | runs        | runs                         | runs
+fails when work cannot start, in the state that owns it                                     | runs                   | runs                    | runs        | runs                         | runs
+starts the invocations of a state in their order, and ends them on their own                | runs                   | runs                    | runs        | runs                         | runs
+runs the work of parallel regions on their own, from the outside in                         | runs                   | runs                    | runs        | runs                         | runs
+handles the end of work that does not suspend in a later step                               | runs                   | runs                    | runs        | runs                         | runs
+starts no work for a state it only passes through                                           | runs                   | runs                    | runs        | runs                         | runs
+maps the input of work from the state and the event that entered it                         | runs                   | runs                    | runs        | runs                         | runs
+stops and starts the work of every level that a step exits and enters                       | runs                   | runs                    | runs        | runs                         | runs
+stops all work when it ends, also that of states that stay active                           | runs                   | runs                    | runs        | differs                      | runs
+retries work through a choice, and finishes with its output                                 | runs                   | runs                    | runs        | runs                         | runs
+emits and raises events from the outcome of work                                            | runs                   | runs                    | runs        | runs                         | runs
+starts the work of its initial state before any event                                       | runs                   | runs                    | runs        | differs                      | runs
+takes the events that its own work sends to it                                              | runs                   | runs                    | runs        | differs                      | runs
+lets the first of two ends that come together win                                           | runs                   | runs                    | runs        | runs                         | runs
+prefers the typed failure of work that also dies                                            | runs                   | runs                    | runs        | runs                         | runs
+closes the scope of work with its end, and with its stop                                    | OPEN                   | OPEN                    | OPEN        | runs                         | runs
+maps the input of work that the outcome of other work starts                                | runs                   | runs                    | runs        | runs                         | runs
+starts work in the order in which one step enters states                                    | runs                   | runs                    | runs        | runs                         | runs
+has released the work of the states it leaves before it starts that of the states it enters | runs                   | runs                    | runs        | runs                         | runs
+fires a timer at its duration, which its state parameterizes                                | runs                   | runs                    | runs        | runs                         | skipped: Timer
+cancels a timer when its state is left                                                      | runs                   | runs                    | runs        | runs                         | skipped: Timer
+starts a timer over when its state is entered again                                         | runs                   | runs                    | runs        | runs                         | skipped: Timer
+fires a timer without a duration, after the state that owns it                              | runs                   | runs                    | runs        | runs                         | skipped: Timer
+stops the effect next to a timer that fires first                                           | runs                   | runs                    | runs        | runs                         | skipped: Timer
+cancels the timer next to an effect that ends first                                         | runs                   | runs                    | runs        | runs                         | skipped: Timer
+keeps a timer that waits when the effect next to it ends and stays                          | runs                   | runs                    | runs        | runs                         | skipped: Timer
+fires the timers of two regions at their own times, and in order when they are due together | runs                   | runs                    | runs        | runs                         | skipped: Timer
+fires a timer that stays once, until its state is entered again                             | runs                   | runs                    | runs        | runs                         | skipped: Timer
+fires again and again in a state that its completion enters again                           | runs                   | runs                    | runs        | runs                         | skipped: Timer
+fails when the completion of a timer cannot be applied                                      | runs                   | runs                    | runs        | runs                         | skipped: Timer
+fails when the duration of a timer throws, in the state that owns it                        | runs                   | runs                    | runs        | runs                         | skipped: Timer
+evaluates a duration in order with the other invocations of its state                       | runs                   | runs                    | runs        | differs                      | skipped: Timer
+never fires a timer of infinite duration                                                    | runs                   | runs                    | runs        | runs                         | skipped: Timer
+counts the timer of its initial state from its start                                        | runs                   | runs                    | runs        | differs                      | skipped: Timer
+restarts while work runs                                                                    | runs                   | runs                    | runs        | runs                         | skipped: Restart
+restarts while a timer waits                                                                | runs                   | runs                    | runs        | differs                      | skipped: Timer, Restart
+restarts after a timer fell due                                                             | runs                   | runs                    | runs        | differs                      | skipped: Timer, Restart
+restarts in a state whose work has ended                                                    | runs                   | runs                    | runs        | differs                      | skipped: Restart
+restarts while the work of regions runs                                                     | runs                   | runs                    | runs        | runs                         | skipped: Restart
+restarts with a history to return to                                                        | runs                   | runs                    | runs        | runs                         | skipped: Restart
+restarts after it ended                                                                     | runs                   | runs                    | runs        | differs                      | skipped: Restart
+restarts after it failed                                                                    | runs                   | runs                    | runs        | differs                      | skipped: Restart
+restarts with decoded values                                                                | runs                   | runs                    | runs        | runs                         | skipped: Restart
+restarts after one of two regions completed                                                 | runs                   | runs                    | runs        | runs                         | skipped: Restart
+restarts in a state whose work ends at once                                                 | runs                   | runs                    | runs        | runs                         | skipped: Restart
+handles the elements of a stream one by one, and its end                                    | runs                   | runs                    | runs        | skipped: Stream              | skipped: Stream
+handles a stream that produces everything at once                                           | runs                   | runs                    | runs        | skipped: Stream              | skipped: Stream
+pulls the next element of a stream once it has handled the one before                       | runs                   | runs                    | runs        | skipped: Stream              | skipped: Stream
+stops a stream when its state is left, and takes no element of it after that                | runs                   | runs                    | runs        | skipped: Stream              | skipped: Stream
+fails after a defect of a stream                                                            | runs                   | runs                    | runs        | skipped: Stream              | skipped: Stream
+routes the snapshots and the output of process logic, and drops those of an earlier run     | runs                   | runs                    | runs        | skipped: Logic, Commands     | skipped: Logic, Commands
+runs an invoked child machine, which reports to it and ends with an output                  | runs                   | runs                    | runs        | skipped: Child, Commands     | skipped: Child, Commands
+fails with an invoked child machine that fails                                              | runs                   | runs                    | runs        | skipped: Child, Commands     | skipped: Child, Commands
+owns the children its work spawns, until it stops them or ends                              | runs                   | runs                    | runs        | skipped: OwnedChildren       | skipped: OwnedChildren
+stops the children its work spawned when its owner stops it                                 | runs                   | runs                    | runs        | skipped: OwnedChildren, Stop | skipped: OwnedChildren, Stop
+spawns process logic from its work, and stops it by its address                             | runs                   | runs                    | runs        | skipped: OwnedChildren       | skipped: OwnedChildren
+stops its work and takes no more events when its owner stops it                             | runs                   | runs                    | runs        | skipped: Stop                | skipped: Stop

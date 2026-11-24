@@ -1,108 +1,10 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Duration, Effect, Exit, Schema, Stream } from "effect"
 import { Machine } from "../../../src/index.js"
-import * as Configuration from "../../../src/internal/machine/configuration.js"
 import * as InvocationChanges from "../../../src/internal/machine/invocationChanges.js"
-import type * as InvocationEvent from "../../../src/internal/machine/invocationEvent.js"
-import { InvocationGenerations } from "../../../src/internal/machine/invocationGeneration.js"
 import * as InvocationOutcome from "../../../src/internal/machine/invocationOutcome.js"
-import * as InvocationResolution from "../../../src/internal/machine/invocationResolution.js"
-import * as Planner from "../../../src/internal/machine/planner.js"
-
-/** One invocation a host has to run, with the generation of its group. */
-interface Started {
-  readonly invocation: InvocationResolution.ResolvedInvocation
-  readonly generation: InvocationEvent.Generation
-}
-
-const refused = new Error("This host owns no children")
-
-/**
- * A host without a runtime. It plans events, keeps generations, and lists the
- * invocations to run, which each test runs and settles in its own order.
- */
-class PlannedHost {
-  readonly generations = new InvocationGenerations()
-  readonly sent: Array<unknown> = []
-  readonly self: Machine.MachineTarget<any> = {
-    id: "planned-host",
-    sessionId: "planned-host:1",
-    send: (event) => Effect.sync(() => void this.sent.push(event))
-  }
-  readonly children: Machine.ChildOwner<any> = {
-    spawn: () => Effect.die(refused),
-    sendTo: () => Effect.die(refused),
-    stop: () => Effect.die(refused)
-  }
-  readonly started: ReadonlyArray<Started>
-  private configuration: Configuration.ActiveConfiguration
-
-  constructor(private readonly machine: Machine.Machine.Any) {
-    const planned = Planner.planInitialSync(machine)
-    this.configuration = Configuration.normalizeConfigurationSync(machine, planned.state)
-    this.started = this.start(
-      Configuration.getInitialEntryPaths(machine, this.configuration),
-      Planner.InitialEvent
-    )
-  }
-
-  get leaves(): ReadonlyArray<string> {
-    return Configuration.getActiveLeafPaths(this.machine, this.configuration)
-  }
-
-  value(path: string): unknown {
-    return this.configuration.values.get(path)
-  }
-
-  resolve(
-    paths: ReadonlyArray<string>,
-    event: Machine.Machine.LifecycleEvent<any>
-  ): ReadonlyArray<InvocationResolution.InvocationGroup> {
-    return InvocationResolution.resolve(this.machine, this.configuration, paths, event, {
-      self: this.self,
-      parent: undefined,
-      children: this.children
-    })
-  }
-
-  private start(
-    paths: ReadonlyArray<string>,
-    event: Machine.Machine.LifecycleEvent<any>
-  ): ReadonlyArray<Started> {
-    return this.resolve(paths, event).flatMap((group) => {
-      const generation = this.generations.beginGeneration(group.path)
-      return group.invocations.map((invocation) => ({ invocation, generation }))
-    })
-  }
-
-  /** Plans one event and returns the invocations it starts. */
-  send(event: object): ReadonlyArray<Started> {
-    const planned = Planner.planConfiguration(this.machine, this.configuration, event)
-    this.configuration = planned.next
-    const changes = InvocationChanges.fromMicrosteps(planned.microsteps)
-    this.generations.retireGenerations(changes?.exited ?? [])
-    if (planned.done) {
-      this.generations.retireAllGenerations()
-      return []
-    }
-    return Array.from(changes?.entered ?? []).flatMap(([path, event]) => this.start([path], event))
-  }
-
-  /** Performs a decision and returns the invocations it starts. */
-  perform(decision: InvocationOutcome.Decision): ReadonlyArray<Started> {
-    switch (decision._tag) {
-      case "Deliver":
-        return this.send(decision.event)
-      case "Fail":
-        throw new Error("The host failed its machine", { cause: decision.cause })
-      case "Ignore":
-        return []
-    }
-  }
-}
-
-const decide = (started: Started, outcome: InvocationOutcome.Outcome): InvocationOutcome.Decision =>
-  InvocationOutcome.decide(started.invocation, started.generation, outcome)
+import type * as InvocationResolution from "../../../src/internal/machine/invocationResolution.js"
+import { decide, PlannedHost, type Started } from "./support/plannedHost.js"
 
 const only = (started: ReadonlyArray<Started>): Started => {
   assert.strictEqual(started.length, 1)
@@ -188,15 +90,6 @@ describe("a host that is not the local runtime", () => {
       assert.deepStrictEqual(host.leaves, ["Loaded"])
       assert.deepStrictEqual(host.value("Loaded"), { _tag: "Loaded", result: "document a" })
       assert.isFalse(loading.generation.current)
-    }))
-
-  it.effect("routes a typed failure through onFailure", () =>
-    Effect.gen(function*() {
-      const host = new PlannedHost(loader)
-      const loading = only(host.send(Events.Load({ id: "missing" })))
-      host.perform(decide(loading, yield* runEffect(loading)))
-      assert.deepStrictEqual(host.leaves, ["Failed"])
-      assert.deepStrictEqual(host.value("Failed"), { _tag: "Failed", reason: "not found" })
     }))
 
   it("reads a timer's duration as data and completes it without sleeping", () => {
