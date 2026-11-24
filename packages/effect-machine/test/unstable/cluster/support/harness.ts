@@ -2,7 +2,7 @@
  * Runs Cluster machines in memory, over storages a test can read, break, and
  * hand to another runner.
  */
-import { Context, type Duration, Effect, Exit, Layer, Option, Scope } from "effect"
+import { Context, Duration, Effect, Exit, Layer, Option, Scope } from "effect"
 import {
   ClusterError,
   MessageStorage,
@@ -14,6 +14,7 @@ import {
   type Snowflake
 } from "effect/cluster"
 import { TestClock } from "effect/testing"
+import { DurableClock } from "effect/workflow"
 import type { Machine } from "../../../../src/index.js"
 import { ClusterMachine } from "../../../../src/unstable/cluster/index.js"
 
@@ -169,12 +170,23 @@ export const config = (entityMaxIdleTime: Duration.Input = "10 minutes") =>
     refreshAssignmentsInterval: 0
   })
 
+/**
+ * Sets the longest timer that waits in memory, which `ClusterMachine` reads
+ * from `DurableClock` as a workflow does. A longer one is woken by a delayed
+ * message instead.
+ */
+export const threshold = (duration: Duration.Input | undefined) =>
+  duration === undefined
+    ? Layer.empty
+    : Layer.succeed(DurableClock.InMemoryThreshold, Duration.fromInputUnsafe(duration))
+
 export const makeLayer = (
   bridge: ClusterMachine.ClusterMachine<any, any, never>,
   storage: ClusterMachine.Storage["Service"],
   enqueue?: (event: any) => Effect.Effect<void, unknown>,
   entityMaxIdleTime?: Duration.Input,
-  overrides?: Partial<MessageStorage.MessageStorage["Service"]>
+  overrides?: Partial<MessageStorage.MessageStorage["Service"]>,
+  inMemoryThreshold?: Duration.Input
 ) => {
   const messageStorageLayer = overrides === undefined ?
     MessageStorage.layerMemory :
@@ -187,6 +199,7 @@ export const makeLayer = (
         }))
     ).pipe(Layer.provideMerge(MessageStorage.MemoryDriver.layer))
   return bridge.toLayer(enqueue === undefined ? undefined : { enqueue }).pipe(
+    Layer.provide(threshold(inMemoryThreshold)),
     Layer.provide(Layer.succeed(ClusterMachine.Storage, storage)),
     Layer.provideMerge(Sharding.layer),
     Layer.provide(Runners.layerNoop),
@@ -229,6 +242,7 @@ export const startRunner = Effect.fnUntraced(function*(
     readonly idle?: Duration.Input
     readonly overrides?: Partial<MessageStorage.MessageStorage["Service"]>
     readonly runnerStorage?: Layer.Layer<RunnerStorage.RunnerStorage>
+    readonly inMemoryThreshold?: Duration.Input
   } = {}
 ) {
   const bridge = adapt("Worker", machine, ...options.input ?? [])
@@ -236,6 +250,7 @@ export const startRunner = Effect.fnUntraced(function*(
   yield* TestClock.adjust("1 second")
   const scope = yield* Scope.fork(yield* Effect.scope)
   const context = yield* bridge.toLayer(options.enqueue === undefined ? undefined : { enqueue: options.enqueue }).pipe(
+    Layer.provide(threshold(options.inMemoryThreshold)),
     Layer.provide(Layer.succeed(ClusterMachine.Storage, storage.service)),
     Layer.provideMerge(Sharding.layer),
     Layer.provide(Runners.layerNoop),

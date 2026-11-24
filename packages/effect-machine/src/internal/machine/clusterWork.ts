@@ -151,6 +151,14 @@ export class ClusterWork<R> {
     return this.running.size > 0
   }
 
+  /** Whether some work whose outcome is still expected is not left out. */
+  pendingExcept(leftOut: (work: Work) => boolean): boolean {
+    for (const works of this.running.values()) {
+      if (works.some((work) => !leftOut(work))) return true
+    }
+    return false
+  }
+
   /** Forks an effect that ends with this work. */
   fork(effect: Effect.Effect<void, never, R>): Effect.Effect<Fiber.Fiber<void>> {
     return Effect.forkIn(Effect.setContext(effect, this.options.context), this.scope, { startImmediately: true })

@@ -7,8 +7,9 @@ import * as Cause from "effect/Cause"
 import * as Clock from "effect/Clock"
 import type { EntityAddress, MessageStorage, Snowflake } from "effect/cluster"
 import * as Data from "effect/Data"
+import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
-import type * as Exit from "effect/Exit"
+import * as Exit from "effect/Exit"
 import * as Option from "effect/Option"
 import * as Predicate from "effect/Predicate"
 import type * as Scope from "effect/Scope"
@@ -103,6 +104,12 @@ export interface ClusterInstance<R> {
    * that `Storage` does not hold.
    */
   readonly apply: (input: Input) => Effect.Effect<SendResult, never, R>
+
+  /**
+   * Answers the delayed message of a timer once the timer is no longer waiting
+   * for that due time, which ignores a message whose activation has ended.
+   */
+  readonly wake: (timer: Timer) => Effect.Effect<void, never, R>
 }
 
 /** @internal */
@@ -118,6 +125,21 @@ export interface Options<R> {
   readonly enqueue: ((event: any) => Effect.Effect<void, unknown, R>) | undefined
   /** `Entity.keepAlive` for the entity of the instance. */
   readonly keepAlive: (enabled: boolean) => Effect.Effect<void>
+  /**
+   * Saves the delayed message that wakes the entity for a timer that waits
+   * longer than `threshold` milliseconds. Inside a transaction of
+   * `MessageStorage` it joins that transaction, and saving one that is already
+   * saved does nothing.
+   */
+  readonly wake: {
+    readonly threshold: number
+    readonly save: (timer: Timer) => Effect.Effect<void, unknown>
+  }
+}
+
+/** A timer that waits, as its delayed message names it. */
+export interface Timer extends Checkpoint.InvocationKey {
+  readonly dueAt: number
 }
 
 /** What `Storage` holds at one stored revision. */
@@ -153,6 +175,9 @@ interface StoredStep {
 
   /** Timers of the state it led to that could not be given a due time. */
   readonly unscheduled: ReadonlyArray<ClusterTimer.Unscheduled>
+
+  /** Timers whose delayed messages the step saved. */
+  readonly woken: ReadonlyArray<Timer>
 }
 
 /** What a step leaves behind once the transaction around it has succeeded. */
@@ -265,6 +290,9 @@ export const readStatus = (status: unknown): ReadStatus | undefined => {
 
 const absent: Memory = { _tag: "Absent", revision: 0 }
 
+const progressOf = (memory: Memory): ClusterProgress.Progress =>
+  memory._tag === "Active" ? memory.progress : ClusterProgress.empty
+
 const accepted = new Accepted({})
 
 /** @internal */
@@ -290,10 +318,70 @@ export const make = <R>(options: Options<R>): Effect.Effect<ClusterInstance<R>, 
     })
     const keepAlive = new ClusterKeepAlive(options.keepAlive)
 
+    // The timers whose delayed messages are saved, by key, with their due time.
+    // Such a timer does not keep the entity alive: its message brings the entity
+    // back when it is due, here or on another runner.
+    const wakes = new Map<string, number>()
+    const timerKey = ({ id, path }: Checkpoint.InvocationKey): string => `${path}\u0000${id}`
+
+    // A timer that never ends needs no message, and one that ends soon stays in
+    // memory, as `DurableClock` keeps a short sleep.
+    const waitsLong = (dueAt: number): boolean =>
+      dueAt < ClusterProgress.maxDueAt && dueAt - clock.currentTimeMillisUnsafe() > options.wake.threshold
+
+    // The timers of `after` that wait long for a due time they did not wait for
+    // in `before`.
+    const longWaits = (before: ClusterProgress.Progress, after: ClusterProgress.Progress): Array<Timer> =>
+      ClusterProgress.entries(after).flatMap(([key, progress]): Array<Timer> => {
+        if (progress._tag !== "Waiting" || !waitsLong(progress.dueAt)) return []
+        const previous = ClusterProgress.get(before, key)
+        return previous?._tag === "Waiting" && previous.dueAt === progress.dueAt
+          ? []
+          : [{ path: key.path, id: key.id, dueAt: progress.dueAt }]
+      })
+
+    const saveWakes = (timers: ReadonlyArray<Timer>): Effect.Effect<void, unknown> =>
+      Effect.forEach(timers, options.wake.save, { discard: true })
+
+    const recordWakes = (timers: ReadonlyArray<Timer>): void => {
+      for (const timer of timers) wakes.set(timerKey(timer), timer.dueAt)
+    }
+
+    const waitingFor = (current: Memory | undefined, key: Checkpoint.InvocationKey): number | undefined => {
+      if (current?._tag !== "Active") return undefined
+      const progress = ClusterProgress.get(current.progress, key)
+      return progress?._tag === "Waiting" ? progress.dueAt : undefined
+    }
+
+    // Whether work may run without keeping the entity alive.
+    const released = (current: Memory, running: ClusterWork.Work): boolean => {
+      if (running.invocation._tag !== "Timer") return false
+      const dueAt = waitingFor(current, running.invocation)
+      return dueAt !== undefined &&
+        (dueAt >= ClusterProgress.maxDueAt || wakes.get(timerKey(running.invocation)) === dueAt)
+    }
+
+    // Callers waiting for memory to change, woken at the end of every turn that
+    // changed it.
+    const waiters = new Set<() => void>()
+
     const annotate = Effect.annotateLogs({ module: "ClusterMachine", definitionId, address })
 
     const serialized = <A, E, R1>(run: (restore: Restore) => Effect.Effect<A, E, R1>): Effect.Effect<A, E, R1> =>
-      Effect.uninterruptibleMask(run).pipe(Semaphore.withPermit(semaphore))
+      Effect.uninterruptibleMask((restore) =>
+        Effect.suspend(() => {
+          const before = memory
+          return Effect.ensuring(
+            run(restore),
+            Effect.sync(() => {
+              if (memory === before || waiters.size === 0) return
+              const woken = Array.from(waiters)
+              waiters.clear()
+              for (const wake of woken) wake()
+            })
+          )
+        })
+      ).pipe(Semaphore.withPermit(semaphore))
 
     // Runs one turn. A turn that leaves something unknown hands it to recovery,
     // whatever ended it.
@@ -533,7 +621,13 @@ export const make = <R>(options: Options<R>): Effect.Effect<ClusterInstance<R>, 
               refuse({ memory: undefined, confirm: false, stage: "Infrastructure" })
             )
           }
-          return { memory: next, stored: { base: base.revision, changes: planned.changes, unscheduled } }
+          // In the transaction of the checkpoint, so a stored wait has its message.
+          const woken = longWaits(base._tag === "Active" ? base.progress : ClusterProgress.empty, progressOf(next))
+          yield* saveWakes(woken).pipe(
+            Effect.mapError((error) => reject("PersistenceFailure", String(error))),
+            refuse({ memory: undefined, confirm: false, stage: "Infrastructure" })
+          )
+          return { memory: next, stored: { base: base.revision, changes: planned.changes, unscheduled, woken } }
         }
       }
     })
@@ -680,18 +774,57 @@ export const make = <R>(options: Options<R>): Effect.Effect<ClusterInstance<R>, 
     const align = (restore: Restore, stored: StoredStep | undefined): Effect.Effect<void> =>
       Effect.suspend(() => {
         if (!hostsWork || work.closed || memory === undefined) return Effect.void
+        if (stored !== undefined) recordWakes(stored.woken)
         return Effect.flatMap(
           stored === undefined ? scheduleLoaded(restore, memory) : Effect.succeed(stored.unscheduled),
           (unscheduled) => {
             if (memory === undefined) return Effect.void
             return Effect.flatMap(alignWork(memory, stored, unscheduled), (failure) =>
               failure === undefined
-                // A request is answered after this, so a crash in between redelivers it.
-                ? restore(keepAlive.switchTo(work.pending)).pipe(annotate)
+                ? Effect.andThen(
+                  stored === undefined ? wakeLoaded(restore) : Effect.void,
+                  Effect.suspend(() => {
+                    const current = memory
+                    if (current === undefined) return Effect.void
+                    forgetWakes(current)
+                    // A request is answered after this, so a crash in between redelivers it.
+                    return restore(keepAlive.switchTo(work.pendingExcept((running) => released(current, running))))
+                      .pipe(annotate)
+                  })
+                )
                 : Effect.asVoid(storeFailure(restore, failure.key, renderFailure(failure.cause))))
           }
         )
       })
+
+    // Saves the messages that the long waits of a loaded state may lack, as
+    // they lack them when a deployment before this one stored the wait. A
+    // message that is not saved keeps its timer, and the entity, in memory.
+    const wakeLoaded = (restore: Restore): Effect.Effect<void> =>
+      Effect.suspend(() => {
+        if (memory === undefined) return Effect.void
+        const timers = longWaits(ClusterProgress.empty, progressOf(memory)).filter((timer) =>
+          wakes.get(timerKey(timer)) !== timer.dueAt
+        )
+        return Effect.forEach(timers, (timer) =>
+          restore(options.wake.save(timer)).pipe(
+            Effect.matchCauseEffect({
+              onFailure: (cause) =>
+                Cause.hasInterrupts(cause)
+                  ? propagate(cause)
+                  : Effect.logWarning("Could not save the message that wakes a Cluster machine", cause),
+              onSuccess: () => Effect.sync(() => recordWakes([timer]))
+            })
+          ), { discard: true }).pipe(annotate)
+      })
+
+    // Keeps only the messages of timers that still wait for their due time.
+    const forgetWakes = (current: Memory): void => {
+      for (const [key, dueAt] of wakes) {
+        const [path, id] = key.split("\u0000") as [string, string]
+        if (waitingFor(current, { path, id }) !== dueAt) wakes.delete(key)
+      }
+    }
 
     // Stores the due times that a loaded state lacks, as a checkpoint of its own.
     // Memory is left unknown when that fails.
@@ -708,15 +841,17 @@ export const make = <R>(options: Options<R>): Effect.Effect<ClusterInstance<R>, 
         }
         const { progress, unscheduled } = schedule(loaded.state, loaded.progress, undefined)
         if (progress === loaded.progress) return Effect.succeed(unscheduled)
+        const woken = longWaits(loaded.progress, progress)
         return amend(restore, {
           origin: { _tag: "Timers" },
           status: { _tag: "Active", invocations: ClusterProgress.toStored(progress) }
-        }).pipe(
+        }, woken).pipe(
           Effect.matchCauseEffect({
             onFailure: (cause) => notDone("Could not store the due times of a Cluster machine", cause),
             onSuccess: (revision) =>
               Effect.sync(() => {
                 memory = { ...loaded, revision, progress }
+                recordWakes(woken)
               })
           }),
           annotate,
@@ -757,7 +892,8 @@ export const make = <R>(options: Options<R>): Effect.Effect<ClusterInstance<R>, 
     // is stored.
     const amend = (
       restore: Restore,
-      amended: Pick<Checkpoint, "origin" | "status">
+      amended: Pick<Checkpoint, "origin" | "status">,
+      woken: ReadonlyArray<Timer> = []
     ): Effect.Effect<number, unknown> =>
       Effect.suspend(() => {
         const revision = memory?.revision
@@ -772,6 +908,7 @@ export const make = <R>(options: Options<R>): Effect.Effect<ClusterInstance<R>, 
           if (committed._tag !== "Committed") {
             return yield* new Conflicted()
           }
+          yield* saveWakes(woken)
           return checkpoint.revision
         })))
       })
@@ -862,7 +999,35 @@ export const make = <R>(options: Options<R>): Effect.Effect<ClusterInstance<R>, 
       yield* options.keepAlive(false)
     }
 
+    // One look at a timer, as a turn. `undefined` means nothing is left to wait
+    // for, and a deferred is completed once memory changes.
+    const lookAt = (timer: Timer) =>
+      serialized((restore) =>
+        Effect.andThen(
+          memory === undefined ? reload(restore) : Effect.void,
+          Effect.sync(() => {
+            if (memory !== undefined && waitingFor(memory, timer) !== timer.dueAt) return undefined
+            const changed = Deferred.makeUnsafe<void>()
+            waiters.add(() => Deferred.doneUnsafe(changed, Exit.void))
+            return { changed, known: memory !== undefined }
+          })
+        )
+      )
+
+    const wake = (timer: Timer): Effect.Effect<void, never, R> =>
+      Effect.gen(function*() {
+        while (true) {
+          const waiting = yield* lookAt(timer)
+          if (waiting === undefined) return
+          // A store that cannot be read is read again later.
+          yield* waiting.known
+            ? Deferred.await(waiting.changed)
+            : Effect.raceFirst(Deferred.await(waiting.changed), Effect.sleep("1 second"))
+        }
+      }).pipe(annotate)
+
     return {
+      wake,
       apply: (input) =>
         turn((restore) =>
           attempt(restore, input).pipe(
