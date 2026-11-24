@@ -117,7 +117,7 @@ const cases = {
   ],
   "a machine that Cluster cannot run": [
     `ClusterMachine.make("Local", local, { version: "1" })`,
-    `"~effect/ClusterMachine/UnsupportedProcessLocal": { readonly invocations: "Stream"; readonly capabilities: "MachineRuntime"; }`
+    `"~effect/cluster/ClusterMachine/UnsupportedProcessLocal": { readonly invocations: "Stream"; readonly capabilities: "MachineRuntime"; }`
   ]
 }
 
