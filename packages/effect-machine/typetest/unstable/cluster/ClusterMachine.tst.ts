@@ -453,32 +453,4 @@ describe("ClusterMachine", () => {
     expect(order((enqueue) => enqueue.sendTo(target, { _tag: "Add", amount: "1" }))).type.toRaiseError()
     expect(order((enqueue) => enqueue.stop(target))).type.toRaiseError()
   })
-
-  it("names a Cluster machine as a target that checks the events sent to it", () => {
-    const Ledger = ClusterMachine.make(
-      "Ledger",
-      Machine.make({
-        root: Machine.state({ states: { Open: {} } }),
-        events: Machine.events({ Add: { amount: Schema.Number } })
-      }).handle({ initial: { target: "Open" } }),
-      { version: "1" }
-    )
-    const target = Ledger.target("ledger-1")
-    expect(target).type.toBeAssignableTo<ClusterMachine.Target<{ readonly _tag: "Add"; readonly amount: number }>>()
-    expect(target).type.toBeAssignableTo<Machine.MachineTarget<{ readonly _tag: "Add"; readonly amount: number }>>()
-    expect<Machine.MachineTarget<unknown>>().type.not.toBeAssignableTo<ClusterMachine.Target<unknown>>()
-
-    const order = (commands: (enqueue: Machine.Enqueue<any, never>) => void) =>
-      Machine.make({
-        root: Machine.state({ states: { Open: {}, Paid: {} } }),
-        events: Machine.events({ Pay: {} })
-      }).handle({
-        initial: { target: "Open" },
-        states: { Open: { on: { Pay: { target: "Paid", commands: (_, enqueue) => commands(enqueue) } } }, Paid: {} }
-      })
-    expect(order((enqueue) => enqueue.sendTo(target, { _tag: "Add", amount: 1 }))).type.not.toRaiseError()
-    expect(order((enqueue) => enqueue.sendTo(target, { _tag: "Remove", amount: 1 }))).type.toRaiseError()
-    expect(order((enqueue) => enqueue.sendTo(target, { _tag: "Add", amount: "1" }))).type.toRaiseError()
-    expect(order((enqueue) => enqueue.stop(target))).type.toRaiseError()
-  })
 })
