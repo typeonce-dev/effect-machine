@@ -944,8 +944,14 @@ const outcomeInput: Scenario = {
   start,
   steps: [
     send({ _tag: "Go" }, { happens: [{ First: {} }, started("first")] }),
-    succeed("first", "done", { happens: [{ Second: {} }, started("second", "x")], log: ["second by outcome"] }),
-    fail("second", "no", { happens: [{ Third: {} }, started("third", "y")], log: ["third by outcome"] })
+    succeed("first", "done", {
+      happens: [{ Second: {} }, started("second", "x")],
+      log: ["second by Done of First/first"]
+    }),
+    fail("second", "no", {
+      happens: [{ Third: {} }, started("third", "y")],
+      log: ["third by Failure of Second/second"]
+    })
   ]
 }
 

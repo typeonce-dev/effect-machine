@@ -3374,9 +3374,13 @@ describe("Machine", () => {
         up: {
           entry: ({ event, state }) => {
             const id: string = state.id
-            expect(event).type.toBe<SignIn | Machine.InitialEvent>()
+            expect(event).type.toBe<SignIn | Machine.InitialEvent | Machine.InvocationEvent>()
             if (Machine.isInitialEvent(event)) {
               expect(event._tag).type.toBe<typeof Machine.InitialEventTypeId>()
+            } else if (Machine.isInvocationEvent(event)) {
+              expect(event._tag).type.toBe<typeof Machine.InvocationEventTypeId>()
+              expect(event.kind).type.toBe<"Done" | "Failure" | "Element" | "Snapshot">()
+              expect(event).type.not.toHaveProperty("output")
             } else {
               expect(event.userId).type.toBe<string>()
             }
@@ -3385,7 +3389,7 @@ describe("Machine", () => {
           always: {
             stay: true,
             commands: ({ event }) => {
-              expect(event).type.toBe<SignIn | Machine.InitialEvent>()
+              expect(event).type.toBe<SignIn | Machine.InitialEvent | Machine.InvocationEvent>()
               return undefined
             }
           },
@@ -3464,7 +3468,7 @@ describe("Machine", () => {
               onDone: {
                 branches: [{ target: "down" }],
                 resolve: ({ event, output, state, select }) => {
-                  expect(event).type.toBe<SignIn | Machine.InitialEvent>()
+                  expect(event).type.toBe<SignIn | Machine.InitialEvent | Machine.InvocationEvent>()
                   expect(output).type.toBe<undefined>()
                   expect(state).type.toBe<Auth>()
                   return select.target("down", { data: new Down({}), decoded: true })
@@ -3622,7 +3626,7 @@ describe("Machine", () => {
       states: {
         down: {
           output: ({ event }) => {
-            expect(event).type.toBe<SignIn | Machine.InitialEvent>()
+            expect(event).type.toBe<SignIn | Machine.InitialEvent | Machine.InvocationEvent>()
           }
         }
       }

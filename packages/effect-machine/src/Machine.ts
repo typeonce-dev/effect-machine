@@ -30,7 +30,7 @@ import type {
   StoppedError
 } from "./internal/machine/machine.js"
 import * as internal from "./internal/machine/machine.js"
-import { InitialEventTypeId } from "./internal/machine/machine.js"
+import { InitialEventTypeId, InvocationEventTypeId } from "./internal/machine/machine.js"
 import type { EnsureExecutable } from "./internal/machine/readiness.js"
 import type * as StateDefinition from "./internal/machine/stateDefinition.js"
 import type * as Topology from "./internal/machine/topology.js"
@@ -113,6 +113,56 @@ export const InitialEvent: InitialEvent = { _tag: InitialEventTypeId }
  * @since 0.4.0
  */
 export const isInitialEvent = (u: unknown): u is InitialEvent => hasProperty(u, "_tag") && u._tag === InitialEventTypeId
+
+/**
+ * Type identifier used for the synthetic event of a step caused by invoked work.
+ *
+ * @category type IDs
+ * @since 0.48.0
+ */
+export { InvocationEventTypeId }
+
+/**
+ * Synthetic event passed to lifecycle callbacks of a step that invoked work
+ * caused: its output, typed failure, stream element, or child snapshot.
+ *
+ * **Details**
+ *
+ * An outcome is not an event of the machine's protocol, so the states that its
+ * transition enters and exits, and the work they start, receive this marker as
+ * their `event`, as they receive `InitialEvent` while the initial state
+ * settles. `path` and `id` name the state that invoked the work and the
+ * invocation, and `kind` names what the work reported. The reported value
+ * itself is available to the transition that handles it, as `output`,
+ * `error`, `element`, or `snapshot`.
+ *
+ * **Gotchas**
+ *
+ * A host that restarts work after a recovery, such as `ClusterMachine`, passes
+ * `InitialEvent` to the input mapper of the restarted work, not this event.
+ *
+ * @category models
+ * @since 0.48.0
+ */
+export interface InvocationEvent {
+  readonly _tag: typeof InvocationEventTypeId
+  /** Path of the state that invoked the work. */
+  readonly path: string
+  /** Id of the invocation within that state. */
+  readonly id: string
+  /** What the work reported. */
+  readonly kind: "Done" | "Failure" | "Element" | "Snapshot"
+}
+
+/**
+ * Returns `true` if a value is the synthetic event of a step caused by invoked
+ * work.
+ *
+ * @category guards
+ * @since 0.48.0
+ */
+export const isInvocationEvent = (u: unknown): u is InvocationEvent =>
+  hasProperty(u, "_tag") && u._tag === InvocationEventTypeId
 
 type IsAny<A> = 0 extends (1 & A) ? true : false
 
@@ -2954,12 +3004,17 @@ export declare namespace Machine {
   export type EmittedEventOf<Emits extends ReadonlyArray<TaggedSchema>> = Emits[number]["Type"]
 
   /**
-   * Event values received by lifecycle callbacks.
+   * Event values received by lifecycle callbacks: a declared event,
+   * `InitialEvent` while the initial state settles, or `InvocationEvent` for a
+   * step caused by invoked work.
    *
    * @category utility types
    * @since 0.4.0
    */
-  export type LifecycleEvent<Events extends ReadonlyArray<TaggedSchema>> = EventOf<Events> | InitialEvent
+  export type LifecycleEvent<Events extends ReadonlyArray<TaggedSchema>> =
+    | EventOf<Events>
+    | InitialEvent
+    | InvocationEvent
 
   /**
    * Extracts a state value from a state definition by identifier.
@@ -3536,7 +3591,7 @@ export declare namespace Machine {
    * value without changing its active descendants.
    *
    * @category models
-   * @since 0.21.0
+   * @since 0.48.0
    */
   export interface StateUpdate<
     States extends StateSchemas,
