@@ -12,6 +12,8 @@ overrides:
   '@effect/platform-browser': 4.1.5
   '@effect/platform-node': 4.1.5
   '@effect/platform-node-shared': 4.1.5
+  '@effect/sql-pglite': 4.1.5
+  '@effect/sql-sqlite-node': 4.1.5
 
 importers:
 
