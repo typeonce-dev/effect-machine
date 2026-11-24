@@ -38,7 +38,7 @@ const editing = {
     // the whole macrostep, including its emission, to have run.
     Pasted: {
       stay: true,
-      commands: ({ event }: { readonly event: Pasted }, enqueue: Machine.Enqueue<Normalized, Published>) => {
+      commands: ({ event }: { readonly event: Pasted }, enqueue: Machine.Commands<Normalized, Published>) => {
         const value = event.value.trim()
         enqueue.raise(new Normalized({ value }))
         enqueue.emit(Emissions.Published({ value }))

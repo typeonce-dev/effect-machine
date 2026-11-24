@@ -515,7 +515,7 @@ class CompiledProcess implements MachineRef<any, any, any, any> {
       ? { status: "stopped", state: latest.snapshot.state }
       : requested._tag === "Done"
       ? { status: "done", state: latest.snapshot.state, output: requested.output }
-      : { status: "error", state: latest.snapshot.state, cause: requested.cause }
+      : { status: "failed", state: latest.snapshot.state, cause: requested.cause }
     this.current = { ...latest, terminalizing: true }
     return snapshot
   }

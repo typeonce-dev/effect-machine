@@ -481,7 +481,7 @@ describe("Static chart", () => {
         ["load-document", "effect"],
         ["document-updates", "stream"],
         ["request-timeout", "timer"],
-        ["status-worker", "process"],
+        ["status-worker", "logic"],
         ["preview-worker", "machine"]
       ])
     )

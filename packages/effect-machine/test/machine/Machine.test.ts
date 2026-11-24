@@ -1058,10 +1058,10 @@ describe("Machine", () => {
         assert.strictEqual(accessorError.event, "Submit")
         assert.isTrue(Cause.isCause(accessorError.cause))
         const actor = yield* LocalMachine.start(machine)
-        const snapshot = yield* sendAndWaitForSnapshot(actor, construction!, (snapshot) => snapshot.status === "error")
+        const snapshot = yield* sendAndWaitForSnapshot(actor, construction!, (snapshot) => snapshot.status === "failed")
         const error = yield* Effect.flip(actor.join)
         assertMachineSchemaDecodeError(error, "event", { event: "Submit" })
-        assert.strictEqual(snapshot.status, "error")
+        assert.strictEqual(snapshot.status, "failed")
       }))
     it.effect("plans inline Effect and timer outcomes", () =>
       Effect.gen(function*() {
@@ -1801,12 +1801,12 @@ describe("Machine", () => {
         const snapshot = yield* sendAndWaitForSnapshot(
           actor,
           unsafeTagged({ _tag: "NonEmptySubmit", value: "" }),
-          (snapshot) => snapshot.status === "error"
+          (snapshot) => snapshot.status === "failed"
         )
         const error = yield* Effect.flip(actor.join)
         assertMachineSchemaDecodeError(error, "event", { event: "NonEmptySubmit" })
-        assert.strictEqual(snapshot.status, "error")
-        if (snapshot.status === "error") {
+        assert.strictEqual(snapshot.status, "failed")
+        if (snapshot.status === "failed") {
           const reason = snapshot.cause.reasons[0]
           assert.ok(reason !== undefined)
           assert.strictEqual(Cause.isFailReason(reason), true)
@@ -1873,10 +1873,10 @@ describe("Machine", () => {
         })
         const actor = yield* LocalMachine.start(machine)
         const snapshot = yield* sendAndWaitForSnapshot(actor, new NonEmptySubmit({ value: "request-1" }), (snapshot) =>
-          snapshot.status === "error")
+          snapshot.status === "failed")
         const error = yield* Effect.flip(actor.join)
         assertMachineSchemaDecodeError(error, "state", { state: "NonEmptyIdle" })
-        assert.strictEqual(snapshot.status, "error")
+        assert.strictEqual(snapshot.status, "failed")
       }))
     it.effect("decodes final state output before caching it", () =>
       Effect.gen(function*() {
@@ -6563,9 +6563,9 @@ describe("Machine", () => {
       })
       const ref = yield* LocalMachine.start(machine, { userId: "user-1" })
       const snapshot = yield* sendAndWaitForSnapshot(ref, new Submit({ value: "hello" }), (snapshot) =>
-        snapshot.status === "error")
-      assert.strictEqual(snapshot.status, "error")
-      if (snapshot.status !== "error") {
+        snapshot.status === "failed")
+      assert.strictEqual(snapshot.status, "failed")
+      if (snapshot.status !== "failed") {
         return assert.fail("expected an error snapshot")
       }
       assert.strictEqual(Cause.squash(snapshot.cause), error)

@@ -189,7 +189,7 @@ const InvocationFields = {
  * @since 0.23.0
  */
 export const Invocation = Schema.Union([
-  Schema.Struct({ ...InvocationFields, type: Schema.tag("process") }),
+  Schema.Struct({ ...InvocationFields, type: Schema.tag("logic") }),
   Schema.Struct({
     ...InvocationFields,
     type: Schema.tag("effect"),

@@ -530,7 +530,7 @@ describe("machine process lifecycle", () => {
 
       assert.strictEqual(yield* Ref.get(cleanupCount), 1)
       assert.deepStrictEqual(yield* ref.snapshot, {
-        status: "error",
+        status: "failed",
         state: 1,
         cause: Cause.fail("external")
       })
@@ -1209,11 +1209,11 @@ describe("machine process lifecycle", () => {
       assert.strictEqual(yield* Ref.get(cleanupCount), 1)
       assert.strictEqual(published.length, 1)
       assert.deepStrictEqual(published[0], snapshot)
-      assert(snapshot.status === "error" || snapshot.status === "stopped")
+      assert(snapshot.status === "failed" || snapshot.status === "stopped")
       assert(Exit.isFailure(joined))
       if (Exit.isFailure(joined)) {
         const failure = joined.cause.reasons.find(Cause.isFailReason)
-        if (snapshot.status === "error") {
+        if (snapshot.status === "failed") {
           assert.strictEqual(failure?.error, "failed")
         } else {
           assert.instanceOf(failure?.error, Machine.StoppedError)
@@ -1269,7 +1269,7 @@ describe("machine process lifecycle", () => {
                 assert.strictEqual(index % 2, 0)
                 assert.deepStrictEqual(joined, Exit.succeed(index))
                 break
-              case "error":
+              case "failed":
                 assert.strictEqual(index % 2, 1)
                 assert(Exit.isFailure(joined))
                 break

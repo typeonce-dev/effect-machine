@@ -124,7 +124,7 @@ describe("machine invocation metadata", () => {
       {
         source: "Loading",
         id: "poll-server",
-        type: "process"
+        type: "logic"
       },
       {
         source: "Loading",
@@ -152,7 +152,7 @@ describe("machine invocation metadata", () => {
       {
         source: "Dynamic",
         id: "context-owned",
-        type: "process"
+        type: "logic"
       }
     ]
     assert.deepStrictEqual(Machine.invocationDefinitions(invocationMachine), expected)
@@ -220,7 +220,7 @@ describe("machine invocation metadata", () => {
         type: "machine",
         child: { id: "child", machineId: "document-worker" }
       },
-      { source: "Dynamic", id: "runtime-dependent", type: "process" }
+      { source: "Dynamic", id: "runtime-dependent", type: "logic" }
     ])
   })
   it("does not evaluate source factories while inspecting", () => {
@@ -243,12 +243,12 @@ describe("machine invocation metadata", () => {
     assert.deepStrictEqual(invocationDefinitions(dynamic), [{
       source: "Active",
       id: "runtime-dependent",
-      type: "process"
+      type: "logic"
     }])
     assert.deepStrictEqual(invocationDefinitions(dynamic), [{
       source: "Active",
       id: "runtime-dependent",
-      type: "process"
+      type: "logic"
     }])
     assert.strictEqual(evaluations, 0)
   })
@@ -280,13 +280,13 @@ describe("machine invocation metadata", () => {
         "",
         "└─ ● (root) [compound, initial: Loading]",
         "   ├─ ● Loading",
-        "   │  ├─ ◆ process: poll-server",
+        "   │  ├─ ◆ logic: poll-server",
         "   │  ├─ ◆ effect: load-document [success: dynamic, failure: dynamic]",
         "   │  ├─ ◆ timer: load-timeout [10s]",
         "   │  ├─ ◆ stream: updates",
         "   │  └─ ◆ machine: child → document-worker",
         "   └─ ○ Dynamic",
-        "      └─ ◆ process: context-owned",
+        "      └─ ◆ logic: context-owned",
         "",
         "Candidate events: none"
       ].join("\n")
@@ -303,7 +303,7 @@ describe("machine invocation metadata", () => {
     })
     assert.include(
       rendered,
-      "state_1: process / poll-server · effect / load-document · timer / load-timeout (10s) · stream / updates · machine / child → document-worker"
+      "state_1: logic / poll-server · effect / load-document · timer / load-timeout (10s) · stream / updates · machine / child → document-worker"
     )
     assert.notInclude(rendered, "success: dynamic")
     assert.notInclude(rendered, "note right of")

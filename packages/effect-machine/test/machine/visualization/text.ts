@@ -59,8 +59,8 @@ const triggerLabels = (definitions: ReadonlyArray<TransitionDefinition>): Readon
 
 const invocationLabel = (definition: InvocationDefinition): string => {
   switch (definition.type) {
-    case "process":
-      return `◆ process: ${definition.id}`
+    case "logic":
+      return `◆ logic: ${definition.id}`
     case "effect":
       return `◆ effect: ${definition.id} [success: ${definition.outcomes.success}, failure: ${definition.outcomes.failure}]`
     case "timer":

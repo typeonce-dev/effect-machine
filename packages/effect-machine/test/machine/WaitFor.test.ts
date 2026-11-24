@@ -7,7 +7,7 @@ type Snapshot = Machine.RuntimeSnapshot<number, "failed", string>
 const active: Snapshot = { status: "active", state: 1 }
 const done: Snapshot = { status: "done", state: 2, output: "ok" }
 const stopped: Snapshot = { status: "stopped", state: 1 }
-const error: Snapshot = { status: "error", state: 1, cause: Cause.fail("failed") }
+const error: Snapshot = { status: "failed", state: 1, cause: Cause.fail("failed") }
 const reference = (
   changes: Stream.Stream<Snapshot, never, import("effect/Scope").Scope>
 ): Machine.MachineRef<number, never, "failed", string> => ({
@@ -49,7 +49,7 @@ describe("Machine.waitFor", () => {
     Effect.gen(function*() {
       for (const cause of [Cause.fail("failed" as const), Cause.die("defect"), Cause.interrupt()]) {
         const result = yield* Effect.exit(Machine.waitFor(
-          reference(Stream.make({ status: "error", state: 1, cause })),
+          reference(Stream.make({ status: "failed", state: 1, cause })),
           () => false
         ))
         assert.ok(Exit.isFailure(result))

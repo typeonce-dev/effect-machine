@@ -440,7 +440,7 @@ describe("ClusterMachine", () => {
     expect(target).type.toBeAssignableTo<Machine.MachineTarget<{ readonly _tag: "Add"; readonly amount: number }>>()
     expect<Machine.MachineTarget<unknown>>().type.not.toBeAssignableTo<ClusterMachine.Target<unknown>>()
 
-    const order = (commands: (enqueue: Machine.Enqueue<any, never>) => void) =>
+    const order = (commands: (enqueue: Machine.Commands<any, never>) => void) =>
       Machine.make({
         root: Machine.state({ states: { Open: {}, Paid: {} } }),
         events: Machine.events({ Pay: {} })

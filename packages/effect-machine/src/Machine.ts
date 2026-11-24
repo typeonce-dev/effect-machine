@@ -697,7 +697,7 @@ export type MachineReferences<
  * @category models
  * @since 0.4.0
  */
-export interface Enqueue<in Events, in Emits> {
+export interface Commands<in Events, in Emits> {
   /** Raises an event inside the current macrostep. */
   readonly raise: (event: Machine.EventInput<Events>) => void
 
@@ -1215,7 +1215,7 @@ export type RuntimeSnapshot<State, Error = never, Output = never> =
     readonly output: Output
   }
   | {
-    readonly status: "error"
+    readonly status: "failed"
     readonly state: State
     readonly cause: Cause.Cause<Error>
   }
@@ -1240,23 +1240,23 @@ export type RuntimeOutcome<State, Error = never, Output = never> =
     readonly _tag: "Failure"
     readonly error: Error
     readonly cause: Cause.Cause<Error>
-    readonly snapshot: Extract<RuntimeSnapshot<State, Error, Output>, { readonly status: "error" }>
+    readonly snapshot: Extract<RuntimeSnapshot<State, Error, Output>, { readonly status: "failed" }>
   }
   | {
     readonly _tag: "Defect"
     readonly defect: unknown
     readonly cause: Cause.Cause<Error>
-    readonly snapshot: Extract<RuntimeSnapshot<State, Error, Output>, { readonly status: "error" }>
+    readonly snapshot: Extract<RuntimeSnapshot<State, Error, Output>, { readonly status: "failed" }>
   }
   | {
     readonly _tag: "Interrupted"
     readonly cause: Cause.Cause<Error>
-    readonly snapshot: Extract<RuntimeSnapshot<State, Error, Output>, { readonly status: "error" }>
+    readonly snapshot: Extract<RuntimeSnapshot<State, Error, Output>, { readonly status: "failed" }>
   }
   | {
     readonly _tag: "Cause"
     readonly cause: Cause.Cause<Error>
-    readonly snapshot: Extract<RuntimeSnapshot<State, Error, Output>, { readonly status: "error" }>
+    readonly snapshot: Extract<RuntimeSnapshot<State, Error, Output>, { readonly status: "failed" }>
   }
   | {
     readonly _tag: "Stopped"
@@ -4446,7 +4446,7 @@ export declare namespace Machine {
     ParentId extends StateIdentifier<States>
   > = (
     context: HistoryDefaultContext<States, Events, Emits, ParentId>,
-    enqueue: Enqueue<EventOf<Events>, EmittedEventOf<Emits>>
+    enqueue: Commands<EventOf<Events>, EmittedEventOf<Emits>>
   ) =>
     | CompleteSnapshotContaining<States, ParentId>
     | StateConstruction<CompleteSnapshotContaining<States, ParentId>>
@@ -5191,7 +5191,7 @@ export declare namespace Machine {
         /** Selects one of the declared `branches`. */
         readonly select: BranchSelect<S, Src, R>
       },
-      enqueue: Enqueue<EventOf<Ev>, EmittedEventOf<Em>>
+      enqueue: Commands<EventOf<Ev>, EmittedEventOf<Em>>
     ) => unknown
     /** Set to true to exit and reenter the handler source. */
     readonly reenter?: Reenter extends true ? boolean : never
@@ -5241,7 +5241,7 @@ export declare namespace Machine {
       & ObjectPolicy<C, Reenter, Acceptance>
       & {
         /** Enqueues synchronous commands when this transition is selected. */
-        readonly commands?: (context: C, enqueue: Enqueue<EventOf<Ev>, EmittedEventOf<Em>>) => void
+        readonly commands?: (context: C, enqueue: Commands<EventOf<Ev>, EmittedEventOf<Em>>) => void
       }
       & DeclarationData<
         | InlineDestination<S, Src, C>
@@ -5618,7 +5618,7 @@ export declare namespace Machine {
         /** Runs synchronously on entry and may enqueue commands. */
         readonly entry?: (
           context: StateActionContext<S, Ev, Em, Src, In, Pa>,
-          enqueue: Enqueue<EventOf<Ev>, EmittedEventOf<Em>>
+          enqueue: Commands<EventOf<Ev>, EmittedEventOf<Em>>
         ) => StateActionResult
       }
       & (Node extends { readonly type: "final" } ?
@@ -5631,7 +5631,7 @@ export declare namespace Machine {
           /** Runs synchronously on exit and may enqueue commands. */
           readonly exit?: (
             context: StateActionContext<S, Ev, Em, Src, In, Pa>,
-            enqueue: Enqueue<EventOf<Ev>, EmittedEventOf<Em>>
+            enqueue: Commands<EventOf<Ev>, EmittedEventOf<Em>>
           ) => StateActionResult
         } & ActiveOutputHandlerConfig<S, Ev, Src>)
     : {

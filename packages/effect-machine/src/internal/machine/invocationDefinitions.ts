@@ -9,7 +9,7 @@ import * as Duration from "effect/Duration"
 /** @internal */
 export type InvocationMetadata =
   | {
-    readonly type: "process"
+    readonly type: "logic"
   }
   | {
     readonly type: "effect"
@@ -102,7 +102,7 @@ const appendStaticDefinition = (
     return
   }
   if (Reflect.has(descriptor, "logic")) {
-    definitions.push({ source, id, type: "process" })
+    definitions.push({ source, id, type: "logic" })
   }
 }
 

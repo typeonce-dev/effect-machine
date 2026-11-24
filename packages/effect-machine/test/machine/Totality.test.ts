@@ -140,14 +140,14 @@ const deliverAndObserve = Effect.fn(function*(machine: any, ref: Machine.Machine
   }
   const expected = yield* encodeWithoutDefect(machine, planned.next, `post-resume expected ${index}`)
   const observed = yield* waitForSnapshot(ref, (snapshot) =>
-    snapshot.status === "error" ||
+    snapshot.status === "failed" ||
     (isDeepStrictEqual(snapshot.state, planned.next) && (!planned.done || snapshot.status === "done"))).pipe(
       Effect.forkChild({ startImmediately: true })
     )
   const sendExit = yield* Effect.exit(ref.send(event))
   assertNoUnexpectedDefect(`post-resume send ${index}`, sendExit)
   const published = yield* Fiber.join(observed)
-  if (published.status === "error") {
+  if (published.status === "failed") {
     assert.fail(`post-resume event ${index} failed:\n${Cause.pretty(published.cause)}`)
   }
   const actual = yield* encodeWithoutDefect(machine, published.state, `post-resume observed ${index}`)
@@ -198,7 +198,7 @@ describe("machine operation totality", () => {
       assertNoUnexpectedDefect("resume", resumeExit)
       const ref = resumeExit.value
       const initialRuntime = yield* ref.snapshot
-      if (initialRuntime.status === "error") {
+      if (initialRuntime.status === "failed") {
         assert.fail(`resume published a failed snapshot:\n${Cause.pretty(initialRuntime.cause)}`)
       }
       yield* assertLogicalSnapshotEquivalent(machine, decoded, initialRuntime.state, "resumed boundary")
@@ -213,7 +213,7 @@ describe("machine operation totality", () => {
         }
       }
       const finalRuntime = yield* ref.snapshot
-      if (finalRuntime.status === "error") {
+      if (finalRuntime.status === "failed") {
         assert.fail(`resumed continuation failed:\n${Cause.pretty(finalRuntime.cause)}`)
       }
       yield* assertLogicalSnapshotEquivalent(machine, fullTrace.final, finalRuntime.state, "resumed continuation")

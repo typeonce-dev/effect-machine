@@ -53,7 +53,7 @@ describe("local timer invocations", () => {
           Effect.runSync(ref.send({ _tag: "Go" }))
           assert.deepStrictEqual(steps, ["first started", "timer mapped"])
           const snapshot = Effect.runSync(ref.snapshot)
-          if (snapshot.status !== "error") throw new Error(`Unexpected ${snapshot.status}`)
+          if (snapshot.status !== "failed") throw new Error(`Unexpected ${snapshot.status}`)
           assert.strictEqual(snapshot.state.state.path, "Working")
           assert.strictEqual((Cause.squash(snapshot.cause) as Error).message, "timer source")
         }).pipe(Effect.scoped))
@@ -67,7 +67,7 @@ describe("local timer invocations", () => {
           assert.strictEqual(status(ref), "active")
           const cause = yield* Effect.flip(Effect.sandbox(ref.join))
           assert.isTrue(Cause.hasDies(cause))
-          assert.strictEqual(status(ref), "error")
+          assert.strictEqual(status(ref), "failed")
         }).pipe(Effect.scoped))
     })
   }

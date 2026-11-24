@@ -516,7 +516,7 @@ export const startGenericInternal: StartProcess = Effect.fnUntraced(
 
     const reserveFailureSnapshot = (cause: Cause.Cause<Error>) =>
       reserveTerminalSnapshot((snapshot) => ({
-        status: "error",
+        status: "failed",
         state: snapshot.state,
         cause
       }))

@@ -75,8 +75,8 @@ const branchLabel = (branch: VisualizationBranch): string | undefined => {
 
 const invocationLabel = (definition: VisualizationInvocation): string => {
   switch (definition.type) {
-    case "process":
-      return `◆ process: ${definition.lifecycleId}`
+    case "logic":
+      return `◆ logic: ${definition.lifecycleId}`
     case "effect":
       return `◆ effect: ${definition.lifecycleId} [success: ${definition.outcomes.success}, failure: ${definition.outcomes.failure}]`
     case "timer":

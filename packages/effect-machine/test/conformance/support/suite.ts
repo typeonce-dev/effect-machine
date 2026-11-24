@@ -39,7 +39,7 @@ const kindOf = {
   effect: "Effect",
   timer: "Timer",
   stream: "Stream",
-  process: "Logic",
+  logic: "Logic",
   machine: "Child"
 } as const satisfies Record<string, InvocationKind>
 

@@ -25,7 +25,7 @@ export const outcomeOf = (snapshot: Machine.RuntimeSnapshot<unknown, unknown, un
       return { _tag: "Running" }
     case "done":
       return snapshot.output === undefined ? { _tag: "Final" } : { _tag: "Final", output: snapshot.output }
-    case "error":
+    case "failed":
       return { _tag: "Failed", failure: renderFailure(snapshot.cause) }
     case "stopped":
       return { _tag: "Stopped" }

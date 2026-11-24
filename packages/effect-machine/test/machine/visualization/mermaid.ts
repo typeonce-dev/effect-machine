@@ -62,8 +62,8 @@ const branchLabel = (
 
 const invocationLabel = (definition: InvocationDefinition): string => {
   switch (definition.type) {
-    case "process":
-      return `process / ${definition.id}`
+    case "logic":
+      return `logic / ${definition.id}`
     case "effect":
       return `effect / ${definition.id}`
     case "timer":

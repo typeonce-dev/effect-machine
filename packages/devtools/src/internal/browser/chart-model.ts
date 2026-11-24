@@ -80,7 +80,7 @@ const invocationLabel = (invocation: VisualizationInvocation): string => {
       return `${invocation.lifecycleId} → ${invocation.child.machineId ?? invocation.child.id}`
     case "timer":
       return `${invocation.lifecycleId} · ${invocation.duration}`
-    case "process":
+    case "logic":
     case "effect":
     case "stream":
       return invocation.lifecycleId

@@ -85,7 +85,7 @@ const inspection: InspectionApi<TestMachine, { readonly active: boolean }> = {
       type: "machine",
       child: { id: "search", machineId: null }
     },
-    { source: "Root.Route", id: "worker %%\nend note", type: "process" }
+    { source: "Root.Route", id: "worker %%\nend note", type: "logic" }
   ],
   configuration: () => states.slice(0, 2),
   enabled: () => ["Continue %%\nnow"]
@@ -109,7 +109,7 @@ describe("Mermaid visualization", () => {
     assert.include(rendered, "state_1 --> state_2: choice [approved #37;#37; now]")
     assert.include(rendered, "state_2 --> state_2: Retry [declinable] / update Root")
     assert.notMatch(rendered, /state_1 --> .*otherwise/)
-    assert.include(rendered, "state_1: process / worker #37;#37; end note")
+    assert.include(rendered, "state_1: logic / worker #37;#37; end note")
     assert.notInclude(rendered, "Candidate events")
   })
 })

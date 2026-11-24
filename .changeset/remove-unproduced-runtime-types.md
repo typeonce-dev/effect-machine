@@ -12,7 +12,7 @@ Most were always `never`, so delete the mention:
 
 The others described values that no API produces or accepts:
 
-- `Machine.Runtime` and `Machine.Runtime.Requirement`. Handlers raise and emit events with `Machine.Enqueue`.
+- `Machine.Runtime` and `Machine.Runtime.Requirement`. Handlers raise and emit events with `Machine.Commands`.
 - `Machine.Machine.AnyStateConfig`, `StateConfig`, `ChoiceStateConfig`, and `EventHandlerMap`. Use `Machine.Machine.StateHandler`.
 - `Machine.Machine.InvokeOwned` and `InvokeSource`. Use `Machine.Machine.Invocation`.
 - `Machine.Machine.EventTransitionReturn`, `EventHandlerReturn`, `AlwaysReturn`, `DoneReturn`, `ChoiceReturn`, and `InvokeOutcomeReturn`. They have no replacement.

@@ -902,7 +902,7 @@ describe("AtomMachine", () => {
       yield* mount(registry, canBegin)
       assert.strictEqual(yield* AtomRegistry.getResult(registry, canBegin), true)
       yield* Effect.sync(() => registry.set(faultBridge.send, new Begin({})))
-      yield* waitForResult(registry, faultBridge.snapshot, (snapshot) => snapshot.status === "error")
+      yield* waitForResult(registry, faultBridge.snapshot, (snapshot) => snapshot.status === "failed")
       const result = registry.get(canBegin)
       assert(AsyncResult.isFailure(result))
       assert.strictEqual(Cause.squash(result.cause), failure)
