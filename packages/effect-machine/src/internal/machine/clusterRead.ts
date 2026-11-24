@@ -21,7 +21,6 @@ import * as Planner from "./planner.js"
 
 type PersistenceError = ClusterError.PersistenceError
 
-type Done<M extends Machine.Machine.Any> = Extract<Snapshot<M>, { readonly status: "done" }>
 
 type Services<M extends Machine.Machine.Any> =
   | Storage
@@ -115,7 +114,7 @@ export const make = <M extends Machine.Machine.Any>(options: Options): Reader<M>
         ? Effect.die(new Error("A reader of a Cluster machine ended without a terminal checkpoint"))
         : read.value.status === "failed"
         ? Effect.fail(new MachineFailedError({ failure: read.value.failure }))
-        : Effect.succeed((read.value as Done<M>).output)
+        : Effect.succeed(read.value.output)
     )
   )
 
