@@ -21,7 +21,6 @@ import * as Planner from "./planner.js"
 
 type PersistenceError = ClusterError.PersistenceError
 
-
 type Services<M extends Machine.Machine.Any> =
   | Storage
   | Machine.Machine.SnapshotDecodingServices<Machine.Machine.States<M>>
