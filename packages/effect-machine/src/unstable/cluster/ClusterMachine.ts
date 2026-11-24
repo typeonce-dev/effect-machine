@@ -1111,6 +1111,18 @@ export { StorageCheckFailure }
  * invocation kind and capability to replace with an Effect, a timer, or a child
  * machine. A source that is registered and never invoked is accepted.
  *
+ * Streams and `Logic` are refused because their progress cannot be stored. A
+ * checkpoint holds the state of a machine, and after a crash, a move to another
+ * runner, or a restart, the machine continues from it and its work runs again
+ * from the start. An Effect or a timer ends with one outcome, so running it
+ * again changes nothing that was applied. A Stream ends after many elements,
+ * and how far it got lives only in memory: run again, it would apply elements
+ * that were applied before, or miss some when it does not produce the same ones.
+ * A `Logic` is a process with a state and a mailbox of its own, and both would
+ * be lost. Model a process, or a source of many events, as a child machine,
+ * whose every step is stored, or as an Effect that ends with one result and a
+ * state that is entered again for the next one.
+ *
  * **Gotchas**
  *
  * Work runs at least once and must be safe to repeat. It runs again after a
