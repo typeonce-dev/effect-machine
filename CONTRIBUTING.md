@@ -85,6 +85,32 @@ understands imports, re-exports, and dynamic imports, and enforces:
 The checker has executable fixture tests and runs as part of `pnpm check`. Add
 new rules only with a failing fixture that demonstrates the boundary.
 
+## Add a host
+
+A host is anything that runs a machine: `LocalMachine`, `AtomMachine`,
+`ClusterMachine`. The conformance suite under
+`packages/effect-machine/test/conformance` writes each scenario once and runs
+it on every host. To add one:
+
+1. Implement `Host` from `test/conformance/support/host.ts` under
+   `test/conformance/support/hosts`. A host that needs library internals goes
+   under `test/internal/machine/support` instead.
+2. Declare its `Capabilities`. They are the only reason a scenario skips a
+   host, so declare what the host can do.
+3. Add it to `hosts` in `HostConformance.test.ts`, run
+   `pnpm vitest run test/conformance` in the package, and read the change to
+   `matrix.txt` (update it with `-u`).
+4. A failing scenario is a bug of the host, unless users are told about the
+   difference. Record a documented difference as a `Deliberate` entry in
+   `differences.ts`, with the sentence of the documentation that promises it,
+   and an undocumented one or a known bug as an `Open` entry with its
+   evidence.
+
+A new host lives in its own module, depends on `Machine` and not on the local
+runtime when it can (`pnpm check:architecture` enforces this for Cluster), and
+documents what it runs, what it refuses, and how its guarantees differ from
+`LocalMachine`.
+
 ## TypeScript compatibility
 
 The repository toolchain uses TypeScript 6. TypeDoc, tstyche, and the

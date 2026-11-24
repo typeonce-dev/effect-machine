@@ -615,6 +615,50 @@ full duration, and prior fibers, subscriptions, queues, and child runtimes are
 not restored. Store machine identity and migration/version metadata beside the
 encoded snapshot.
 
+## Run on Effect Cluster
+
+`ClusterMachine` runs the same machine as a persisted Cluster entity, one per
+entity id. Effect Cluster owns identity, placement, routing, and delivery;
+`ClusterMachine` applies one input at a time and commits each step to
+`Storage`, which is the truth. An entity that comes up on any runner
+continues from its last checkpoint.
+
+```ts
+import { ClusterMachine, SqlMachineStorage } from "@typeonce/effect-machine/cluster"
+import { Layer } from "effect"
+import { SqlMessageStorage } from "effect/cluster"
+
+const Invoice = ClusterMachine.make("Invoice", invoiceMachine, { version: "1" })
+const InvoiceLive = Invoice.toLayer().pipe(
+  Layer.provide(Layer.mergeAll(SqlMessageStorage.layer, SqlMachineStorage.layer))
+)
+
+const client = (yield* Invoice.client)("invoice-1")
+yield* client.send(Events.Send({ invoiceId: "inv-1" }))
+const receipt = yield* client.join
+```
+
+What to know before you deploy:
+
+- invoked effects run **at least once**, and again after a crash, a move, or a
+  restart, so make them safe to repeat;
+- work that ends in a way the model does not handle stores the machine as
+  `failed`, with no hidden retry; storage and Cluster failures are retried;
+- timers store their due time and wait only for what remains after a restart;
+  long ones are delayed Cluster messages, so the entity may leave memory;
+- child machines run as entities of their own, and machines send to each other
+  through `adapter.target(id)`, applied once;
+- Streams, `Logic`, and work that needs `Machine.MachineRuntime` do not compile,
+  because their progress cannot be stored;
+- a client reads committed checkpoints from `Storage`, and is a remote view
+  without the synchronous guarantees of a local reference;
+- `SqlMachineStorage` stores checkpoints in PostgreSQL or SQLite, in the
+  transaction of `SqlMessageStorage`; check a store of your own with
+  `ClusterMachine.checkStorage`.
+
+`ClusterMachine` needs `effect` 4.1.5 or later. The agent documentation covers
+each point in full.
+
 ## Testing
 
 Start with `MachineTest.check`. It reads the declared topology, explores the
