@@ -30,7 +30,7 @@ import type {
   StoppedError
 } from "./internal/machine/machine.js"
 import * as internal from "./internal/machine/machine.js"
-import { InitialEventTypeId } from "./internal/machine/machine.js"
+import { InitialEventTypeId, InvocationEventTypeId } from "./internal/machine/machine.js"
 import type { EnsureExecutable } from "./internal/machine/readiness.js"
 import type * as StateDefinition from "./internal/machine/stateDefinition.js"
 import type * as Topology from "./internal/machine/topology.js"
@@ -113,6 +113,56 @@ export const InitialEvent: InitialEvent = { _tag: InitialEventTypeId }
  * @since 0.4.0
  */
 export const isInitialEvent = (u: unknown): u is InitialEvent => hasProperty(u, "_tag") && u._tag === InitialEventTypeId
+
+/**
+ * Type identifier used for the synthetic event of a step caused by invoked work.
+ *
+ * @category type IDs
+ * @since 0.48.0
+ */
+export { InvocationEventTypeId }
+
+/**
+ * Synthetic event passed to lifecycle callbacks of a step that invoked work
+ * caused: its output, typed failure, stream element, or child snapshot.
+ *
+ * **Details**
+ *
+ * An outcome is not an event of the machine's protocol, so the states that its
+ * transition enters and exits, and the work they start, receive this marker as
+ * their `event`, as they receive `InitialEvent` while the initial state
+ * settles. `path` and `id` name the state that invoked the work and the
+ * invocation, and `kind` names what the work reported. The reported value
+ * itself is available to the transition that handles it, as `output`,
+ * `error`, `element`, or `snapshot`.
+ *
+ * **Gotchas**
+ *
+ * A host that restarts work after a recovery, such as `ClusterMachine`, passes
+ * `InitialEvent` to the input mapper of the restarted work, not this event.
+ *
+ * @category models
+ * @since 0.48.0
+ */
+export interface InvocationEvent {
+  readonly _tag: typeof InvocationEventTypeId
+  /** Path of the state that invoked the work. */
+  readonly path: string
+  /** Id of the invocation within that state. */
+  readonly id: string
+  /** What the work reported. */
+  readonly kind: "Done" | "Failure" | "Element" | "Snapshot"
+}
+
+/**
+ * Returns `true` if a value is the synthetic event of a step caused by invoked
+ * work.
+ *
+ * @category guards
+ * @since 0.48.0
+ */
+export const isInvocationEvent = (u: unknown): u is InvocationEvent =>
+  hasProperty(u, "_tag") && u._tag === InvocationEventTypeId
 
 type IsAny<A> = 0 extends (1 & A) ? true : false
 
@@ -2954,12 +3004,17 @@ export declare namespace Machine {
   export type EmittedEventOf<Emits extends ReadonlyArray<TaggedSchema>> = Emits[number]["Type"]
 
   /**
-   * Event values received by lifecycle callbacks.
+   * Event values received by lifecycle callbacks: a declared event,
+   * `InitialEvent` while the initial state settles, or `InvocationEvent` for a
+   * step caused by invoked work.
    *
    * @category utility types
    * @since 0.4.0
    */
-  export type LifecycleEvent<Events extends ReadonlyArray<TaggedSchema>> = EventOf<Events> | InitialEvent
+  export type LifecycleEvent<Events extends ReadonlyArray<TaggedSchema>> =
+    | EventOf<Events>
+    | InitialEvent
+    | InvocationEvent
 
   /**
    * Extracts a state value from a state definition by identifier.
@@ -3536,7 +3591,7 @@ export declare namespace Machine {
    * value without changing its active descendants.
    *
    * @category models
-   * @since 0.21.0
+   * @since 0.48.0
    */
   export interface StateUpdate<
     States extends StateSchemas,
@@ -5236,7 +5291,10 @@ export declare namespace Machine {
       /** Maps the owning state context to the registered source input. */
       readonly input?: never
     }
-  type ResolvedInvoke<R, K extends PropertyKey> = SourceKind<R, K> extends "effects" ?
+  // Distributes over the source names, so a state that picks its work by a
+  // condition keeps the requirements and outcomes of every name it can pick.
+  type ResolvedInvoke<R, K extends PropertyKey> = K extends PropertyKey ? ResolvedSource<R, K> : never
+  type ResolvedSource<R, K extends PropertyKey> = SourceKind<R, K> extends "effects" ?
     { readonly effect: () => InvokeResolvedSource<SourceValue<R, K>> }
     : SourceKind<R, K> extends "streams" ? { readonly stream: () => InvokeResolvedSource<SourceValue<R, K>> }
     : SourceKind<R, K> extends "timers" ? { readonly after: Duration.Input }
@@ -6428,6 +6486,13 @@ type Make = {
  * `effects`, `streams`, `timers`, `logic`, and `children`. A state invokes a
  * registered source by name with `invoke: { src }`, and only invoked sources
  * add to the machine's requirements.
+ *
+ * Each run of invoked work owns a `Scope`, which every host closes when the run
+ * ends or is stopped. An Effect and a Stream get a new one for each run, and
+ * logic gets one from its `initial` through the end of its `run`. Finalizers
+ * added with `Effect.addFinalizer` or `Effect.acquireRelease` therefore run with
+ * the work, not when the machine stops. A timer acquires nothing, and a child
+ * machine has no scope of its own: its invoked work follows the same rule.
  *
  * `Machine.events` defines the public input protocol. `Machine.internalEvents`
  * adds raised events and other machine-local deliveries.

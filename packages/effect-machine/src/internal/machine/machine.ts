@@ -44,7 +44,7 @@ export {
   StartupError,
   StoppedError
 } from "./errors.js"
-export { InitialEventTypeId } from "./symbols.js"
+export { InitialEventTypeId, InvocationEventTypeId } from "./symbols.js"
 
 /** Internal seam for the public target-reference factory and its opaque brand. */
 

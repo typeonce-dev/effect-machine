@@ -52,7 +52,7 @@ starts the work of its initial state before any event                           
 takes the events that its own work sends to it                                              | runs                   | runs                    | runs        | differs                      | runs
 lets the first of two ends that come together win                                           | runs                   | runs                    | runs        | runs                         | runs
 prefers the typed failure of work that also dies                                            | runs                   | runs                    | runs        | runs                         | runs
-closes the scope of work with its end, and with its stop                                    | OPEN                   | OPEN                    | OPEN        | runs                         | runs
+closes the scope of work with its end, and with its stop                                    | runs                   | runs                    | runs        | runs                         | runs
 maps the input of work that the outcome of other work starts                                | runs                   | runs                    | runs        | runs                         | runs
 starts work in the order in which one step enters states                                    | runs                   | runs                    | runs        | runs                         | runs
 has released the work of the states it leaves before it starts that of the states it enters | runs                   | runs                    | runs        | runs                         | runs
@@ -83,11 +83,13 @@ restarts with decoded values                                                    
 restarts after one of two regions completed                                                 | runs                   | runs                    | runs        | runs                         | skipped: Restart
 restarts in a state whose work ends at once                                                 | runs                   | runs                    | runs        | runs                         | skipped: Restart
 handles the elements of a stream one by one, and its end                                    | runs                   | runs                    | runs        | skipped: Stream              | skipped: Stream
+closes the scope of a stream with its end, and with its stop                                | runs                   | runs                    | runs        | skipped: Stream              | skipped: Stream
 handles a stream that produces everything at once                                           | runs                   | runs                    | runs        | skipped: Stream              | skipped: Stream
 pulls the next element of a stream once it has handled the one before                       | runs                   | runs                    | runs        | skipped: Stream              | skipped: Stream
 stops a stream when its state is left, and takes no element of it after that                | runs                   | runs                    | runs        | skipped: Stream              | skipped: Stream
 fails after a defect of a stream                                                            | runs                   | runs                    | runs        | skipped: Stream              | skipped: Stream
 routes the snapshots and the output of process logic, and drops those of an earlier run     | runs                   | runs                    | runs        | skipped: Logic, Commands     | skipped: Logic, Commands
+closes the scope of process logic with its end, and with its stop                           | runs                   | runs                    | runs        | skipped: Logic               | skipped: Logic
 runs an invoked child machine, which reports to it and ends with an output                  | runs                   | runs                    | runs        | skipped: Child, Commands     | skipped: Child, Commands
 fails with an invoked child machine that fails                                              | runs                   | runs                    | runs        | skipped: Child, Commands     | skipped: Child, Commands
 owns the children its work spawns, until it stops them or ends                              | runs                   | runs                    | runs        | skipped: OwnedChildren       | skipped: OwnedChildren
