@@ -271,12 +271,12 @@ const refuse = (options: {
       ))
 
 /** The status of a checkpoint, in the form memory holds it. */
-type ReadStatus =
+export type ReadStatus =
   | { readonly _tag: "Active"; readonly progress: ClusterProgress.Progress }
   | { readonly _tag: "Failed"; readonly failure: string }
 
 /** Reads the status of a checkpoint, whose store may hold anything. */
-const readStatus = (status: unknown): ReadStatus | undefined => {
+export const readStatus = (status: unknown): ReadStatus | undefined => {
   if (!Predicate.hasProperty(status, "_tag")) return undefined
   if (status._tag === "Failed") {
     return Predicate.hasProperty(status, "failure") && Predicate.isString(status.failure)

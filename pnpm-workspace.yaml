@@ -10,6 +10,8 @@ overrides:
   "@effect/platform-browser": 4.1.5
   "@effect/platform-node": 4.1.5
   "@effect/platform-node-shared": 4.1.5
+  "@effect/sql-pglite": 4.1.5
+  "@effect/sql-sqlite-node": 4.1.5
 
 minimumReleaseAge: 1440
 minimumReleaseAgeExclude:
@@ -20,4 +22,6 @@ minimumReleaseAgeExclude:
   - "@effect/platform-browser"
   - "@effect/platform-node"
   - "@effect/platform-node-shared"
+  - "@effect/sql-pglite"
+  - "@effect/sql-sqlite-node"
   - xstate-v6
