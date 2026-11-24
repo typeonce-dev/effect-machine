@@ -1634,11 +1634,11 @@ Nothing about how the machine is written changes.
 
 ### Choose a host
 
-| Host           | Where the machine lives                                 | What survives a crash                       |
-| -------------- | ------------------------------------------------------- | ------------------------------------------- |
-| `LocalMachine` | in memory, owned by a `Scope`                           | nothing, unless you encode and resume it    |
-| `AtomMachine`  | in memory, owned by an `AtomRegistry`                   | nothing                                     |
-| `ClusterMachine` | one entity per id, on any runner of a Cluster         | every committed step, from `Storage`        |
+| Host             | Where the machine lives                       | What survives a crash                    |
+| ---------------- | --------------------------------------------- | ---------------------------------------- |
+| `LocalMachine`   | in memory, owned by a `Scope`                 | nothing, unless you encode and resume it |
+| `AtomMachine`    | in memory, owned by an `AtomRegistry`         | nothing                                  |
+| `ClusterMachine` | one entity per id, on any runner of a Cluster | every committed step, from `Storage`     |
 
 Use `ClusterMachine` when a machine must outlive the process that started it,
 be addressed by id from anywhere, or wait on timers longer than a process
