@@ -74,12 +74,12 @@
     "test:types": "tstyche"
   },
   "peerDependencies": {
-    "effect": "^4.0.0"
+    "effect": "^4.1.5"
   },
   "devDependencies": {
-    "@effect/vitest": "4.1.1",
+    "@effect/vitest": "4.1.5",
     "@types/node": "26.6.6",
-    "effect": "4.1.1",
+    "effect": "4.1.5",
     "tinybench": "6.2.2",
     "tstyche": "7.2.5",
     "typescript": "6.0.3",

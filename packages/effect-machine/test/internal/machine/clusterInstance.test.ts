@@ -468,10 +468,10 @@ describe("ClusterInstance with work", () => {
       assert.strictEqual(yield* harness.revision, 1)
     }))
 
-  it.effect("leaves a keep-alive behind when it ends while replacing it", () =>
+  it.effect("leaves a keep-alive behind when it ends before enabling it for an interrupted caller", () =>
     Effect.gen(function*() {
       const harness = yield* makeHarness
-      const { machine } = makeLoader()
+      const { machine, runs } = makeLoader()
       const scope = yield* Scope.make()
       const switches: Array<boolean> = []
       let block: Effect.Effect<void> = Effect.void
@@ -481,23 +481,27 @@ describe("ClusterInstance with work", () => {
           keepAlive: (enabled) =>
             Effect.suspend(() => {
               switches.push(enabled)
-              return enabled ? block : Effect.void
+              return block
             })
         }),
         scope
       )
-      assert.instanceOf(yield* instance.apply(go(1)), Accepted)
-      assert.deepStrictEqual(switches, [false, true])
+      yield* settle
       block = Effect.never
-      yield* TestClock.adjust("5 minutes")
-      // Released, and not yet replaced.
-      assert.deepStrictEqual(switches, [false, true, false, true])
+      const fiber = yield* Effect.forkChild(instance.apply(go(1)), { startImmediately: true })
+      yield* settle
+      // The step is stored, so nothing delivers its input again.
+      yield* Fiber.interrupt(fiber)
+      yield* settle
+      assert.strictEqual(yield* harness.revision, 1)
+      assert.strictEqual(runs.length, 1)
+      assert.deepStrictEqual(switches, [false, true, true])
       block = Effect.void
       yield* Scope.close(scope, Exit.void)
-      assert.deepStrictEqual(switches, [false, true, false, true, true])
+      assert.deepStrictEqual(switches, [false, true, true, true])
     }))
 
-  it.effect("keeps its keep-alive when it ends with work, and replaces none without work", () =>
+  it.effect("switches its keep-alive only when its work starts or ends, and keeps it when it ends with work", () =>
     Effect.gen(function*() {
       const harness = yield* makeHarness
       const { machine } = makeLoader()
@@ -508,31 +512,14 @@ describe("ClusterInstance with work", () => {
         scope
       )
       assert.instanceOf(yield* instance.apply(go(1)), Accepted)
+      yield* TestClock.adjust("30 minutes")
+      assert.deepStrictEqual(switches, [false, true])
       assert.instanceOf(yield* instance.apply(back(2)), Accepted)
       yield* TestClock.adjust("30 minutes")
       assert.deepStrictEqual(switches, [false, true, false])
       assert.instanceOf(yield* instance.apply(go(3)), Accepted)
       yield* Scope.close(scope, Exit.void)
       assert.deepStrictEqual(switches, [false, true, false, true])
-    }))
-
-  it.effect("counts the life of a keep-alive from when it was enabled", () =>
-    Effect.gen(function*() {
-      const harness = yield* makeHarness
-      const { machine } = makeLoader()
-      const switches: Array<boolean> = []
-      const instance = yield* harness.make({
-        machine,
-        keepAlive: (enabled) => Effect.sync(() => void switches.push(enabled))
-      })
-      assert.instanceOf(yield* instance.apply(go(1)), Accepted)
-      yield* TestClock.adjust("3 minutes")
-      assert.instanceOf(yield* instance.apply(back(2)), Accepted)
-      assert.instanceOf(yield* instance.apply(go(3)), Accepted)
-      yield* TestClock.adjust("4 minutes")
-      assert.deepStrictEqual(switches, [false, true, false, true])
-      yield* TestClock.adjust("1 minute")
-      assert.deepStrictEqual(switches, [false, true, false, true, false, true])
     }))
 
   it.effect("leaves no keep-alive behind when it ends while releasing one", () =>
@@ -661,22 +648,21 @@ describe("ClusterInstance with work", () => {
       assert.instanceOf(yield* Fiber.join(fiber), Accepted)
       assert.deepStrictEqual(switches, [false, true, true])
 
-      // The renewal fails once, and is completed.
-      interruptSwitch = true
-      yield* TestClock.adjust("5 minutes")
-      interruptSwitch = false
-      yield* TestClock.adjust("10 seconds")
-      assert.deepStrictEqual(switches.slice(-2), [false, true])
-
       interruptTransaction = true
       yield* Deferred.succeed(runs[0]!.result, "document")
       yield* settle
       assert.strictEqual(yield* harness.revision, 1)
       interruptTransaction = false
+      interruptSwitch = true
       yield* TestClock.adjust("20 seconds")
       assert.strictEqual(yield* harness.revision, 2)
       assert.strictEqual(runs.length, 1)
+      // The release is tried again until it succeeds, and then no more.
+      const tries = switches.length
       assert.strictEqual(switches.at(-1), false)
+      interruptSwitch = false
+      yield* TestClock.adjust("1 minute")
+      assert.deepStrictEqual(switches.slice(tries), [false])
     }))
 
   describe("with timers", () => {

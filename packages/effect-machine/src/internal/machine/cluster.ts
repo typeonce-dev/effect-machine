@@ -69,8 +69,9 @@ export const makeMemory: Effect.Effect<Storage["Service"]> = Effect.sync(() => {
 
 export const layerMemory: Layer.Layer<Storage> = Layer.effect(Storage, makeMemory)
 
-// `Entity.keepAlive` does nothing where Cluster provides no latch, as in
-// `Entity.makeTestClient`, which has no crash to recover from either.
+// A `Sharding` runner provides the latch that holds a keep-alive request.
+// `Entity.makeTestClient` provides none, and has no crash to recover from either.
+// The `Entity.KeepAliveHandler` that other hosts provide instead is not used.
 const makeKeepAlive = Effect.gen(function*() {
   const context = yield* Effect.context<Sharding.Sharding | Entity.CurrentAddress>()
   const latch = yield* Effect.serviceOption(Entity.KeepAliveLatch)
