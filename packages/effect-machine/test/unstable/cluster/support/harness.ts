@@ -252,7 +252,11 @@ export const startRunner = Effect.fnUntraced(function*(
   )
   yield* TestClock.adjust(1)
   const client = (yield* Effect.provideContext(bridge.entity.client, context))("worker-1")
+  const machineClient: ClusterMachine.Client<Machine.Machine.Any> =
+    (yield* Effect.provideContext(bridge.client, context))("worker-1")
   return {
+    /** The client of the machine, as a caller of the adapter uses it. */
+    client: machineClient,
     stored: () => storage.entries.get(storageKey("Worker", "worker-1")),
     send: (event: object): Effect.Effect<ClusterMachine.Accepted | ClusterMachine.Rejected> =>
       Effect.orDie(client.send(event as never) as Effect.Effect<any, unknown>),

@@ -432,6 +432,10 @@ export { Accepted }
  *
  * **Details**
  *
+ * `InvalidEvent` reports an event that {@link Client} refused before sending
+ * it, because its schema or the protocol of the machine refuses it. The
+ * machine never sees such an event.
+ *
  * `DefinitionIdMismatch` reports a checkpoint whose `definitionId` is not the id
  * of the machine that loaded it. `PersistenceFailure` reports storage that
  * failed. `RevisionConflict` reports storage that worked and refused the request,
@@ -457,6 +461,11 @@ export type RejectionReason = typeof RejectionReason.Type
 /**
  * Rejected Cluster machine request. Transaction-participating durable storage
  * leaves the previous checkpoint in place and suppresses emitted events.
+ *
+ * **Details**
+ *
+ * It is a yieldable error, which {@link Client} reports in its error channel,
+ * and the raw `send` RPC of the entity returns as a value of {@link SendResult}.
  *
  * @category models
  * @since 0.4.0
@@ -486,7 +495,8 @@ type MachineEmits<M extends Machine.Machine.Any> = Machine.Machine.EmittedEvents
  *
  * **Details**
  *
- * The adapter exposes one persisted `send` RPC. Each live entity keeps one
+ * The adapter exposes one persisted `send` RPC, and {@link Client}s that send
+ * through it as a local reference sends. Each live entity keeps one
  * machine instance in memory, which applies requests and the outcomes of invoked
  * effects and timers one at a time. Every accepted request advances the
  * checkpoint at most once.
@@ -504,6 +514,43 @@ export interface ClusterMachine<
 
   /** Cluster entity exposing the persisted, schema-validated `send` RPC. */
   readonly entity: Entity.Entity<Type, SendRpc<MachineEvents<M>>>
+
+  /**
+   * Creates clients for the entities of this machine, one per entity id, like
+   * `Entity.client`.
+   *
+   * **Example** (Sending an event built by a constructor)
+   *
+   * ```ts import.meta.vitest
+   * import { Machine } from "@typeonce/effect-machine"
+   * import { ClusterMachine } from "@typeonce/effect-machine/cluster"
+   * import { Effect, Schema } from "effect"
+   *
+   * const Events = Machine.events({ Rename: { name: Schema.NonEmptyString } })
+   * const machine = Machine.make({
+   *   root: Machine.state({ states: { Draft: { fields: { name: Schema.String } } } }),
+   *   events: Events
+   * }).handle({
+   *   initial: { target: "Draft", data: { name: "untitled" } },
+   *   states: { Draft: { on: { Rename: { target: "Draft", data: ({ event }) => ({ name: event.name }) } } } }
+   * })
+   *
+   * const adapter = ClusterMachine.make("Document", machine, { version: "1" })
+   *
+   * // Run with a Cluster runner, which provides `Sharding`.
+   * const rename = Effect.gen(function*() {
+   *   const client = (yield* adapter.client)("document-1")
+   *   yield* client.send(Events.Rename({ name: "report" })).pipe(
+   *     Effect.catchTag("Rejected", (rejected) => Effect.logWarning(rejected.reason))
+   *   )
+   * })
+   *
+   * Effect.isEffect(rename) // => true
+   * ```
+   *
+   * @since 0.48.0
+   */
+  readonly client: Effect.Effect<(entityId: string) => Client<M>, never, Sharding.Sharding>
 
   /**
    * Creates the Cluster entity layer for this machine.
@@ -528,6 +575,55 @@ export interface ClusterMachine<
       event: Machine.Machine.EmittedEventOf<MachineEmits<M>>
     ) => Effect.Effect<void, unknown, R>
   }) => Layer.Layer<never, never, Storage | MessageStorage.MessageStorage | Sharding.Sharding | R | Services>
+}
+
+/**
+ * Failures of Cluster that keep a request from reaching an entity or its reply
+ * from reaching the caller.
+ *
+ * @category errors
+ * @since 0.48.0
+ */
+export type ClientError =
+  | ClusterError.MailboxFull
+  | ClusterError.AlreadyProcessingMessage
+  | ClusterError.PersistenceError
+  | ClusterError.EntityNotAssignedToRunner
+
+/**
+ * A client for one Cluster machine, addressed by its entity id.
+ *
+ * **Details**
+ *
+ * `send` takes what `send` of a local machine reference takes: an event of the
+ * machine's input protocol, as a plain value or as built by a constructor of
+ * `Machine.events`. It decodes the event as a local reference does, sends it
+ * through the persisted `send` RPC of the entity, and succeeds once the request
+ * is committed or recognized as a redelivery.
+ *
+ * An event that its schema refuses is rejected as `InvalidEvent` before it is
+ * sent, and the machine never sees it. A request that the machine rejects fails
+ * with the same {@link Rejected}, carrying its reason. A local machine instead
+ * fails when it is sent an event that its schema refuses, because a local
+ * `send` does not wait for the step.
+ *
+ * **Gotchas**
+ *
+ * Failures of Cluster itself, such as a full mailbox, are {@link ClientError}s.
+ * A request that ended in one may still have been delivered, and is delivered at
+ * most once when it is sent again.
+ *
+ * @category models
+ * @since 0.48.0
+ */
+export interface Client<M extends Machine.Machine.Any> {
+  /** Entity id of the machine this client addresses. */
+  readonly entityId: string
+
+  /** Sends one input event and waits until it is committed or rejected. */
+  readonly send: (
+    event: Machine.Machine.EventInputOf<MachineEvents<M>>
+  ) => Effect.Effect<void, Rejected | ClientError>
 }
 
 type MachineServices<M extends Machine.Machine.Any> =

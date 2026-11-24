@@ -124,6 +124,28 @@ const owningOwner = definition.handle({
   states: { Busy: { invoke: { src: "grandparent", onFailure: { stay: true } } } }
 })
 
+// A state that picks its work by a condition requires what every choice requires.
+declare const flag: boolean
+const choosingTimer = definition.handle({
+  initial,
+  states: { Busy: { invoke: { src: flag ? "load" : "wait", onDone: { stay: true } } } }
+})
+const choosingStream = definition.handle({
+  initial,
+  states: { Busy: { invoke: { src: flag ? "feed" : "stopping", onElement: { stay: true }, onDone: { stay: true } } } }
+})
+const choosingInList = definition.handle({
+  initial,
+  states: {
+    Busy: {
+      invoke: [
+        { src: "wait", onDone: { stay: true } },
+        { src: flag ? "stopStored" : "load", onDone: { stay: true } }
+      ]
+    }
+  }
+})
+
 type Services<M extends Machine.Machine.Any> = Machine.Machine.Services<M>
 
 describe("InvocationSupport", () => {
@@ -151,6 +173,14 @@ describe("InvocationSupport", () => {
       | Machine.InvocationSupport<"Stream">
       | Machine.InvocationSupport<"Logic">
     >()
+  })
+
+  it("is required by every source a state can pick by a condition", () => {
+    expect<Services<typeof choosingTimer>>().type.toBe<Database>()
+    expect<Services<typeof choosingStream>>().type.toBe<
+      Feed | Machine.MachineRuntime | Machine.InvocationSupport<"Stream">
+    >()
+    expect<Services<typeof choosingInList>>().type.toBe<Database | Machine.MachineRuntime>()
   })
 
   it("reaches a parent from the child machines it invokes", () => {
@@ -302,6 +332,15 @@ describe("ClusterMachine", () => {
     ClusterMachine.make("StoppingStream", stoppingStream, options)
     // @ts-expect-error { readonly invocations: "Logic"; readonly capabilities: "MachineRuntime"; }
     ClusterMachine.make("Spawning", spawning, options)
+  })
+
+  it("refuses a machine whose state can pick unsupported work by a condition", () => {
+    const layer = ClusterMachine.make("ChoosingTimer", choosingTimer, options).toLayer()
+    expect<Layer.Services<typeof layer>>().type.toBe<Host | Database>()
+    // @ts-expect-error { readonly invocations: "Stream"; readonly capabilities: "MachineRuntime"; }
+    ClusterMachine.make("ChoosingStream", choosingStream, options)
+    // @ts-expect-error { readonly invocations: never; readonly capabilities: "MachineRuntime"; }
+    ClusterMachine.make("ChoosingInList", choosingInList, options)
   })
 
   it("names what the child machines of a machine use", () => {

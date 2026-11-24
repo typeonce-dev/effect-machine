@@ -15,6 +15,7 @@ describe("ClusterMachine", () => {
       ClusterMachine.Accepted | ClusterMachine.Rejected
     >()
     expect<Schema.Schema.Type<typeof ClusterMachine.RejectionReason>>().type.toBe<
+      | "InvalidEvent"
       | "DefinitionIdMismatch"
       | "VersionMismatch"
       | "InvalidCheckpoint"
@@ -365,5 +366,29 @@ describe("ClusterMachine", () => {
     expect<Layer.Services<typeof layer>>().type.toBe<
       ClusterMachine.Storage | MessageStorage.MessageStorage | Sharding.Sharding | SnapshotDecoding | SnapshotEncoding
     >()
+  })
+  it("gives a client that takes what a local reference takes, and fails with a rejection", () => {
+    const Events = Machine.events({ Rename: { name: Schema.String }, Archive: {} })
+    const machine = Machine.make({
+      root: Machine.state({ states: { Draft: {} } }),
+      events: Events,
+      internalEvents: Machine.internalEvents({ Touched: {} })
+    }).handle({
+      initial: { target: "Draft" },
+      states: { Draft: { on: { Rename: { stay: true }, Archive: { stay: true }, Touched: { stay: true } } } }
+    })
+    const adapter = ClusterMachine.make("Document", machine, { version: "1" })
+    expect<Effect.Services<typeof adapter.client>>().type.toBe<Sharding.Sharding>()
+    const client = null! as Effect.Success<typeof adapter.client> extends (id: string) => infer C ? C : never
+    expect(client).type.toBe<ClusterMachine.Client<typeof machine>>()
+    expect(client.send).type.toBeCallableWith(Events.Rename({ name: "report" }))
+    expect(client.send).type.toBeCallableWith({ _tag: "Rename" as const, name: "report" })
+    expect(client.send).type.toBeCallableWith(Events.Archive())
+    expect(client.send).type.not.toBeCallableWith({ _tag: "Touched" as const })
+    expect(client.send).type.not.toBeCallableWith({ _tag: "Rename" as const, name: 1 })
+    expect<Effect.Error<ReturnType<typeof client.send>>>().type.toBe<
+      ClusterMachine.Rejected | ClusterMachine.ClientError
+    >()
+    expect<Effect.Services<ReturnType<typeof client.send>>>().type.toBe<never>()
   })
 })
