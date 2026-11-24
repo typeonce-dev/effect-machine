@@ -19,6 +19,8 @@ import type * as Stream from "effect/Stream"
 import * as internal from "../../internal/machine/cluster.js"
 import * as Protocol from "../../internal/machine/clusterProtocol.js"
 import { Accepted, MachineFailedError, ReadError, Rejected, Storage } from "../../internal/machine/clusterProtocol.js"
+import * as StorageCheck from "../../internal/machine/clusterStorageCheck.js"
+import { StorageCheckFailure } from "../../internal/machine/clusterStorageCheck.js"
 import type { EnsureExecutable } from "../../internal/machine/readiness.js"
 import type * as Machine from "../../Machine.js"
 
@@ -837,6 +839,63 @@ export const makeMemory: Effect.Effect<Storage["Service"]> = internal.makeMemory
  * @since 0.4.0
  */
 export const layerMemory: Layer.Layer<Storage> = internal.layerMemory
+
+/**
+ * Checks that a {@link Storage} keeps the contract that Cluster machines rely
+ * on, and fails with the first scenario it breaks.
+ *
+ * **When to use**
+ *
+ * Use in the tests of a `Storage` of your own, against the database it runs
+ * on.
+ *
+ * **Details**
+ *
+ * The check commits to new entities of its own entity types, and so runs
+ * against a store that holds other machines. It checks that:
+ *
+ * - every field of a checkpoint is stored unchanged, including a 64-bit request
+ *   id;
+ * - only the revision after the stored one commits;
+ * - a committed request is a `Duplicate` whatever the revision, and is
+ *   reported as processed with the checkpoint it committed;
+ * - a rejected commit writes nothing and records no request;
+ * - a commit whose origin is not a request is never a `Duplicate`;
+ * - entities of other ids and types are kept apart;
+ * - of two concurrent commits of one revision, one commits.
+ *
+ * With `withTransaction`, it also checks that a commit inside a transaction
+ * that fails is rolled back. Pass the `withTransaction` of the
+ * `MessageStorage` that the store runs beside.
+ *
+ * **Example** (Checking the in-memory store)
+ *
+ * ```ts import.meta.vitest
+ * import { ClusterMachine } from "@typeonce/effect-machine/cluster"
+ * import { Effect } from "effect"
+ *
+ * const program = Effect.flatMap(ClusterMachine.makeMemory, (storage) => ClusterMachine.checkStorage(storage))
+ *
+ * await Effect.runPromise(program) // => undefined
+ * ```
+ *
+ * @category testing
+ * @since 0.48.0
+ */
+export const checkStorage: (
+  storage: Storage["Service"],
+  options?: {
+    readonly withTransaction?: <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.Effect<A, E, R>
+  }
+) => Effect.Effect<void, StorageCheckFailure | ClusterError.PersistenceError> = StorageCheck.check
+
+/**
+ * The scenario of {@link checkStorage} that a store breaks, and how.
+ *
+ * @category errors
+ * @since 0.48.0
+ */
+export { StorageCheckFailure }
 
 /**
  * Creates a persisted Cluster entity adapter for a machine.
