@@ -69,14 +69,16 @@ export const makeMemory: Effect.Effect<Storage["Service"]> = Effect.sync(() => {
 
 export const layerMemory: Layer.Layer<Storage> = Layer.effect(Storage, makeMemory)
 
-// A `Sharding` runner provides the latch that holds a keep-alive request.
-// `Entity.makeTestClient` provides none, and has no crash to recover from either.
-// The `Entity.KeepAliveHandler` that other hosts provide instead is not used.
+// A `Sharding` runner provides the latch that holds a keep-alive request, and
+// another host can provide an `Entity.KeepAliveHandler` instead, which
+// `Entity.keepAlive` prefers. `Entity.makeTestClient` provides neither, and has
+// no crash to recover from either.
 const makeKeepAlive = Effect.gen(function*() {
   const context = yield* Effect.context<Sharding.Sharding | Entity.CurrentAddress>()
-  const latch = yield* Effect.serviceOption(Entity.KeepAliveLatch)
+  const supported = Option.isSome(yield* Effect.serviceOption(Entity.KeepAliveHandler)) ||
+    Option.isSome(yield* Effect.serviceOption(Entity.KeepAliveLatch))
   return (enabled: boolean): Effect.Effect<void> =>
-    enabled && Option.isNone(latch)
+    enabled && !supported
       ? Effect.logWarning("This Cluster runner cannot keep a machine alive, so its work is not recovered after a crash")
       : Effect.provideContext(Entity.keepAlive(enabled), context)
 })

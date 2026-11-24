@@ -651,7 +651,9 @@ export const layerMemory: Layer.Layer<Storage> = internal.layerMemory
  * is stored. The end of the work is applied as a step of its own, in order with
  * requests, and only the state it leads to is stored, never the result itself.
  * While work should run the entity is kept alive, so it is not passivated, and
- * Cluster brings it up on another runner after a crash.
+ * Cluster brings it up on another runner after a crash. It is kept alive through
+ * `Entity.keepAlive`, so a host that provides an `Entity.KeepAliveHandler` is
+ * told when to keep it, and when to let it go.
  *
  * An entity that comes up starts the work of its stored state again. Input
  * mappers run again against that state, with `Machine.InitialEvent` as their
