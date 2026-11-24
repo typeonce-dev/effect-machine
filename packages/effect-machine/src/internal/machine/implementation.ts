@@ -1,4 +1,4 @@
-import type { Enqueue, Machine } from "../../Machine.js"
+import type { Commands, Machine } from "../../Machine.js"
 import type { CapturedInvocation } from "./capturedInvocation.js"
 import type { EventTransition } from "./transition.js"
 
@@ -6,7 +6,7 @@ import type { EventTransition } from "./transition.js"
 // state/event types. Stored transitions are evaluated callbacks, not the public
 // selector factories accepted by Definition.handle.
 type Transition = EventTransition<any, any>
-type Action = (context: any, enqueue: Enqueue<any, any>) => undefined
+type Action = (context: any, enqueue: Commands<any, any>) => undefined
 
 export interface CapturedStateConfig {
   readonly entry?: Action
@@ -20,7 +20,7 @@ export interface CapturedStateConfig {
   readonly output?: (context: any) => unknown
   readonly history?: Readonly<
     Record<string, {
-      readonly default: (context: any, enqueue: Enqueue<any, any>) => Machine.HandlerResult<any>
+      readonly default: (context: any, enqueue: Commands<any, any>) => Machine.HandlerResult<any>
     }>
   >
 }

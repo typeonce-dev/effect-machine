@@ -165,7 +165,7 @@ const renderIncomingTransition = (
 
 const invocationTitle = (invocation: VisualizationInvocation): string => {
   switch (invocation.type) {
-    case "process":
+    case "logic":
     case "effect":
     case "timer":
     case "stream":

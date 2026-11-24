@@ -4070,7 +4070,7 @@ describe("ClusterMachine", () => {
               yield* ref.send(Events.Load({ id: "a" }))
               assert.isTrue(Exit.hasDies(yield* Effect.exit(ref.join)))
               const local = yield* ref.snapshot
-              assert(local.status === "error")
+              assert(local.status === "failed")
               assert.strictEqual(local.state.state.path, "Loading")
               assert.strictEqual(failure, `Error: ${(Cause.squash(local.cause) as Error).message}`)
               assert.deepStrictEqual(localOrder, ["first", ...order.filter((step) => step !== "first")])

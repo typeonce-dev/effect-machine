@@ -217,8 +217,8 @@ describe("inline invoke", () => {
       const ref = yield* LocalMachine.start(machine)
       yield* ref.changes.pipe(Stream.runDrain)
       const snapshot = yield* ref.snapshot
-      assert.strictEqual(snapshot.status, "error")
-      if (snapshot.status !== "error") {
+      assert.strictEqual(snapshot.status, "failed")
+      if (snapshot.status !== "failed") {
         return assert.fail("expected an error snapshot")
       }
       assert.strictEqual(Cause.squash(snapshot.cause), defect)
@@ -397,8 +397,8 @@ describe("inline invoke", () => {
         yield* Effect.yieldNow
       }
       const snapshot = yield* ref.snapshot
-      assert.strictEqual(snapshot.status, "error")
-      if (snapshot.status !== "error") {
+      assert.strictEqual(snapshot.status, "failed")
+      if (snapshot.status !== "failed") {
         return assert.fail("expected an error snapshot")
       }
       assert.strictEqual(Cause.squash(snapshot.cause), defect)
@@ -437,8 +437,8 @@ describe("inline invoke", () => {
         yield* Effect.yieldNow
       }
       const snapshot = yield* ref.snapshot
-      assert.strictEqual(snapshot.status, "error")
-      if (snapshot.status !== "error") {
+      assert.strictEqual(snapshot.status, "failed")
+      if (snapshot.status !== "failed") {
         return assert.fail("expected an error snapshot")
       }
       assert.strictEqual(Cause.squash(snapshot.cause), failure)

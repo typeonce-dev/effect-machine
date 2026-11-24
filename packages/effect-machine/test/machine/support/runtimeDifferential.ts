@@ -30,11 +30,11 @@ const assertRuntimeSnapshot = Effect.fn(function*(
 ) {
   assert.notStrictEqual(
     actual.status,
-    "error",
-    `${label} unexpectedly failed${actual.status === "error" ? `: ${Cause.pretty(actual.cause)}` : ""}`
+    "failed",
+    `${label} unexpectedly failed${actual.status === "failed" ? `: ${Cause.pretty(actual.cause)}` : ""}`
   )
   assert.notStrictEqual(actual.status, "stopped", `${label} unexpectedly stopped`)
-  if (actual.status === "error" || actual.status === "stopped") return
+  if (actual.status === "failed" || actual.status === "stopped") return
   assert.strictEqual(actual.status, expected.done ? "done" : "active", `${label} status`)
   assert.deepStrictEqual(yield* encoded(machine, actual.state), yield* encoded(machine, expected.state), label)
   if (actual.status === "done") assert.deepStrictEqual(actual.output, expected.output, `${label} output`)
@@ -49,7 +49,7 @@ const waitForBoundary = (
     // fiber acknowledges the publication caused by the event being sent.
     Stream.drop(1),
     Stream.filter((snapshot) =>
-      snapshot.status === "error" ||
+      snapshot.status === "failed" ||
       (isDeepStrictEqual(snapshot.state, expected.state) && snapshot.status === (expected.done ? "done" : "active"))
     ),
     Stream.take(1),

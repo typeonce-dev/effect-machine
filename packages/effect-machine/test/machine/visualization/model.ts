@@ -71,7 +71,7 @@ export type InvocationDefinition =
   | {
     readonly source: string
     readonly id: string
-    readonly type: "process"
+    readonly type: "logic"
   }
   | {
     readonly source: string

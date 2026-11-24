@@ -21,7 +21,7 @@ export const classifyOutcome = <State, Error, Output>(
         snapshot
       }
     }
-    case "error": {
+    case "failed": {
       const failure = snapshot.cause.reasons.find(Cause.isFailReason)
       if (failure !== undefined) {
         return {
@@ -90,7 +90,7 @@ export const waitFor: typeof Machine.waitFor = dual(2, <State, Event, Error, Out
           switch (snapshot.status) {
             case "active":
               return Effect.succeed(true)
-            case "error":
+            case "failed":
               return Effect.failCause(snapshot.cause)
             case "stopped":
               return Effect.fail(new StoppedError())

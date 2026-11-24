@@ -24,7 +24,7 @@ describe("Machine invocation inspection", () => {
   it("preserves source path and invocation kind unions", () => {
     const definition = Machine.invocationDefinitions(machine)[0]!
     expect(definition.source).type.toBe<"" | "Loading" | "Dynamic">()
-    expect(definition.type).type.toBe<"process" | "effect" | "stream" | "timer" | "machine">()
+    expect(definition.type).type.toBe<"logic" | "effect" | "stream" | "timer" | "machine">()
   })
   it("narrows kind-specific descriptive metadata", () => {
     const definition = Machine.invocationDefinitions(machine)[0]!

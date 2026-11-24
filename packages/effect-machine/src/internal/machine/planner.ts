@@ -5,7 +5,7 @@
  */
 
 import * as Effect from "effect/Effect"
-import type { Enqueue, InitialEvent as MachineInitialEvent, Machine, MachineTarget } from "../../Machine.js"
+import type { Commands, InitialEvent as MachineInitialEvent, Machine, MachineTarget } from "../../Machine.js"
 import * as CapturedInvocation from "./capturedInvocation.js"
 import { makeCollector, type RuntimeCommand } from "./command.js"
 import {
@@ -198,7 +198,7 @@ export const normalizeTransition = <States extends Machine.StateSchemas, Context
 
 const collectStateAction = <Context, Event>(
   machine: Machine.Any,
-  handler: ((context: Context, enqueue: Enqueue<any, any>) => Machine.StateActionResult) | undefined,
+  handler: ((context: Context, enqueue: Commands<any, any>) => Machine.StateActionResult) | undefined,
   context: Context
 ) => {
   const collected = makeCollector<Event>(machine)
@@ -247,7 +247,7 @@ const collectTransition = <
 
 const collectStateInitializer = (
   machine: Machine.Any,
-  handler: (context: any, enqueue: Enqueue<any, any>) => unknown,
+  handler: (context: any, enqueue: Commands<any, any>) => unknown,
   context: any
 ) => {
   const collected = makeCollector<unknown>(machine)

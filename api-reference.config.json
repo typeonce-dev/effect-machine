@@ -177,8 +177,8 @@
               "label": "Branch selection"
             },
             {
-              "reflection": "Enqueue",
-              "label": "Enqueued commands"
+              "reflection": "Commands",
+              "label": "Commands"
             }
           ]
         },

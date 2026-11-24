@@ -830,7 +830,7 @@ describe("MachineTest causal runtime commands", () => {
       assert.match(formatted, /attempted 1:/)
       assert.match(formatted, /failure: phase=execution index=1/)
       const snapshot = yield* ref.snapshot
-      assert.strictEqual(snapshot.status, "error")
+      assert.strictEqual(snapshot.status, "failed")
     }))
   it.effect("does not confuse a processing StoppedError with mailbox rejection", () =>
     Effect.gen(function*() {
@@ -840,7 +840,7 @@ describe("MachineTest causal runtime commands", () => {
       const snapshot = yield* ref.snapshot
       const failedRef: typeof ref = {
         ...ref,
-        snapshot: Effect.succeed({ status: "error", state: snapshot.state, cause: Cause.fail(stopped) })
+        snapshot: Effect.succeed({ status: "failed", state: snapshot.state, cause: Cause.fail(stopped) })
       }
       const failingProbe: typeof attached = {
         ...attached,

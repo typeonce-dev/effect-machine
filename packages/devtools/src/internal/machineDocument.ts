@@ -95,8 +95,8 @@ const trigger = (value: Machine.Machine.TransitionTrigger): Public.Trigger => {
 const invocation = (value: Machine.Machine.InvocationDefinition, id: string): Public.Invocation => {
   const common = { id, source: value.source, lifecycleId: value.id }
   switch (value.type) {
-    case "process":
-      return { ...common, type: "process" }
+    case "logic":
+      return { ...common, type: "logic" }
     case "effect":
       return { ...common, type: "effect", outcomes: { ...value.outcomes } }
     case "timer":

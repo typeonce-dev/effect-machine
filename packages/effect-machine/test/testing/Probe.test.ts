@@ -188,6 +188,6 @@ describe("MachineTest probe", () => {
       )
       assert.instanceOf(error, Machine.MachineSchemaDecodeError)
       const snapshot = yield* ref.snapshot
-      assert.strictEqual(snapshot.status, "error")
+      assert.strictEqual(snapshot.status, "failed")
     }))
 })

@@ -4,19 +4,19 @@
  * @since 0.4.0
  */
 
-import type { Command, Enqueue, Machine } from "../../Machine.js"
+import type { Command, Commands, Machine } from "../../Machine.js"
 import { decodeEmitSync, decodeEventSync } from "./protocol.js"
 
 export type RuntimeCommand = Command
 
-/** Destination accepted by `Enqueue.sendTo`, erased over the child's event type. */
+/** Destination accepted by `Commands.sendTo`, erased over the child's event type. */
 export type SendToTarget = Extract<RuntimeCommand, { readonly _tag: "SendTo" }>["target"]
 
-/** Child accepted by `Enqueue.stop`, erased over the child's event type. */
+/** Child accepted by `Commands.stop`, erased over the child's event type. */
 export type StopTarget = Extract<RuntimeCommand, { readonly _tag: "Stop" }>["child"]
 
 export interface Collected<Event> {
-  readonly enqueue: Enqueue<Event, unknown>
+  readonly enqueue: Commands<Event, unknown>
   readonly commands: Array<RuntimeCommand>
   readonly raisedEvents: Array<Event>
   readonly emittedEvents: Array<unknown>

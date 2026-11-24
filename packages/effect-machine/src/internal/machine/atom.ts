@@ -375,7 +375,7 @@ const makeRuntimeResultAtom = <State, Error, Output, StartError>(
         previous: get.self(),
         waiting: current.waiting
       })
-    } else if (current.value.status === "error") {
+    } else if (current.value.status === "failed") {
       return AsyncResult.failureWithPrevious(current.value.cause, {
         previous: get.self(),
         waiting: current.waiting
@@ -417,7 +417,7 @@ const makeChildRuntimeResultAtom = <State, Error, Output, StartError>(
       return AsyncResult.success(Option.none(), {
         waiting: current.waiting
       })
-    } else if (current.value.value.status === "error") {
+    } else if (current.value.value.status === "failed") {
       return AsyncResult.failureWithPrevious(current.value.value.cause, {
         previous: get.self(),
         waiting: current.waiting
@@ -906,7 +906,7 @@ export const can = (event: unknown) => {
           previous,
           waiting: current.waiting
         })
-      } else if (current.value.status === "error") {
+      } else if (current.value.status === "failed") {
         return AsyncResult.failureWithPrevious(current.value.cause, {
           previous,
           waiting: current.waiting
