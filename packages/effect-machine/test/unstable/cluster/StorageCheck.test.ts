@@ -1,5 +1,6 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Effect, Option } from "effect"
+import { EntityAddress, EntityType } from "effect/cluster"
 import { CommitResult } from "../../../src/unstable/cluster/ClusterMachine.js"
 import { ClusterMachine } from "../../../src/unstable/cluster/index.js"
 
@@ -51,7 +52,12 @@ describe("ClusterMachine.checkStorage", () => {
   it.effect("fails a store that keys entities by id alone", () =>
     Effect.gen(function*() {
       const scenario = yield* failure(broken((storage) => {
-        const byId = (address: Parameters<Service["load"]>[0]) => ({ ...address, entityType: "Any" }) as typeof address
+        const byId = (address: EntityAddress.EntityAddress) =>
+          EntityAddress.make({
+            shardId: address.shardId,
+            entityType: EntityType.make("Any"),
+            entityId: address.entityId
+          })
         return {
           load: (address) => storage.load(byId(address)),
           loadForRequest: (address, id) => storage.loadForRequest(byId(address), id),

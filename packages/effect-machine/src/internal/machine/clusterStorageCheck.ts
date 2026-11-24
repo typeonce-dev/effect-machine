@@ -210,7 +210,11 @@ const scenarios = [
     Effect.gen(function*() {
       const name = "keeps entities of other ids and types apart"
       const address = freshAddress()
-      const sameId = EntityAddress.make({ ...address, entityType: EntityType.make("StorageCheckOther") })
+      const sameId = EntityAddress.make({
+        shardId: address.shardId,
+        entityType: EntityType.make("StorageCheckOther"),
+        entityId: address.entityId
+      })
       const first = checkpoint(1, request(1))
       yield* expectResult(name, "the first entity", yield* storage.commit(address, first), "Committed")
       yield* expectStored(name, storage, sameId, undefined)
