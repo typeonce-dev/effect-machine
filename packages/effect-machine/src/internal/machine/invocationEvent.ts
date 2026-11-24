@@ -4,9 +4,11 @@
  *
  * @since 0.9.0
  */
+import type { InvocationEvent as PublicInvocationEvent } from "../../Machine.js"
+import { InvocationEventTypeId as PublicInvocationEventTypeId } from "./symbols.js"
 
 /** @internal */
-export const InvocationEventTypeId: unique symbol = Symbol("effect/Machine/InvocationEvent")
+export const InvocationMessageTypeId: unique symbol = Symbol("effect/Machine/InvocationMessage")
 
 /** @internal */
 export const GenerationId: unique symbol = Symbol("effect/Machine/InvocationEvent/Generation")
@@ -27,7 +29,7 @@ export interface Generation {
 }
 
 interface Base {
-  readonly [InvocationEventTypeId]: true
+  readonly [InvocationMessageTypeId]: true
   // Keyed by a symbol so the runtime handle stays out of inspection payloads,
   // JSON, and canonical value formatting, like the type id above.
   readonly [GenerationId]: Generation
@@ -56,7 +58,7 @@ export type InvocationEvent =
 
 /** @internal */
 export const done = (path: string, id: string, generation: Generation, output: unknown): InvocationEvent => ({
-  [InvocationEventTypeId]: true,
+  [InvocationMessageTypeId]: true,
   [GenerationId]: generation,
   path,
   id,
@@ -66,7 +68,7 @@ export const done = (path: string, id: string, generation: Generation, output: u
 
 /** @internal */
 export const element = (path: string, id: string, generation: Generation, value: unknown): InvocationEvent => ({
-  [InvocationEventTypeId]: true,
+  [InvocationMessageTypeId]: true,
   [GenerationId]: generation,
   path,
   id,
@@ -76,7 +78,7 @@ export const element = (path: string, id: string, generation: Generation, value:
 
 /** @internal */
 export const failure = (path: string, id: string, generation: Generation, error: unknown): InvocationEvent => ({
-  [InvocationEventTypeId]: true,
+  [InvocationMessageTypeId]: true,
   [GenerationId]: generation,
   path,
   id,
@@ -86,7 +88,7 @@ export const failure = (path: string, id: string, generation: Generation, error:
 
 /** @internal */
 export const snapshot = (path: string, id: string, generation: Generation, value: unknown): InvocationEvent => ({
-  [InvocationEventTypeId]: true,
+  [InvocationMessageTypeId]: true,
   [GenerationId]: generation,
   path,
   id,
@@ -103,4 +105,25 @@ export const isCurrent = (event: InvocationEvent): boolean => event[GenerationId
 
 /** @internal */
 export const isInvocationEvent = (value: unknown): value is InvocationEvent =>
-  typeof value === "object" && value !== null && InvocationEventTypeId in value
+  typeof value === "object" && value !== null && InvocationMessageTypeId in value
+
+const kinds = {
+  element: "Element",
+  done: "Done",
+  failure: "Failure",
+  snapshot: "Snapshot"
+} as const
+
+/**
+ * The lifecycle event that user code receives for a step caused by an
+ * invocation. It names the invocation and what it reported, and leaves out the
+ * generation handle and the reported value.
+ *
+ * @internal
+ */
+export const toLifecycleEvent = (event: InvocationEvent): PublicInvocationEvent => ({
+  _tag: PublicInvocationEventTypeId,
+  path: event.path,
+  id: event.id,
+  kind: kinds[event.type]
+})

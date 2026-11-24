@@ -31,12 +31,13 @@ export interface Options {
 const labelOf = (source: string, input: unknown): string =>
   input === undefined ? source : `${source}(${typeof input === "string" ? input : JSON.stringify(input)})`
 
-/**
- * The name of a lifecycle event. The outcome of work has no tag at run time,
- * although the type of lifecycle events says that it has one.
- */
+/** The name of a lifecycle event. */
 const eventName = (event: { readonly _tag: PropertyKey }): string =>
-  Machine.isInitialEvent(event) ? "initial" : event._tag === undefined ? "outcome" : String(event._tag)
+  Machine.isInitialEvent(event)
+    ? "initial"
+    : Machine.isInvocationEvent(event)
+    ? `${event.kind} of ${event.path}/${event.id}`
+    : String(event._tag)
 
 export class Fixture {
   readonly runs: Array<Run> = []
