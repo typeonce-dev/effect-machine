@@ -63,6 +63,10 @@ const start = Effect.gen(function*() {
   return { storage, messages, runner }
 })
 
+// Each test steps a TestClock through hours of polls, which takes seconds of
+// real time on a loaded runner.
+const timeout = 20_000
+
 describe("ClusterMachine timers that wait longer than DurableClock keeps in memory", () => {
   it.effect("save one delayed message with the step, and keep nothing alive", () =>
     Effect.gen(function*() {
@@ -86,7 +90,7 @@ describe("ClusterMachine timers that wait longer than DurableClock keeps in memo
       yield* send(runner, { _tag: "Note" })
       yield* settle
       assert.lengthOf(wakes(messages.driver), 1)
-    }).pipe(Effect.scoped))
+    }).pipe(Effect.scoped), timeout)
 
   it.effect("let the entity leave memory, and bring it back when the timer is due", () =>
     Effect.gen(function*() {
@@ -102,7 +106,7 @@ describe("ClusterMachine timers that wait longer than DurableClock keeps in memo
       assert.strictEqual(leafOf(storage), "Expired")
       assert.lengthOf(unprocessedOf(messages.driver, "wake"), 0)
       assert.strictEqual(keptAlive(messages.driver), 0)
-    }).pipe(Effect.scoped))
+    }).pipe(Effect.scoped), timeout)
 
   it.effect("fire on another runner after the first one stops", () =>
     Effect.gen(function*() {
@@ -118,7 +122,7 @@ describe("ClusterMachine timers that wait longer than DurableClock keeps in memo
       yield* advance("30 minutes")
       yield* advance(pollInterval)
       assert.strictEqual(leafOf(storage), "Expired")
-    }).pipe(Effect.scoped))
+    }).pipe(Effect.scoped), timeout)
 
   it.effect("ignore the message of an activation that ended", () =>
     Effect.gen(function*() {
@@ -141,7 +145,7 @@ describe("ClusterMachine timers that wait longer than DurableClock keeps in memo
       yield* advance(pollInterval)
       assert.strictEqual(leafOf(storage), "Expired")
       assert.lengthOf(unprocessedOf(messages.driver, "wake"), 0)
-    }).pipe(Effect.scoped))
+    }).pipe(Effect.scoped), timeout)
 
   it.effect("keep a short timer in memory, without a message", () =>
     Effect.gen(function*() {
@@ -153,7 +157,7 @@ describe("ClusterMachine timers that wait longer than DurableClock keeps in memo
       yield* advance("45 seconds")
       assert.strictEqual(leafOf(storage), "Expired")
       assert.strictEqual(keptAlive(messages.driver), 0)
-    }).pipe(Effect.scoped))
+    }).pipe(Effect.scoped), timeout)
 
   it.effect("give a long wait stored without a message one at the next wake", () =>
     Effect.gen(function*() {
@@ -176,7 +180,7 @@ describe("ClusterMachine timers that wait longer than DurableClock keeps in memo
       yield* advance("59 minutes")
       yield* advance(pollInterval)
       assert.strictEqual(leafOf(storage), "Expired")
-    }).pipe(Effect.scoped))
+    }).pipe(Effect.scoped), timeout)
 
   it.effect("reject the step when its message cannot be saved", () =>
     Effect.gen(function*() {
@@ -197,5 +201,5 @@ describe("ClusterMachine timers that wait longer than DurableClock keeps in memo
       yield* send(runner, { _tag: "Wait", seconds: 3600 })
       yield* settle
       assert.lengthOf(wakes(messages.driver), 1)
-    }).pipe(Effect.scoped))
+    }).pipe(Effect.scoped), timeout)
 })
