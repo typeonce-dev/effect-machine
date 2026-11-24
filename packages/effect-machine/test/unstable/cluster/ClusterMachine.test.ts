@@ -1462,6 +1462,7 @@ describe("ClusterMachine", () => {
         readonly idle?: Duration.Input
         readonly withTransaction?: MessageStorage.MessageStorage["Service"]["withTransaction"]
         readonly storage?: TestStorage
+        readonly inMemoryThreshold?: Duration.Input
       },
       body: (host: {
         readonly storage: TestStorage
@@ -1492,11 +1493,15 @@ describe("ClusterMachine", () => {
         storage.service,
         options.enqueue,
         options.idle,
-        options.withTransaction === undefined ? undefined : { withTransaction: options.withTransaction }
+        options.withTransaction === undefined ? undefined : { withTransaction: options.withTransaction },
+        options.inMemoryThreshold
       )))
     }
 
     /** Keep-alive requests that wait for a reply, which is what revives an entity. */
+    /** Delayed messages that wake the entity for a long timer, not yet processed. */
+    const wakes = (driver: MessageStorage.MemoryDriver["Service"]) =>
+      Array.from(driver.unprocessed).filter((envelope) => envelope._tag === "Request" && envelope.tag === "wake")
     const keptAlive = (driver: MessageStorage.MemoryDriver["Service"]) =>
       Array.from(driver.unprocessed).filter((envelope) =>
         envelope._tag === "Request" && envelope.tag === "Cluster/Entity/keepAlive"
@@ -3501,7 +3506,9 @@ describe("ClusterMachine", () => {
                 assert.strictEqual(new Date(due).getTime(), due)
                 yield* advance("10 seconds")
                 assert.strictEqual(pathOf(stored()), due === 8.64e15 ? "Waiting" : "Expired")
-                assert.strictEqual(keptAlive(driver), due === 8.64e15 ? 1 : 0)
+                // A timer that never ends keeps nothing alive, and no message wakes it.
+                assert.strictEqual(keptAlive(driver), 0)
+                assert.strictEqual(wakes(driver).length, 0)
               }))
           }
         }))
@@ -3904,9 +3911,11 @@ describe("ClusterMachine", () => {
               const storage = makeTestStorage()
               const messages = yield* makeMessages
               const delivered = recordKeepAlive(messages)
+              // Within the in-memory threshold, the timer keeps the entity.
               const runner = yield* startRunner(makeTimer(), storage, messages, {
                 idle: 0,
-                overrides: delivered.overrides
+                overrides: delivered.overrides,
+                inMemoryThreshold: "1 day"
               })
               assertAccepted(yield* runner.send(wait(36 * 60)))
               for (let minutes = 0; minutes < 35; minutes++) {
@@ -3933,7 +3942,7 @@ describe("ClusterMachine", () => {
               const storage = makeTestStorage()
               const messages = yield* makeMessages
               const machine = makeTimer()
-              const first = yield* startRunner(machine, storage, messages, { idle: 0 })
+              const first = yield* startRunner(machine, storage, messages, { idle: 0, inMemoryThreshold: "1 day" })
               const dueAt = (yield* now) + 30 * 60_000
               assertAccepted(yield* first.send(wait(30 * 60)))
               for (let minutes = 0; minutes < 25; minutes++) yield* advance("1 minute")
@@ -3942,7 +3951,7 @@ describe("ClusterMachine", () => {
               yield* advance("1 minute")
               assertHeld(messages.driver)
 
-              const second = yield* startRunner(machine, storage, messages, { idle: 0 })
+              const second = yield* startRunner(machine, storage, messages, { idle: 0, inMemoryThreshold: "1 day" })
               yield* settle
               assert.deepStrictEqual(second.stored()?.status, waits(dueAt))
               yield* reach(dueAt, () => assert.strictEqual(pathOf(second.stored()), "Waiting"))
@@ -3954,7 +3963,7 @@ describe("ClusterMachine", () => {
 
         it.effect("is released when a timer is cancelled", () =>
           Effect.gen(function*() {
-            yield* run(makeTimer(), { idle: 0 }, ({ driver, send, sharding }) =>
+            yield* run(makeTimer(), { idle: 0, inMemoryThreshold: "1 day" }, ({ driver, send, sharding }) =>
               Effect.gen(function*() {
                 assertAccepted(yield* send(wait(3600)))
                 yield* advance("12 minutes")
@@ -4460,6 +4469,7 @@ describe("ClusterMachine", () => {
             const machine = makeTimer(evaluations)
             let lost = false
             const first = yield* startRunner(machine, storage, messages, {
+              inMemoryThreshold: "1 day",
               runnerStorage: Layer.effect(
                 RunnerStorage.RunnerStorage,
                 Effect.map(RunnerStorage.makeMemory, (runners) =>

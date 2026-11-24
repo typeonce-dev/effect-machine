@@ -510,7 +510,11 @@ export interface ClusterMachine<
   /** Machine definition executed by each entity instance. */
   readonly machine: M
 
-  /** Cluster entity exposing the persisted, schema-validated `send` RPC. */
+  /**
+   * Cluster entity exposing the persisted, schema-validated `send` RPC. The
+   * entity also answers the delayed messages that wake it for its long timers,
+   * which only the machine itself sends, so its type leaves them out.
+   */
   readonly entity: Entity.Entity<Type, SendRpc<MachineEvents<M>>>
 
   /**
@@ -800,10 +804,22 @@ export const layerMemory: Layer.Layer<Storage> = internal.layerMemory
  * of an entity after about ten minutes, so a machine whose work runs or whose
  * timer waits longer would not come up again after a crash.
  *
- * An entity stays in memory while a timer waits, so a very long timer holds
- * memory for as long as it waits. Due times are read from the wall clock of the
- * runner, so runners whose clocks differ complete a timer that moves between them
- * that much earlier or later.
+ * A timer that waits no longer than `DurableClock.InMemoryThreshold`, one
+ * minute by default, keeps its entity in memory, as a workflow keeps a short
+ * sleep. The step that stores a longer wait also saves, in the same
+ * transaction of `MessageStorage`, a message to the entity that Cluster
+ * delivers when the timer is due. Such a timer keeps nothing alive, so the
+ * entity may leave memory, and the message brings it back, here or on another
+ * runner. The path, the id, and the due time of the timer name the message, so
+ * the message of a wait that ended is ignored. A timer that never ends saves no
+ * message. A long wait stored before this version gets its message when its
+ * entity next comes up.
+ *
+ * A message is read by the runner every `entityMessagePollInterval`, so a long
+ * timer of an entity that left memory fires up to that much after it is due.
+ *
+ * Due times are read from the wall clock of the runner, so runners whose clocks
+ * differ complete a timer that moves between them that much earlier or later.
  *
  * A state that was stored before the machine declared one of its timers has no
  * due time for it. The entity evaluates the duration when it comes up, with

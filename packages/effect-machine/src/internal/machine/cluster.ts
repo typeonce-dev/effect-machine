@@ -3,8 +3,8 @@
  *
  * @since 0.4.0
  */
-import { ClusterSchema, Entity, MessageStorage } from "effect/cluster"
-import type { EntityAddress, Sharding, Snowflake } from "effect/cluster"
+import { ClusterSchema, Entity, MessageStorage, Sharding } from "effect/cluster"
+import type { EntityAddress, Snowflake } from "effect/cluster"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
@@ -15,6 +15,7 @@ import type { Checkpoint } from "../../unstable/cluster/ClusterMachine.js"
 import type { Client, ClientError, ClusterMachine } from "../../unstable/cluster/ClusterMachine.js"
 import * as ClusterInstance from "./clusterInstance.js"
 import { CommitResult, Rejected, SendResult, Storage } from "./clusterProtocol.js"
+import * as ClusterWake from "./clusterWake.js"
 import type { MachineSchemaDecodeError } from "./errors.js"
 import * as Protocol from "./protocol.js"
 import type { EnsureExecutable } from "./readiness.js"
@@ -212,7 +213,9 @@ export const make = <
     success: SendResult
   })
     .annotate(ClusterSchema.Persisted, true) as SendRpc<MachineEvents<M>>
-  const entity = Entity.make(type, [rpc])
+  // The `wake` RPC is the delayed message of a long timer, which only the
+  // machine itself sends. The public type of the entity leaves it out.
+  const entity = Entity.make(type, [rpc, ClusterWake.WakeRpc])
   const definitionId = machine.id ?? type
 
   const toLayer = <EnqueueR = never>(layerOptions?: {
@@ -223,19 +226,26 @@ export const make = <
     // does not require.
     entity.toLayer(
       Effect.gen(function*() {
+        const address = yield* Entity.CurrentAddress
+        const messageStorage = yield* MessageStorage.MessageStorage
         const instance = yield* ClusterInstance.make<Services | EnqueueR>({
           machine,
           definitionId,
           version: options.version,
           input,
-          address: yield* Entity.CurrentAddress,
+          address,
           storage: yield* Storage,
-          messageStorage: yield* MessageStorage.MessageStorage,
+          messageStorage,
           enqueue: layerOptions?.enqueue,
-          keepAlive: yield* makeKeepAlive
+          keepAlive: yield* makeKeepAlive,
+          wake: {
+            threshold: yield* ClusterWake.threshold,
+            save: ClusterWake.makeSave({ address, messageStorage, sharding: yield* Sharding.Sharding })
+          }
         })
         return entity.of({
-          send: (request) => instance.apply({ requestId: request.requestId, event: request.payload })
+          send: (request) => instance.apply({ requestId: request.requestId, event: request.payload }),
+          wake: (request) => instance.wake(request.payload)
         })
       })
     ) as Layer.Layer<
@@ -261,7 +271,7 @@ export const make = <
 
   return {
     machine,
-    entity,
+    entity: entity as unknown as Entity.Entity<Type, SendRpc<MachineEvents<M>>>,
     client,
     toLayer
   }
