@@ -56,6 +56,7 @@ export class Accepted extends Schema.TaggedClass<Accepted>("effect/cluster/Clust
 ) {}
 
 export const RejectionReason = Schema.Literals([
+  "InvalidEvent",
   "DefinitionIdMismatch",
   "VersionMismatch",
   "InvalidCheckpoint",
@@ -70,7 +71,7 @@ export const RejectionReason = Schema.Literals([
 
 export type RejectionReason = typeof RejectionReason.Type
 
-export class Rejected extends Schema.TaggedClass<Rejected>("effect/cluster/ClusterMachine/Rejected")(
+export class Rejected extends Schema.TaggedError<Rejected>("effect/cluster/ClusterMachine/Rejected")(
   "Rejected",
   {
     reason: RejectionReason,

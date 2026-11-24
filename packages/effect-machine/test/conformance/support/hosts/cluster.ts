@@ -1,4 +1,4 @@
-import { Effect, SchemaIssue, Scope } from "effect"
+import { Effect, Scope } from "effect"
 import { TestClock } from "effect/testing"
 import { Machine } from "../../../../src/index.js"
 import type { ClusterMachine } from "../../../../src/unstable/cluster/index.js"
@@ -6,8 +6,8 @@ import { makeMessages, makeTestStorage, startRunner } from "../../../unstable/cl
 import type { Answer, Host, Outcome } from "../host.js"
 import { decode, unsupported } from "../host.js"
 
-const answerOf = (result: ClusterMachine.Accepted | ClusterMachine.Rejected): Answer =>
-  result._tag === "Accepted" ? "Accepted" : result.reason === "MachineFailed" ? "Ended" : "Rejected"
+const answerOf = (rejected: ClusterMachine.Rejected): Answer =>
+  rejected.reason === "MachineFailed" ? "Ended" : "Rejected"
 
 const outcomeOf = (machine: Machine.Machine.Any, checkpoint: ClusterMachine.Checkpoint | undefined): Outcome => {
   if (checkpoint === undefined) return { _tag: "Running" }
@@ -16,8 +16,6 @@ const outcomeOf = (machine: Machine.Machine.Any, checkpoint: ClusterMachine.Chec
   const output = checkpoint.snapshot.completed?.find(({ path }) => path === "")?.output
   return output === undefined ? { _tag: "Final" } : { _tag: "Final", output }
 }
-
-const isRefusedPayload = (defect: unknown): boolean => defect instanceof Error && SchemaIssue.isIssue(defect.cause)
 
 // What a runner takes to come up, as the harness starts it.
 const startupMillis = 1001
@@ -58,14 +56,13 @@ export const clusterHost: Host = {
       },
       emitted,
       current: () => storage.history.at(-1)?.snapshot,
-      // The client refuses a payload that the schema of the event refuses, as a
-      // defect of its caller.
+      // Sends through the client of the adapter, which takes what a local
+      // reference takes.
       send: (event) =>
-        runner.send(event).pipe(
-          Effect.map(answerOf),
-          Effect.catchDefect((defect) =>
-            isRefusedPayload(defect) ? Effect.succeed("Rejected" as const) : Effect.die(defect)
-          )
+        runner.client.send(event as never).pipe(
+          Effect.as<Answer>("Accepted"),
+          Effect.catchTag("Rejected", (rejected) => Effect.succeed(answerOf(rejected))),
+          Effect.orDie
         ),
       outcome: Effect.sync(() => outcomeOf(machine, runner.stored())),
       stop: unsupported("Stop"),
