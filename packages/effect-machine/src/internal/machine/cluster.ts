@@ -170,7 +170,7 @@ export const make = <
     InputEvents,
     ParentEvents
   >,
-  | Exclude<R, Machine.InvocationSupport<"Child">>
+  | Exclude<R, Machine.InvocationSupport<"Child"> | Machine.ChildMachineRuntime>
   | Machine.Machine.SnapshotDecodingServices<States>
   | Machine.Machine.SnapshotEncodingServices<States>
 > => {
@@ -310,6 +310,8 @@ const build = (
             save,
             address: (target) => ClusterTarget.addressOf(sharding, target),
             snapshots: parent?.snapshots ?? false,
+            // Saved as a step saves it, so the child takes it after its start.
+            dispatch: (target, tag, payload) => Effect.andThen(save(target, tag, payload), sharding.pollStorage),
             parent: parent === undefined || parentEntityId === undefined
               ? undefined
               : new ClusterTarget.Target(parent.protocol, parentEntityId)

@@ -2024,7 +2024,8 @@ describe("ClusterMachine", () => {
         }))
       it.effect("fails a machine whose work needs the runtime of a local process", () =>
         Effect.gen(function*() {
-          yield* run(makeCapable(() => Machine.stopChild(UnsupportedChild), []), {}, ({ send, stored }) =>
+          // A child address names a process, which only a local host runs.
+          yield* run(makeCapable(() => Machine.stopChild(Machine.childAddress("worker")), []), {}, ({ send, stored }) =>
             Effect.gen(function*() {
               assertAccepted(yield* send(Event.Note()))
               yield* until(() =>

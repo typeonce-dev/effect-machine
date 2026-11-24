@@ -57,6 +57,7 @@ const host = Machine.make({
       Doomed: {},
       Watching: { fields: { seen: Schema.Number } },
       Glancing: {},
+      Driving: {},
       Blind: {}
     }
   }),
@@ -69,9 +70,15 @@ const host = Machine.make({
     Doom: {},
     Watch: {},
     Glance: {},
+    Drive: {},
     Counted: { count: Schema.Number }
   }),
-  effects: { fail: Effect.andThen(Effect.sleep("10 seconds"), Effect.die("broken host")) },
+  effects: {
+    fail: Effect.andThen(Effect.sleep("10 seconds"), Effect.die("broken host")),
+    // Work that acts on the child of its state.
+    drive: Machine.sendTo(Counter, { _tag: "Add", by: 5 }),
+    halt: Effect.andThen(Effect.sleep("1 second"), Machine.stopChild(Counter))
+  },
   children: { counter: Counter, watched: Watched }
 }).handle({
   initial: { target: "Idle" },
@@ -81,7 +88,8 @@ const host = Machine.make({
         Host: { target: "Hosting", data: { counted: 0 } },
         Doom: { target: "Doomed" },
         Watch: { target: "Watching", data: { seen: -1 } },
-        Glance: { target: "Glancing" }
+        Glance: { target: "Glancing" },
+        Drive: { target: "Driving" }
       }
     },
     Hosting: {
@@ -118,6 +126,13 @@ const host = Machine.make({
       on: {
         Add: { stay: true, commands: ({ event }, enqueue) => enqueue.sendTo(Watched, { _tag: "Add", by: event.by }) }
       }
+    },
+    Driving: {
+      invoke: [
+        { src: "counter", input: () => "driver", onDone: { target: "Idle" } },
+        { src: "drive", onDone: { stay: true }, onFailure: { stay: true } },
+        { src: "halt", onDone: { stay: true } }
+      ]
     },
     // Leaves with the first snapshot of its child.
     Glancing: {
@@ -303,5 +318,18 @@ describe("ClusterMachine child machines", () => {
       assert.strictEqual(parent?.status._tag, "Failed")
       assert.match(parent?.status._tag === "Failed" ? parent.status.failure : "", /seen too much/)
       assert.deepStrictEqual(checkpointOf(storage, watchedType, "worker-1/watched/1")?.status, { _tag: "Stopped" })
+    }).pipe(Effect.scoped))
+
+  it.effect("let work send to the child of its state and stop it", () =>
+    Effect.gen(function*() {
+      const { runner, storage } = yield* start
+      yield* runner.send({ _tag: "Drive" })
+      yield* settle
+      assert.deepStrictEqual(leafOf(storage, childType, "worker-1/counter/1")?.value, { _tag: "Counting", count: 5 })
+      yield* TestClock.adjust("1 second")
+      yield* settle
+      assert.deepStrictEqual(checkpointOf(storage, childType, "worker-1/counter/1")?.status, { _tag: "Stopped" })
+      // The parent stays, as a local one does when its work stops its child.
+      assert.deepStrictEqual(leafOf(storage), { path: "Driving" })
     }).pipe(Effect.scoped))
 })

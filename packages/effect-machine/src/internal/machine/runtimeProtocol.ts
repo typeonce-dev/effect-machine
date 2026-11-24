@@ -17,7 +17,7 @@ import type {
   RuntimeSnapshot as PublicRuntimeSnapshot
 } from "../../Machine.js"
 import type { ChildMachine, Machine as MachineDefinition, MachineTarget } from "../../Machine.js"
-import { MachineRuntime } from "./capability.js"
+import { ChildMachineRuntime, MachineRuntime } from "./capability.js"
 import { isChildMachine } from "./child.js"
 import {
   type ChildDescriptor,
@@ -521,7 +521,13 @@ interface ProcessSpawn<OwnerEvent = unknown> {
 export const provideMachineRuntime = <A, E, R, Event>(
   effect: Effect.Effect<A, E, R>,
   scope: ProcessInitialContext<Event>
-): Effect.Effect<A, E, Exclude<R, MachineRuntime>> => Effect.provideService(effect, MachineRuntime, scope)
+): Effect.Effect<A, E, Exclude<R, MachineRuntime | ChildMachineRuntime>> =>
+  // One update of the context for both, as each process starts with them.
+  Effect.updateContext(
+    effect,
+    (context: Context.Context<Exclude<R, MachineRuntime | ChildMachineRuntime>>) =>
+      Context.add(Context.add(context, MachineRuntime, scope), ChildMachineRuntime, scope) as Context.Context<R>
+  )
 
 export const notifyActiveSnapshot = <State, Error, Output>(
   onSnapshot: (

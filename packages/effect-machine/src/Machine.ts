@@ -19,7 +19,7 @@ import type * as Schema from "effect/Schema"
 import type * as Scope from "effect/Scope"
 import type * as Stream from "effect/Stream"
 import type * as Types from "effect/Types"
-import type { MachineRuntime } from "./internal/machine/capability.js"
+import type { ChildMachineRuntime, MachineRuntime } from "./internal/machine/capability.js"
 import type * as InvocationDefinitions from "./internal/machine/invocationDefinitions.js"
 import type {
   ChildAlreadyExistsError,
@@ -496,8 +496,38 @@ export {
 
 export type {
   /**
-   * Capability to act on the children of the running machine, required by
-   * `spawn`, `sendTo`, and `stopChild`.
+   * Capability to act on the child machines that the states of the running
+   * machine invoke, required by `sendTo` and `stopChild` with the descriptor of
+   * a child machine.
+   *
+   * **When to use**
+   *
+   * Name this requirement when annotating a reusable helper built from those
+   * operations, or when exporting a value whose inferred type includes it.
+   *
+   * **Details**
+   *
+   * The model declares this capability, and a host provides it to the work it
+   * runs. `LocalMachine` and `ClusterMachine` provide it, also when `AtomMachine`
+   * hosts the machine. Unlike {@link MachineRuntime}, it starts no process, so a
+   * host that runs child machines provides it.
+   *
+   * `Machine.Machine.Services` contains it when the work that a state invokes
+   * requires it, or when the machine of an invoked child does.
+   * `LocalMachine.RequiredServices` removes it.
+   *
+   * **Gotchas**
+   *
+   * Only the type is public: hosts of this library provide the service, and it
+   * cannot be constructed elsewhere.
+   *
+   * @category services
+   * @since 0.48.0
+   */
+  ChildMachineRuntime,
+  /**
+   * Capability to act on the processes of the running machine, required by
+   * `spawn`, and by `sendTo` and `stopChild` with a child address.
    *
    * **When to use**
    *
@@ -1577,8 +1607,10 @@ export declare namespace ChildMachine {
    * @category utility types
    * @since 0.20.0
    */
-  export type StartRequirements<Child extends Any> = Child extends ChildMachine<string, infer M> ?
-    Exclude<Machine.Services<M>, MachineRuntime | InvocationSupport<InvocationSupport.Kind> | Scope.Scope>
+  export type StartRequirements<Child extends Any> = Child extends ChildMachine<string, infer M> ? Exclude<
+      Machine.Services<M>,
+      MachineRuntime | ChildMachineRuntime | InvocationSupport<InvocationSupport.Kind> | Scope.Scope
+    >
     : never
 
   /**
@@ -7663,6 +7695,12 @@ export const spawn: {
 /**
  * Sends an event to a named child process of the running machine.
  *
+ * **Details**
+ *
+ * With the descriptor of an invoked child machine, it requires only
+ * {@link ChildMachineRuntime}, which `ClusterMachine` provides too. With a
+ * child address, it requires {@link MachineRuntime}.
+ *
  * @category runtime
  * @since 0.4.0
  */
@@ -7670,23 +7708,29 @@ export const sendTo: {
   <Child extends ChildMachine.Any>(
     child: Child,
     event: ChildMachine.Event<Child>
-  ): Effect.Effect<void, StoppedError, MachineRuntime>
+  ): Effect.Effect<void, StoppedError, ChildMachineRuntime>
   <Address extends ChildAddress<never>>(
     id: Address,
     event: ChildAddress.Event<Address>
   ): Effect.Effect<void, StoppedError, MachineRuntime>
-} = internal.sendTo
+} = internal.sendTo as never
 
 /**
  * Stops a named child process of the running machine.
+ *
+ * **Details**
+ *
+ * With the descriptor of an invoked child machine, it requires only
+ * {@link ChildMachineRuntime}, which `ClusterMachine` provides too. With a
+ * child address, it requires {@link MachineRuntime}.
  *
  * @category runtime
  * @since 0.4.0
  */
 export const stopChild: {
   <Event>(child: ChildAddress<Event>): Effect.Effect<void, never, MachineRuntime>
-  <Child extends ChildMachine.Any>(child: Child): Effect.Effect<void, never, MachineRuntime>
-} = internal.stopChild
+  <Child extends ChildMachine.Any>(child: Child): Effect.Effect<void, never, ChildMachineRuntime>
+} = internal.stopChild as never
 
 /**
  * Returns a stream of terminal lifecycle outcomes for a running machine.

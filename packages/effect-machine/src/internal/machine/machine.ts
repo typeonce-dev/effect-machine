@@ -18,8 +18,9 @@ import type {
   State,
   StoppedError
 } from "../../Machine.js"
-import { MachineRuntime } from "./capability.js"
+import { ChildMachineRuntime, MachineRuntime } from "./capability.js"
 import * as CapturedInvocation from "./capturedInvocation.js"
+import * as Child from "./child.js"
 import * as Configuration from "./configuration.js"
 import * as Construction from "./construction.js"
 import * as Declaration from "./declaration.js"
@@ -1095,15 +1096,22 @@ export const spawn = (logic: Logic<any, any, any, any, any, any>, options?: Spaw
     (runtime) => options?.id === undefined ? runtime.spawn(logic) : runtime.spawn(logic, { id: options.id })
   )
 
+// A child machine needs only the capability of child machines, which more hosts
+// provide than the one of processes.
 export const sendTo = (
   child: ChildAddress<never> | ChildMachine.Any,
   event: unknown
-): Effect.Effect<void, StoppedError, MachineRuntime> =>
-  Effect.flatMap(MachineRuntime, (runtime) => runtime.sendTo(child, event))
+): Effect.Effect<void, StoppedError, MachineRuntime | ChildMachineRuntime> =>
+  Child.isChildMachine(child)
+    ? Effect.flatMap(ChildMachineRuntime, (runtime) => runtime.sendTo(child, event))
+    : Effect.flatMap(MachineRuntime, (runtime) => runtime.sendTo(child, event))
 
 export const stopChild = (
   child: ChildAddress<never> | ChildMachine.Any
-): Effect.Effect<void, never, MachineRuntime> => Effect.flatMap(MachineRuntime, (runtime) => runtime.stopChild(child))
+): Effect.Effect<void, never, MachineRuntime | ChildMachineRuntime> =>
+  Child.isChildMachine(child)
+    ? Effect.flatMap(ChildMachineRuntime, (runtime) => runtime.stopChild(child))
+    : Effect.flatMap(MachineRuntime, (runtime) => runtime.stopChild(child))
 
 export const watch = Observation.watch
 
