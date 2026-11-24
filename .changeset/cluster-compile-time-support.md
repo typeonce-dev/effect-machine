@@ -5,7 +5,7 @@
 `ClusterMachine.make` no longer compiles for a machine that Cluster cannot run: one whose states invoke a Stream, a `Logic`, or a child machine, or whose work requires `Machine.MachineRuntime`. These machines compiled before, and then rejected every request or failed while running. The error lists everything to replace:
 
 ```ts
-// "~effect/ClusterMachine/UnsupportedProcessLocal": {
+// "~effect/cluster/ClusterMachine/UnsupportedProcessLocal": {
 //   readonly invocations: "Stream" | "Child"
 //   readonly capabilities: "MachineRuntime"
 // }

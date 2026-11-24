@@ -933,7 +933,7 @@ type EnsureJsonEncoded<
   InputEvents extends ReadonlyArray<Machine.Machine.TaggedSchema>
 > = [NonJsonState<States> | NonJsonOutput<States> | NonJsonInputEvent<InputEvents>] extends [never] ? unknown
   : {
-    readonly "~effect/ClusterMachine/NonJsonEncoded": {
+    readonly "~effect/cluster/ClusterMachine/NonJsonEncoded": {
       readonly states: NonJsonState<States>
       readonly outputs: NonJsonOutput<States>
       readonly inputEvents: NonJsonInputEvent<InputEvents>
@@ -950,7 +950,7 @@ type UnsupportedCapability<R> = R extends Machine.MachineRuntime ? "MachineRunti
 type EnsureSupported<R> = IsAny<R> extends true ? unknown
   : [UnsupportedInvocation<R> | UnsupportedCapability<R>] extends [never] ? unknown
   : {
-    readonly "~effect/ClusterMachine/UnsupportedProcessLocal": {
+    readonly "~effect/cluster/ClusterMachine/UnsupportedProcessLocal": {
       readonly invocations: UnsupportedInvocation<R>
       readonly capabilities: UnsupportedCapability<R>
     }
@@ -1107,7 +1107,7 @@ export { StorageCheckFailure }
  * child that runs when the work acts, through a persisted request saved outside
  * the transaction of a step, and ignore a child that does not run. The error
  * names the property
- * `~effect/ClusterMachine/UnsupportedProcessLocal`, and lists there every
+ * `~effect/cluster/ClusterMachine/UnsupportedProcessLocal`, and lists there every
  * invocation kind and capability to replace with an Effect, a timer, or a child
  * machine. A source that is registered and never invoked is accepted.
  *
