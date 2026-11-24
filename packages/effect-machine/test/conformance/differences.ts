@@ -200,31 +200,19 @@ export const differences: ReadonlyArray<Difference> = [
     }
   },
   {
-    kind: "Open",
+    kind: "Deliberate",
     hosts: cluster,
     scenario: "refuses the payload of an event that its schema refuses",
-    differs: "The client refuses the payload, and the machine goes on.",
-    evidence:
-      "The entity client validates the payload before it sends it, and dies with \"Schema validation failed\" " +
-      "in the fiber of the caller. The adapter of this suite reads that as a rejection. The documentation says that " +
-      "events are schema-validated, and neither that the machine survives nor that the caller gets a defect.",
+    differs: "The client rejects the event before it sends it, and the machine goes on.",
+    because: "The sender waits for a reply, so it is told, and the machine never sees the event.",
+    documentedIn: {
+      file: clusterDocs,
+      text: "An event that its schema refuses is rejected as `InvalidEvent` before it is sent, and the machine never " +
+        "sees it."
+    },
     steps: {
       "an invalid payload": { answers: ["Rejected"], outcome: running },
       "an event after it": { answers: ["Accepted"], happens: [{ Count: { length: 5 } }] }
-    }
-  },
-  {
-    kind: "Open",
-    hosts: cluster,
-    scenario: "takes an event that a constructor of its protocol built",
-    differs: "Refuses an event with fields that a constructor of the protocol built.",
-    evidence:
-      "`Machine.events` returns constructors whose result holds its fields behind a symbol. The entity client " +
-      "expects the fields themselves, so its types refuse such an event, and at run time it dies with \"Schema " +
-      "validation failed\". An event without fields passes. The documentation does not say what the client takes.",
-    steps: {
-      "send Open": { answers: ["Rejected"], happens: [] },
-      "send Close": { happens: [] }
     }
   },
   {
