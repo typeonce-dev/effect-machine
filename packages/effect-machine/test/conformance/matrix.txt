@@ -2,7 +2,7 @@ scenario                                                                        
 settles in its initial state before any event                                               | runs                   | runs                    | runs        | differs                      | runs
 starts from its input                                                                       | runs                   | runs                    | runs        | runs                         | runs
 moves between states and carries their data                                                 | runs                   | runs                    | runs        | runs                         | runs
-takes an event that a constructor of its protocol built                                     | runs                   | runs                    | runs        | OPEN                         | runs
+takes an event that a constructor of its protocol built                                     | runs                   | runs                    | runs        | runs                         | runs
 takes an event that no active state handles, and does nothing                               | runs                   | runs                    | runs        | runs                         | runs
 offers an event that a guard or a branch declines to the ancestor                           | runs                   | runs                    | runs        | runs                         | runs
 updates retained state, and exits and enters only what it is told to                        | runs                   | runs                    | runs        | runs                         | runs
@@ -16,7 +16,7 @@ plans raised events in the step that raises them, in order                      
 emits the events of every kind of transition, in order                                      | runs                   | runs                    | runs        | runs                         | runs
 ends in a final state with its output, and takes no event after it                          | runs                   | runs                    | runs        | differs                      | runs
 ends at once when its initial state is final                                                | runs                   | runs                    | runs        | differs                      | runs
-refuses the payload of an event that its schema refuses                                     | runs                   | runs                    | runs        | OPEN                         | runs
+refuses the payload of an event that its schema refuses                                     | runs                   | runs                    | runs        | differs                      | runs
 a transition throws                                                                         | runs                   | runs                    | runs        | differs                      | runs
 a step never settles                                                                        | runs                   | runs                    | runs        | differs                      | runs
 a transition leads to a state that its schema refuses                                       | runs                   | runs                    | runs        | differs                      | runs

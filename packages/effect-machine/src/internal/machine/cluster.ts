@@ -12,9 +12,10 @@ import { Rpc } from "effect/rpc"
 import * as Schema from "effect/Schema"
 import type * as Machine from "../../Machine.js"
 import type { Checkpoint } from "../../unstable/cluster/ClusterMachine.js"
-import type { ClusterMachine } from "../../unstable/cluster/ClusterMachine.js"
+import type { Client, ClientError, ClusterMachine } from "../../unstable/cluster/ClusterMachine.js"
 import * as ClusterInstance from "./clusterInstance.js"
-import { CommitResult, SendResult, Storage } from "./clusterProtocol.js"
+import { CommitResult, Rejected, SendResult, Storage } from "./clusterProtocol.js"
+import type { MachineSchemaDecodeError } from "./errors.js"
 import * as Protocol from "./protocol.js"
 import type { EnsureExecutable } from "./readiness.js"
 
@@ -28,6 +29,37 @@ type SendRpc<Events extends ReadonlyArray<Machine.Machine.TaggedSchema>> = Rpc.R
 >
 
 type MachineEvents<M extends Machine.Machine.Any> = Machine.Machine.InputEvents<M>
+
+const invalidEvent = (error: MachineSchemaDecodeError): Rejected =>
+  new Rejected({
+    reason: "InvalidEvent",
+    message: error.event === undefined
+      ? "The event does not match the protocol of the machine"
+      : `The event ${error.event} does not match its schema`
+  })
+
+/**
+ * Decodes an event as `LocalMachine` does before it sends it, so that a client
+ * takes what a local reference takes, and refuses only public input events.
+ */
+const decodeInputEvent = (
+  machine: Machine.Machine.Any,
+  publicTags: ReadonlySet<PropertyKey>,
+  event: unknown
+): Effect.Effect<unknown, Rejected> =>
+  Protocol.decodeEvent(machine, event).pipe(
+    Effect.mapError(invalidEvent),
+    Effect.flatMap((decoded) =>
+      publicTags.has(decoded._tag)
+        ? Effect.succeed(decoded)
+        : Effect.fail(
+          new Rejected({
+            reason: "InvalidEvent",
+            message: `The event ${String(decoded._tag)} is not an input event`
+          })
+        )
+    )
+  )
 
 const addressKey = (address: EntityAddress): string => `${address.entityType}\u0000${address.entityId}`
 
@@ -153,6 +185,20 @@ export const make = <
     OutputStates,
     InputEvents
   >
+  type Hosted = Machine.Machine<
+    States,
+    Events,
+    Input,
+    UnhandledStates,
+    E,
+    R,
+    FinalStates,
+    Output,
+    Emits,
+    OutputStates,
+    InputEvents,
+    ParentEvents
+  >
   type Services =
     | R
     | Machine.Machine.SnapshotDecodingServices<States>
@@ -195,9 +241,25 @@ export const make = <
       Storage | MessageStorage.MessageStorage | Sharding.Sharding | EnqueueR | Services
     >
 
+  const publicTags: ReadonlySet<PropertyKey> = new Set(Reflect.ownKeys(machine.events))
+  const client = Effect.map(entity.client, (makeEntityClient) => (entityId: string): Client<Hosted> => {
+    const rpc = makeEntityClient(entityId)
+    return {
+      entityId,
+      send: (event) =>
+        decodeInputEvent(machine, publicTags, event).pipe(
+          // The cast drops the encoding services of the event schemas, as the
+          // layer drops their decoding services.
+          Effect.flatMap((decoded) => rpc.send(decoded as never) as Effect.Effect<typeof SendResult.Type, ClientError>),
+          Effect.flatMap((result) => result._tag === "Accepted" ? Effect.void : Effect.fail(result))
+        )
+    }
+  })
+
   return {
     machine,
     entity,
+    client,
     toLayer
   }
 }
