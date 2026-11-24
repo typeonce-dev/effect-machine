@@ -1,20 +1,26 @@
-import { Effect, Scope } from "effect"
+import { Effect, Option, Scope } from "effect"
 import { TestClock } from "effect/testing"
-import { Machine } from "../../../../src/index.js"
-import type { ClusterMachine } from "../../../../src/unstable/cluster/index.js"
+import type { Machine } from "../../../../src/index.js"
+import { ClusterMachine } from "../../../../src/unstable/cluster/index.js"
 import { makeMessages, makeTestStorage, startRunner } from "../../../unstable/cluster/support/harness.js"
 import type { Answer, Host, Outcome } from "../host.js"
-import { decode, unsupported } from "../host.js"
+import { unsupported } from "../host.js"
 
 const answerOf = (rejected: ClusterMachine.Rejected): Answer =>
   rejected.reason === "MachineFailed" ? "Ended" : "Rejected"
 
-const outcomeOf = (machine: Machine.Machine.Any, checkpoint: ClusterMachine.Checkpoint | undefined): Outcome => {
-  if (checkpoint === undefined) return { _tag: "Running" }
-  if (checkpoint.status._tag === "Failed") return { _tag: "Failed", failure: checkpoint.status.failure }
-  if (!Machine.isFinal(machine as never, decode(machine, checkpoint.snapshot) as never)) return { _tag: "Running" }
-  const output = checkpoint.snapshot.completed?.find(({ path }) => path === "")?.output
-  return output === undefined ? { _tag: "Final" } : { _tag: "Final", output }
+// Reads the outcome as a caller of the adapter does, from the store.
+const outcomeOf = (read: Option.Option<ClusterMachine.Snapshot<Machine.Machine.Any>>): Outcome => {
+  if (Option.isNone(read)) return { _tag: "Running" }
+  const snapshot = read.value
+  switch (snapshot.status) {
+    case "active":
+      return { _tag: "Running" }
+    case "failed":
+      return { _tag: "Failed", failure: snapshot.failure }
+    case "done":
+      return snapshot.output === undefined ? { _tag: "Final" } : { _tag: "Final", output: snapshot.output }
+  }
 }
 
 // What a runner takes to come up, as the harness starts it.
@@ -64,7 +70,12 @@ export const clusterHost: Host = {
           Effect.catchTag("Rejected", (rejected) => Effect.succeed(answerOf(rejected))),
           Effect.orDie
         ),
-      outcome: Effect.sync(() => outcomeOf(machine, runner.stored())),
+      // An erased machine leaves the services of its schemas unknown.
+      outcome: runner.client.snapshot.pipe(
+        Effect.map(outcomeOf),
+        Effect.provideService(ClusterMachine.Storage, storage.service),
+        Effect.orDie
+      ) as Effect.Effect<Outcome>,
       stop: unsupported("Stop"),
       restart: Effect.fnUntraced(function*(downtimeMillis) {
         yield* runner.stop

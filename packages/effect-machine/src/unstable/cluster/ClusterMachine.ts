@@ -9,14 +9,16 @@
  * @since 0.4.0
  */
 import type { ClusterError, Entity, MessageStorage, Sharding, Snowflake } from "effect/cluster"
+import type * as Duration from "effect/Duration"
 import type * as Effect from "effect/Effect"
 import type * as Layer from "effect/Layer"
 import type * as Option from "effect/Option"
 import type { Rpc } from "effect/rpc"
 import type * as Schema from "effect/Schema"
+import type * as Stream from "effect/Stream"
 import * as internal from "../../internal/machine/cluster.js"
 import * as Protocol from "../../internal/machine/clusterProtocol.js"
-import { Accepted, Rejected, Storage } from "../../internal/machine/clusterProtocol.js"
+import { Accepted, MachineFailedError, ReadError, Rejected, Storage } from "../../internal/machine/clusterProtocol.js"
 import type { EnsureExecutable } from "../../internal/machine/readiness.js"
 import type * as Machine from "../../Machine.js"
 
@@ -605,11 +607,24 @@ export type ClientError =
  * fails when it is sent an event that its schema refuses, because a local
  * `send` does not wait for the step.
  *
+ * `snapshot`, `changes`, and `join` read the machine from {@link Storage}, which
+ * is the truth, and never ask the entity. A read works from any process that
+ * reaches the store, whichever runner owns the entity and whether it is in
+ * memory or not. It does not wake the entity or keep it alive, so a machine that
+ * is passivated, moved, or recovered after a restart is read the same way.
+ *
  * **Gotchas**
  *
  * Failures of Cluster itself, such as a full mailbox, are {@link ClientError}s.
  * A request that ended in one may still have been delivered, and is delivered at
  * most once when it is sent again.
+ *
+ * A remote view is narrower than a local `MachineRef`. Reads see committed
+ * checkpoints only, and `changes` reads again after each `readInterval`, so it
+ * may skip checkpoints committed between two reads and sees a change up to one
+ * interval late. A failed machine carries the text of its failure, not a
+ * `Cause`. There is no `stopped` status, since a Cluster machine is not
+ * stopped, and nothing is read before the first event is committed.
  *
  * @category models
  * @since 0.48.0
@@ -622,7 +637,111 @@ export interface Client<M extends Machine.Machine.Any> {
   readonly send: (
     event: Machine.Machine.EventInputOf<MachineEvents<M>>
   ) => Effect.Effect<void, Rejected | ClientError>
+
+  /**
+   * Reads the latest committed checkpoint, or `None` when the machine has not
+   * committed one yet.
+   */
+  readonly snapshot: Effect.Effect<
+    Option.Option<Snapshot<M>>,
+    ReadError | ClusterError.PersistenceError,
+    ReadServices<M>
+  >
+
+  /**
+   * Streams the latest committed checkpoint and the later ones it reads, once
+   * each, and ends after a `done` or `failed` one. It waits while the machine
+   * has committed none.
+   */
+  readonly changes: Stream.Stream<Snapshot<M>, ReadError | ClusterError.PersistenceError, ReadServices<M>>
+
+  /**
+   * Waits for the output of the machine, or fails with
+   * {@link MachineFailedError} when it failed.
+   */
+  readonly join: Effect.Effect<
+    Machine.Machine.Output<M>,
+    MachineFailedError | ReadError | ClusterError.PersistenceError,
+    ReadServices<M>
+  >
 }
+
+/**
+ * Services that reading a Cluster machine from outside requires: the
+ * {@link Storage} that holds its checkpoints, and what its state schemas need
+ * to decode.
+ *
+ * @category models
+ * @since 0.48.0
+ */
+export type ReadServices<M extends Machine.Machine.Any> =
+  | Storage
+  | Machine.Machine.SnapshotDecodingServices<Machine.Machine.States<M>>
+
+/**
+ * A committed checkpoint of a Cluster machine, as a {@link Client} reads it.
+ *
+ * **Details**
+ *
+ * `revision` orders the checkpoints of one machine. A `done` machine carries
+ * its output, as its final state computes it. A `failed` machine carries the
+ * text of the failure that ended it, and the last state it committed before.
+ *
+ * @category models
+ * @since 0.48.0
+ */
+export type Snapshot<M extends Machine.Machine.Any> =
+  | {
+    readonly status: "active"
+    readonly revision: number
+    readonly state: Machine.Machine.Snapshot<Machine.Machine.States<M>>
+  }
+  | {
+    readonly status: "done"
+    readonly revision: number
+    readonly state: Machine.Machine.Snapshot<Machine.Machine.States<M>>
+    readonly output: Machine.Machine.Output<M>
+  }
+  | {
+    readonly status: "failed"
+    readonly revision: number
+    readonly state: Machine.Machine.Snapshot<Machine.Machine.States<M>>
+    readonly failure: string
+  }
+
+/**
+ * Why a {@link Client} could not read a checkpoint: it was written by another
+ * definition or version, or it is not one that this machine can hold.
+ *
+ * @category errors
+ * @since 0.48.0
+ */
+export { ReadError }
+
+/**
+ * Reasons for a {@link ReadError}.
+ *
+ * @category errors
+ * @since 0.48.0
+ */
+export const ReadFailureReason: typeof Protocol.ReadFailureReason = Protocol.ReadFailureReason
+
+/**
+ * Reason for a {@link ReadError}.
+ *
+ * @category errors
+ * @since 0.48.0
+ */
+export type ReadFailureReason = typeof ReadFailureReason.Type
+
+/**
+ * The failure of a Cluster machine that `join` waited for, as the text that
+ * the machine stored when it failed.
+ *
+ * @category errors
+ * @since 0.48.0
+ */
+export { MachineFailedError }
 
 type MachineServices<M extends Machine.Machine.Any> =
   | Machine.Machine.Services<M>
@@ -1021,6 +1140,11 @@ export const make: <
     & EnsureSupported<R>,
   options: {
     readonly version: string
+    /**
+     * How long `changes` and `join` of a {@link Client} wait between two reads.
+     * Defaults to one second.
+     */
+    readonly readInterval?: Duration.Input | undefined
   },
   ...input: [...Machine.Machine.InputArgs<Input>]
 ) => ClusterMachine<

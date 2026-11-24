@@ -3,8 +3,9 @@
  *
  * @since 0.4.0
  */
-import { ClusterSchema, Entity, MessageStorage } from "effect/cluster"
-import type { EntityAddress, Sharding, Snowflake } from "effect/cluster"
+import { ClusterSchema, Entity, EntityAddress, EntityId, MessageStorage, Sharding } from "effect/cluster"
+import type { Snowflake } from "effect/cluster"
+import type * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
@@ -15,6 +16,7 @@ import type { Checkpoint } from "../../unstable/cluster/ClusterMachine.js"
 import type { Client, ClientError, ClusterMachine } from "../../unstable/cluster/ClusterMachine.js"
 import * as ClusterInstance from "./clusterInstance.js"
 import { CommitResult, Rejected, SendResult, Storage } from "./clusterProtocol.js"
+import * as ClusterRead from "./clusterRead.js"
 import type { MachineSchemaDecodeError } from "./errors.js"
 import * as Protocol from "./protocol.js"
 import type { EnsureExecutable } from "./readiness.js"
@@ -153,6 +155,7 @@ export const make = <
     & Machine.Machine.RootCompatible<ParentEvents>,
   options: {
     readonly version: string
+    readonly readInterval?: Duration.Input | undefined
   },
   ...input: [...Machine.Machine.InputArgs<Input>]
 ): ClusterMachine<
@@ -245,17 +248,36 @@ export const make = <
     >
 
   const publicTags: ReadonlySet<PropertyKey> = new Set(Reflect.ownKeys(machine.events))
-  const client = Effect.map(entity.client, (makeEntityClient) => (entityId: string): Client<Hosted> => {
-    const rpc = makeEntityClient(entityId)
-    return {
-      entityId,
-      send: (event) =>
-        decodeInputEvent(machine, publicTags, event).pipe(
-          // The cast drops the encoding services of the event schemas, as the
-          // layer drops their decoding services.
-          Effect.flatMap((decoded) => rpc.send(decoded as never) as Effect.Effect<typeof SendResult.Type, ClientError>),
-          Effect.flatMap((result) => result._tag === "Accepted" ? Effect.void : Effect.fail(result))
-        )
+  const client = Effect.gen(function*() {
+    const makeEntityClient = yield* entity.client
+    const sharding = yield* Sharding.Sharding
+    return (entityId: string): Client<Hosted> => {
+      const rpc = makeEntityClient(entityId)
+      const id = EntityId.make(entityId)
+      const reader = ClusterRead.make<Hosted>({
+        machine,
+        definitionId,
+        version: options.version,
+        address: EntityAddress.make({
+          shardId: sharding.getShardId(id, entity.getShardGroup(id)),
+          entityType: entity.type,
+          entityId: id
+        }),
+        interval: options.readInterval ?? "1 second"
+      })
+      return {
+        entityId,
+        ...reader,
+        send: (event) =>
+          decodeInputEvent(machine, publicTags, event).pipe(
+            // The cast drops the encoding services of the event schemas, as the
+            // layer drops their decoding services.
+            Effect.flatMap((decoded) =>
+              rpc.send(decoded as never) as Effect.Effect<typeof SendResult.Type, ClientError>
+            ),
+            Effect.flatMap((result) => result._tag === "Accepted" ? Effect.void : Effect.fail(result))
+          )
+      }
     }
   })
 

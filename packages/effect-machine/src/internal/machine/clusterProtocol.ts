@@ -80,3 +80,19 @@ export class Rejected extends Schema.TaggedError<Rejected>("effect/cluster/Clust
 ) {}
 
 export const SendResult = Schema.Union([Accepted, Rejected])
+
+export const ReadFailureReason = Schema.Literals(["DefinitionIdMismatch", "VersionMismatch", "InvalidCheckpoint"])
+
+export class ReadError extends Schema.TaggedError<ReadError>("effect/cluster/ClusterMachine/ReadError")(
+  "ReadError",
+  {
+    reason: ReadFailureReason,
+    message: Schema.String
+  }
+) {}
+
+export class MachineFailedError extends Schema.TaggedError<MachineFailedError>(
+  "effect/cluster/ClusterMachine/MachineFailedError"
+)("MachineFailedError", {
+  failure: Schema.String
+}) {}
