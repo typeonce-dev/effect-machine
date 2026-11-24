@@ -522,10 +522,12 @@ export const provideMachineRuntime = <A, E, R, Event>(
   effect: Effect.Effect<A, E, R>,
   scope: ProcessInitialContext<Event>
 ): Effect.Effect<A, E, Exclude<R, MachineRuntime | ChildMachineRuntime>> =>
-  effect.pipe(
-    Effect.provideService(MachineRuntime, scope),
-    Effect.provideService(ChildMachineRuntime, scope)
-  ) as Effect.Effect<A, E, Exclude<R, MachineRuntime | ChildMachineRuntime>>
+  // One update of the context for both, as each process starts with them.
+  Effect.updateContext(
+    effect,
+    (context: Context.Context<Exclude<R, MachineRuntime | ChildMachineRuntime>>) =>
+      Context.add(Context.add(context, MachineRuntime, scope), ChildMachineRuntime, scope) as Context.Context<R>
+  )
 
 export const notifyActiveSnapshot = <State, Error, Output>(
   onSnapshot: (
