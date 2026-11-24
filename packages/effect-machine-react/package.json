@@ -49,8 +49,8 @@
     "@typeonce/effect-machine": "workspace:^"
   },
   "peerDependencies": {
-    "@effect/atom-react": "^4.1.5",
-    "effect": "^4.1.5",
+    "@effect/atom-react": "^4.0.0",
+    "effect": "^4.0.0",
     "react": ">=19.0.0 <20.0.0"
   },
   "devDependencies": {

@@ -33,11 +33,11 @@ test("all Effect Machine packages release with the same version", async () => {
   )
 })
 
-// `ClusterMachine` needs the fix to `Entity.keepAlive` that Effect released in
-// 4.1.5: on an older version, a machine silently loses crash recovery.
-const effectRange = "^4.1.5"
+// Every stable 4.x is accepted. `ClusterMachine` alone needs 4.1.5 or later,
+// for the fix to `Entity.keepAlive`, and says so in its documentation.
+const effectRange = "^4.0.0"
 
-test("Effect consumers accept stable 4.x from 4.1.5 while development versions stay synchronized", async () => {
+test("Effect consumers accept stable 4.x while development versions stay synchronized", async () => {
   const [root, core, react, devtools] = await Promise.all([
     readJson("package.json"),
     readJson("packages/effect-machine/package.json"),
