@@ -2042,11 +2042,14 @@ const macrostepConfiguration = (
   configuration: ActiveConfiguration,
   event: Machine.EventOf<any> | InvocationEvent.InvocationEvent
 ) => {
-  const decodedEvent = InvocationEvent.isInvocationEvent(event) ? event : decodeEventSync(machine, event)
+  // User code sees the public lifecycle view of an invocation message; only
+  // transition selection reads the message itself.
+  const invocation = InvocationEvent.isInvocationEvent(event) ? event : undefined
+  const decodedEvent = invocation === undefined
+    ? decodeEventSync(machine, event)
+    : InvocationEvent.toLifecycleEvent(invocation)
   if (isActiveFinalConfiguration(machine, configuration)) {
-    // Completion contexts receive the triggering event, including private invocation events
-    // that the public lifecycle event type does not model.
-    const completed = completeConfigurationSync(machine, configuration, decodedEvent as any)
+    const completed = completeConfigurationSync(machine, configuration, decodedEvent)
     const root = getRootPath(machine, completed.configuration)
     if (!completed.configuration.outputs.has(root)) {
       throw new Error("Machine reached a terminal configuration without a completed root output")
@@ -2062,8 +2065,8 @@ const macrostepConfiguration = (
     }
   }
 
-  const selections = InvocationEvent.isInvocationEvent(decodedEvent)
-    ? selectInvocationTransition(machine, configuration, decodedEvent)
+  const selections = invocation !== undefined
+    ? selectInvocationTransition(machine, configuration, invocation)
     : selectEventTransitions(
       machine,
       configuration,
