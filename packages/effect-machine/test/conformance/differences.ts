@@ -226,15 +226,5 @@ export const differences: ReadonlyArray<Difference> = [
       "send Open": { answers: ["Rejected"], happens: [] },
       "send Close": { happens: [] }
     }
-  },
-  {
-    kind: "Open",
-    hosts: ["LocalMachine (generic)", "LocalMachine (compiled)", "AtomMachine"],
-    scenario: "closes the scope of work with its end, and with its stop",
-    differs: "Keeps the resources of every run until the machine stops.",
-    evidence: "An invoked effect that requires `Scope` gets the scope of the machine, so the finalizers of runs that " +
-      "ended or were stopped pile up until the machine stops. `ClusterMachine` gives each run a scope. No " +
-      "documentation describes the scope of invoked work.",
-    steps: { "load succeeds": { log: [] }, "cancel again": { log: [] } }
   }
 ]
