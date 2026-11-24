@@ -191,7 +191,7 @@ describe("ClusterMachine timers that wait longer than DurableClock keeps in memo
               : messages.storage.saveRequest(message)
         }
       })
-      const rejected = yield* Effect.flip(runner.client.send({ _tag: "Wait", seconds: 3600 } as never))
+      const rejected = yield* Effect.flip(runner.client.send({ _tag: "Wait", seconds: 3600 }))
       assert.strictEqual(rejected._tag === "Rejected" && rejected.reason, "PersistenceFailure")
       failing = false
       yield* send(runner, { _tag: "Wait", seconds: 3600 })

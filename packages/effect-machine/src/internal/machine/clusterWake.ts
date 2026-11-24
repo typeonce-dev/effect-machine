@@ -91,7 +91,7 @@ export const makeSave = (options: {
           payload: new Wake(timer),
           headers: Headers.empty
         }),
-        context: Context.empty() as never,
+        context: Context.empty(),
         lastReceivedReply: Option.none(),
         rpc: WakeRpc,
         respond: () => Effect.void,
