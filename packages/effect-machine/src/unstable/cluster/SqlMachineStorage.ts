@@ -16,13 +16,15 @@
  *
  * **Example** (Storing machines next to the messages of Cluster)
  *
- * ```ts
+ * ```ts import.meta.vitest
  * import { SqlMachineStorage } from "@typeonce/effect-machine/cluster"
- * import { SqlMessageStorage } from "effect/cluster"
  * import { Layer } from "effect"
+ * import { SqlMessageStorage } from "effect/cluster"
  *
  * // Both need the same `SqlClient`, such as one from `@effect/sql-pg`.
  * const storage = Layer.mergeAll(SqlMessageStorage.layer, SqlMachineStorage.layer)
+ *
+ * Layer.isLayer(storage) // => true
  * ```
  *
  * **Gotchas**
