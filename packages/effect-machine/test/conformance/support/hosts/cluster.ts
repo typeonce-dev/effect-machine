@@ -20,6 +20,8 @@ const outcomeOf = (read: Option.Option<ClusterMachine.Snapshot<Machine.Machine.A
       return { _tag: "Failed", failure: snapshot.failure }
     case "done":
       return snapshot.output === undefined ? { _tag: "Final" } : { _tag: "Final", output: snapshot.output }
+    case "stopped":
+      return { _tag: "Stopped" }
   }
 }
 
@@ -34,7 +36,7 @@ const startupMillis = 1001
 export const clusterHost: Host = {
   name: "ClusterMachine",
   capabilities: {
-    invocations: ["Effect", "Timer"],
+    invocations: ["Effect", "Timer", "Child"],
     ownedChildren: false,
     commands: true,
     restart: true,
@@ -57,11 +59,12 @@ export const clusterHost: Host = {
     }).pipe(Effect.provideService(Scope.Scope, scope))
     let runner = yield* start
     return {
+      // Only the machine's own checkpoints: its children store theirs too.
       get states() {
-        return storage.history.map(({ snapshot }) => snapshot)
+        return storage.historyOf("Worker", "worker-1").map(({ snapshot }) => snapshot)
       },
       emitted,
-      current: () => storage.history.at(-1)?.snapshot,
+      current: () => storage.historyOf("Worker", "worker-1").at(-1)?.snapshot,
       // Sends through the client of the adapter, which takes what a local
       // reference takes.
       send: (event) =>

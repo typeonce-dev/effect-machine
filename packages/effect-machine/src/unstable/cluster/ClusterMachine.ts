@@ -180,7 +180,7 @@ export declare namespace Checkpoint {
    * @category models
    * @since 0.48.0
    */
-  export type Progress = Progress.Settled | Progress.Waiting
+  export type Progress = Progress.Settled | Progress.Waiting | Progress.Child
 
   /**
    * Types for the progress of an invocation.
@@ -216,6 +216,20 @@ export declare namespace Checkpoint {
        */
       readonly dueAt: number
     }
+
+    /**
+     * The invocation is a child machine, which runs as an entity of its own
+     * and has not ended.
+     *
+     * @category models
+     * @since 0.48.0
+     */
+    export interface Child {
+      readonly _tag: "Child"
+
+      /** Entity id of the child, unique to this activation of its state. */
+      readonly entityId: string
+    }
   }
 
   /**
@@ -224,7 +238,7 @@ export declare namespace Checkpoint {
    * @category models
    * @since 0.48.0
    */
-  export type Status = Status.Active | Status.Failed
+  export type Status = Status.Active | Status.Failed | Status.Stopped
 
   /**
    * Types for the status of a checkpoint.
@@ -262,6 +276,18 @@ export declare namespace Checkpoint {
 
       /** Human-readable rendering of the failure, of bounded length. */
       readonly failure: string
+    }
+
+    /**
+     * The machine is a child that its parent stopped, because the state that
+     * invoked it exited. It is terminal, runs no work, and rejects every later
+     * request as `MachineFailed`.
+     *
+     * @category models
+     * @since 0.48.0
+     */
+    export interface Stopped {
+      readonly _tag: "Stopped"
     }
   }
 }
@@ -664,9 +690,10 @@ export type ClientError =
  * transaction as its checkpoint, so the event is sent if and only if the step
  * is stored. The request has an id of its own, which the target records when it
  * applies the request, so Cluster may deliver it again and it is applied once.
- * The answer of the target is not read: an event the target rejects, such as
- * one sent after it failed, is dropped, as a local send to a child that stopped
- * is ignored.
+ * Nobody waits for its answer, so the target treats it as a local machine
+ * treats an event sent to it: an event it cannot apply, such as one whose
+ * transition throws, fails it, and a target that ended drops the event. A
+ * failure of storage is retried.
  *
  * `send` sends through the client of the target, from the work of a Cluster
  * machine or from any effect that has `Sharding`, and waits for the target to
@@ -678,9 +705,9 @@ export type ClientError =
  *
  * The types check the event against the input events of the target, but not
  * that the target was made by this module: a step on Cluster that sends to a
- * local reference or to a child is rejected as `UnsupportedProcessLocal`, and so
- * is `enqueue.stop`. A target made here is not a local reference either, so a
- * local machine cannot send to it.
+ * local reference is rejected as `UnsupportedProcessLocal`, and so is
+ * `enqueue.stop`. A target made here is not a local reference either, so a local
+ * machine cannot send to it.
  *
  * The runner that stores the step reads the request at once. A target owned by
  * another runner reads it at its next poll of `MessageStorage`, after up to
@@ -735,8 +762,8 @@ export interface Target<in Event> extends Machine.MachineTarget<Event> {
  * checkpoints only, and `changes` reads again after each `readInterval`, so it
  * may skip checkpoints committed between two reads and sees a change up to one
  * interval late. A failed machine carries the text of its failure, not a
- * `Cause`. There is no `stopped` status, since a Cluster machine is not
- * stopped, and nothing is read before the first event is committed.
+ * `Cause`. Only a child machine is ever `stopped`, by its parent, and nothing
+ * is read before the first event is committed.
  *
  * @category models
  * @since 0.48.0
@@ -798,6 +825,7 @@ export type ReadServices<M extends Machine.Machine.Any> =
  * `revision` orders the checkpoints of one machine. A `done` machine carries
  * its output, as its final state computes it. A `failed` machine carries the
  * text of the failure that ended it, and the last state it committed before.
+ * A `stopped` machine is a child machine that its parent stopped.
  *
  * @category models
  * @since 0.48.0
@@ -819,6 +847,11 @@ export type Snapshot<M extends Machine.Machine.Any> =
     readonly revision: number
     readonly state: Machine.Machine.Snapshot<Machine.Machine.States<M>>
     readonly failure: string
+  }
+  | {
+    readonly status: "stopped"
+    readonly revision: number
+    readonly state: Machine.Machine.Snapshot<Machine.Machine.States<M>>
   }
 
 /**
@@ -856,7 +889,7 @@ export type ReadFailureReason = typeof ReadFailureReason.Type
 export { MachineFailedError }
 
 type MachineServices<M extends Machine.Machine.Any> =
-  | Machine.Machine.Services<M>
+  | Exclude<Machine.Machine.Services<M>, Machine.InvocationSupport<"Child">>
   | Machine.Machine.SnapshotDecodingServices<Machine.Machine.States<M>>
   | Machine.Machine.SnapshotEncodingServices<Machine.Machine.States<M>>
 
@@ -907,12 +940,13 @@ type EnsureJsonEncoded<
     }
   }
 
-type UnsupportedInvocation<R> = R extends Machine.InvocationSupport<infer Kind> ? Kind : never
+// A child machine runs as an entity of its own.
+type UnsupportedInvocation<R> = R extends Machine.InvocationSupport<infer Kind> ? Exclude<Kind, "Child"> : never
 
 type UnsupportedCapability<R> = R extends Machine.MachineRuntime ? "MachineRuntime" : never
 
-// This host supports no kind that `InvocationSupport` names, so a kind added to
-// it is refused until this host states that it runs it.
+// This host supports only the child kind that `InvocationSupport` names, so a
+// kind added to it is refused until this host states that it runs it.
 type EnsureSupported<R> = IsAny<R> extends true ? unknown
   : [UnsupportedInvocation<R> | UnsupportedCapability<R>] extends [never] ? unknown
   : {
@@ -1066,12 +1100,12 @@ export { StorageCheckFailure }
  * recovers declares `onFailure`.
  *
  * A machine that this host cannot run does not compile: one whose states invoke a
- * Stream, a `Logic`, or a child machine, or whose invoked work requires
- * `Machine.MachineRuntime`, as `Machine.spawn`, `Machine.sendTo`, and
- * `Machine.stopChild` do. The error names the property
+ * Stream or a `Logic`, or whose invoked work requires `Machine.MachineRuntime`,
+ * as `Machine.spawn`, `Machine.sendTo`, and `Machine.stopChild` do. The error
+ * names the property
  * `~effect/ClusterMachine/UnsupportedProcessLocal`, and lists there every
- * invocation kind and capability to replace with an Effect or a timer. A source
- * that is registered and never invoked is accepted.
+ * invocation kind and capability to replace with an Effect, a timer, or a child
+ * machine. A source that is registered and never invoked is accepted.
  *
  * **Gotchas**
  *
@@ -1115,15 +1149,34 @@ export { StorageCheckFailure }
  * by its type and id: `target` of an adapter makes one, and `self` is the one of
  * the machine's own entity. An event that a step sends with `enqueue.sendTo` is
  * saved with its checkpoint and applied once, and work sends with `send` of a
- * target. There is no `parent`.
+ * target.
+ *
+ * A child machine that a state invokes runs as an entity of its own, of type
+ * `Type/childId`, which the layer of the adapter registers too, with the same
+ * version. Each activation of the state starts a new child, whose id is
+ * `entityId/childId/revision`, with the revision of the step that entered the
+ * state, so a child knows nothing of the one before it. The step that enters
+ * the state saves the start of the child, with its input, in the transaction of
+ * its checkpoint, and the step that exits it saves its stop, so a child runs
+ * exactly while its state is stored. `enqueue.sendTo` with the descriptor of a
+ * child sends to the child that runs once the step is stored, and drops the
+ * event when none does. The child's `parent` is the target of its parent. A
+ * child that ends tells its parent, which reads its output or its failure from
+ * `Storage` and applies it as the end of the invocation. A failure of a child
+ * fails its parent, also when the parent declares `onFailure`, because the
+ * failure is stored as text and not as the error of the child. A stopped child
+ * is stored as `Stopped`, and a machine that fails or ends stops its children.
  *
  * The compiler reads only the requirements of a machine, so these uses of a local
  * process compile and fail at run time:
  *
- * - A step whose plan sends to a target that is not a {@link Target}, such as a
- *   child, or stops a child with `enqueue.stop`. It rejects the request as
- *   `UnsupportedProcessLocal`, or fails the machine when the step applies an
- *   outcome. Planning-time raised events remain part of the current macrostep.
+ * - A step whose plan sends to a target that is neither a {@link Target} nor
+ *   the descriptor of an invoked child, or stops a child with `enqueue.stop`. It
+ *   rejects the request as `UnsupportedProcessLocal`, or fails the machine when
+ *   the step applies an outcome. Planning-time raised events remain part of the
+ *   current macrostep.
+ * - A child invocation that declares `onSnapshot`. It rejects every request as
+ *   `UnsupportedProcessLocal`.
  * - Work that uses an operation of `children` from the context of its input
  *   mapper. It fails the machine.
  * - A machine whose requirements are `any`, such as an erased one. When any of its
@@ -1348,7 +1401,8 @@ export const make: <
     InputEvents,
     ParentEvents
   >,
-  | R
+  // A child machine runs as an entity that the layer of its parent registers.
+  | Exclude<R, Machine.InvocationSupport<"Child">>
   | Machine.Machine.SnapshotDecodingServices<States>
   | Machine.Machine.SnapshotEncodingServices<States>
 > = internal.make

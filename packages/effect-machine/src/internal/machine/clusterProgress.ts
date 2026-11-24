@@ -53,6 +53,38 @@ export const wait = (progress: Progress, key: Checkpoint.InvocationKey, dueAt: n
   set(progress, key, { _tag: "Waiting", dueAt })
 
 /**
+ * A child machine that runs as the entity `entityId`.
+ *
+ * @internal
+ */
+export const child = (progress: Progress, key: Checkpoint.InvocationKey, entityId: string): Progress =>
+  set(progress, key, { _tag: "Child", entityId })
+
+/**
+ * The children that run, with their keys.
+ *
+ * @internal
+ */
+export const children = (
+  progress: Progress
+): ReadonlyArray<readonly [key: Checkpoint.InvocationKey, entityId: string]> =>
+  entries(progress).flatMap(([key, value]) => value._tag === "Child" ? [[key, value.entityId] as const] : [])
+
+/**
+ * Removes every child, as a machine that ends stops them.
+ *
+ * @internal
+ */
+export const stopChildren = (progress: Progress): Progress =>
+  new Map(
+    Array.from(progress, ([path, invocations]) =>
+      [
+        path,
+        new Map(Array.from(invocations).filter(([, { _tag }]) => _tag !== "Child"))
+      ] as const)
+  )
+
+/**
  * Removes the invocations of exited states.
  *
  * @internal
@@ -93,6 +125,11 @@ export const toStored = (progress: Progress): Checkpoint.Invocations =>
 const readOne = (value: unknown): Checkpoint.Progress | undefined => {
   if (!Predicate.hasProperty(value, "_tag")) return undefined
   if (value._tag === "Settled") return { _tag: "Settled" }
+  if (value._tag === "Child") {
+    return Predicate.hasProperty(value, "entityId") && Predicate.isString(value.entityId)
+      ? { _tag: "Child", entityId: value.entityId }
+      : undefined
+  }
   return value._tag === "Waiting" && Predicate.hasProperty(value, "dueAt") && Predicate.isNumber(value.dueAt) &&
       Number.isInteger(value.dueAt) && Math.abs(value.dueAt) <= maxDueAt
     ? { _tag: "Waiting", dueAt: value.dueAt }

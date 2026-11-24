@@ -48,18 +48,19 @@ const refusedChildren: ChildOwner<any> = {
 }
 
 /**
- * Capabilities of a Cluster host. Its machine has no parent, and refuses every
- * operation that needs a local process. Its `self` is the target of its own
+ * Capabilities of a Cluster host. Its machine has a parent when it is a child,
+ * and refuses every operation that needs a local process. Its `self` is the target of its own
  * entity, when the host sends to Cluster machines.
  *
  * @internal
  */
 export const makeCapabilities = (
   definitionId: string,
-  self: MachineTarget<any> | undefined
+  self: MachineTarget<any> | undefined,
+  parent?: MachineTarget<any>
 ): InvocationResolution.InvocationCapabilities => ({
   self: self ?? new HostedTarget(definitionId),
-  parent: undefined,
+  parent,
   children: refusedChildren
 })
 
@@ -182,6 +183,9 @@ export class ClusterWork<R> {
       if (this.isClosed) return undefined
       const generation = this.generations.beginGeneration(group.path)
       for (const invocation of group.invocations) {
+        // A child runs as an entity of its own, which the step that entered its
+        // state started.
+        if (invocation._tag === "Child") continue
         if (ClusterProgress.get(stored.progress, invocation)?._tag === "Settled") continue
         const exit = yield* Effect.exit(construct(invocation, stored))
         if (Exit.isFailure(exit)) {
@@ -337,15 +341,16 @@ export const outcomeOf = (work: Work, outcome: InvocationOutcome.Outcome): Invoc
 export type Support =
   /** The machine invokes nothing. */
   | { readonly _tag: "Idle" }
-  /** Every invocation of the machine is an effect or a timer. */
+  /** Every invocation of the machine is an effect, a timer, or a child machine. */
   | { readonly _tag: "Hosted" }
   | { readonly _tag: "Unsupported"; readonly message: string }
 
+// The snapshots of a child are not sent to its parent yet.
 const unsupportedKind = (definition: CapturedInvocation.CapturedInvocation): string | undefined => {
   if ("effect" in definition || "after" in definition) return undefined
+  if ("child" in definition) return definition.onSnapshot === undefined ? undefined : "Child snapshot"
   if ("stream" in definition) return "Stream"
-  if ("logic" in definition) return "Logic"
-  return "Child"
+  return "Logic"
 }
 
 /**

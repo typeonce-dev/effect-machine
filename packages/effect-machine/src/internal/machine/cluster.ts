@@ -14,25 +14,19 @@ import * as Schema from "effect/Schema"
 import type * as Machine from "../../Machine.js"
 import type { Checkpoint } from "../../unstable/cluster/ClusterMachine.js"
 import type { Client, ClientError, ClusterMachine } from "../../unstable/cluster/ClusterMachine.js"
+import * as ClusterChild from "./clusterChild.js"
 import * as ClusterInstance from "./clusterInstance.js"
 import { CommitResult, Rejected, SendResult, Storage } from "./clusterProtocol.js"
 import * as ClusterRead from "./clusterRead.js"
 import * as ClusterTarget from "./clusterTarget.js"
 import * as ClusterWake from "./clusterWake.js"
 import type { MachineSchemaDecodeError } from "./errors.js"
+import { toImpl } from "./implementation.js"
 import * as Protocol from "./protocol.js"
 import type { EnsureExecutable } from "./readiness.js"
 
 type EntityAddress = EntityAddress.EntityAddress
 type Snowflake = Snowflake.Snowflake
-
-type SendRpc<Events extends ReadonlyArray<Machine.Machine.TaggedSchema>> = Rpc.Rpc<
-  "send",
-  Schema.Union<Events>,
-  typeof SendResult
->
-
-type MachineEvents<M extends Machine.Machine.Any> = Machine.Machine.InputEvents<M>
 
 const invalidEvent = (error: MachineSchemaDecodeError): Rejected =>
   new Rejected({
@@ -176,50 +170,67 @@ export const make = <
     InputEvents,
     ParentEvents
   >,
-  | R
+  | Exclude<R, Machine.InvocationSupport<"Child">>
   | Machine.Machine.SnapshotDecodingServices<States>
   | Machine.Machine.SnapshotEncodingServices<States>
 > => {
-  type M = Machine.Machine<
-    States,
-    Events,
-    Input,
-    UnhandledStates,
-    E,
-    R,
-    FinalStates,
-    Output,
-    Emits,
-    OutputStates,
-    InputEvents
-  >
-  type Hosted = Machine.Machine<
-    States,
-    Events,
-    Input,
-    UnhandledStates,
-    E,
-    R,
-    FinalStates,
-    Output,
-    Emits,
-    OutputStates,
-    InputEvents,
-    ParentEvents
-  >
-  type Services =
-    | R
-    | Machine.Machine.SnapshotDecodingServices<States>
-    | Machine.Machine.SnapshotEncodingServices<States>
-  const eventSchema = Schema.Union(Protocol.inputEventSchemas(machine) as MachineEvents<M>)
+  // The public type of the entity leaves out the RPCs that only machines send.
+  return build(type, machine, options, input, undefined) as never
+}
+
+/** A request to an entity, as its handlers see it. */
+interface Request {
+  readonly requestId: Snowflake
+  readonly payload: any
+}
+
+/** The parent of a child adapter. */
+interface Parent {
+  readonly protocol: ClusterTarget.Protocol
+  readonly childId: string
+}
+
+/** An adapter, and the adapters of the child machines that its states invoke. */
+interface Built {
+  readonly machine: Machine.Machine.Any
+  readonly entity: Entity.Entity<string, any>
+  readonly protocol: ClusterTarget.Protocol
+  readonly client: Effect.Effect<(entityId: string) => Client<any>, never, Sharding.Sharding>
+  readonly target: (entityId: string) => ClusterTarget.Target
+  readonly toLayer: (layerOptions?: {
+    readonly enqueue?: (event: any) => Effect.Effect<void, unknown, any>
+  }) => Layer.Layer<never, never, any>
+}
+
+const build = (
+  type: string,
+  machine: Machine.Machine.Any,
+  options: {
+    readonly version: string
+    readonly readInterval?: Duration.Input | undefined
+  },
+  input: ReadonlyArray<unknown>,
+  parent: Parent | undefined
+): Built => {
+  const eventSchema = Schema.Union(Protocol.inputEventSchemas(machine))
   const rpc = Rpc.make("send", {
     payload: eventSchema,
     success: SendResult
   })
-    .annotate(ClusterSchema.Persisted, true) as SendRpc<MachineEvents<M>>
-  // The `wake` RPC is the delayed message of a long timer, which only the
-  // machine itself sends. The public type of the entity leaves it out.
-  const entity = Entity.make(type, [rpc, ClusterWake.WakeRpc])
+    .annotate(ClusterSchema.Persisted, true)
+  // An event that another machine sends, which nobody waits for.
+  const deliver = Rpc.make("deliver", { payload: eventSchema }).annotate(ClusterSchema.Persisted, true)
+  // `deliver` carries an event another machine sends, `wake` is the delayed
+  // message of a long timer, `start` and `stop` come from the parent of a
+  // child, and `ended` from a child. Only machines send them.
+  const entity = Entity.make(type, [
+    rpc,
+    deliver,
+    ClusterWake.WakeRpc,
+    ClusterChild.makeStartRpc(machine.input ?? Schema.Undefined),
+    ClusterChild.StopRpc,
+    ClusterChild.EndedRpc
+  ])
   const definitionId = machine.id ?? type
   const publicTags: ReadonlySet<PropertyKey> = new Set(Reflect.ownKeys(machine.events))
 
@@ -235,25 +246,41 @@ export const make = <
 
   const protocol: ClusterTarget.Protocol = {
     entity,
+    machine,
     definitionId,
+    version: options.version,
     decode: (event) => decodeInputEvent(machine, publicTags, event),
     send: (entityId, event) =>
       Effect.flatMap(entity.client, (makeEntityClient) => sendThroughClient(makeEntityClient(entityId), event))
   }
   const target = (entityId: string): ClusterTarget.Target => new ClusterTarget.Target(protocol, entityId)
 
-  const toLayer = <EnqueueR = never>(layerOptions?: {
-    readonly enqueue?: (event: Machine.Machine.EmittedEventOf<Emits>) => Effect.Effect<void, unknown, EnqueueR>
-  }) =>
+  // Each child runs as an entity of its own, with the version of its parent.
+  const children = Array.from(
+    ClusterChild.childrenOf(toImpl(machine).handlers),
+    ([childId, child]) =>
+      [
+        childId,
+        build(ClusterChild.entityTypeOf(type, childId), child.machine, { version: options.version }, [], {
+          protocol,
+          childId
+        })
+      ] as const
+  )
+  const childProtocols: ReadonlyMap<string, ClusterTarget.Protocol> = new Map(
+    children.map(([childId, child]) => [childId, child.protocol])
+  )
+
+  const toLayer: Built["toLayer"] = (layerOptions) => {
     // Each live entity builds its own handlers, and so owns its own instance.
-    // The cast drops the services of the event schemas, which `ClusterMachine`
-    // does not require.
-    entity.toLayer(
+    const layer = entity.toLayer(
       Effect.gen(function*() {
         const address = yield* Entity.CurrentAddress
         const messageStorage = yield* MessageStorage.MessageStorage
         const sharding = yield* Sharding.Sharding
-        const instance = yield* ClusterInstance.make<Services | EnqueueR>({
+        const save = ClusterTarget.makeSave({ messageStorage, sharding })
+        const parentEntityId = parent && ClusterChild.parentEntityIdOf(address.entityId, parent.childId)
+        const instance = yield* ClusterInstance.make<any>({
           machine,
           definitionId,
           version: options.version,
@@ -261,7 +288,8 @@ export const make = <
           address,
           storage: yield* Storage,
           messageStorage,
-          enqueue: layerOptions?.enqueue,
+          // A child has no observers, so what it emits reaches nobody.
+          enqueue: parent === undefined ? layerOptions?.enqueue : () => Effect.void,
           keepAlive: yield* makeKeepAlive,
           wake: {
             threshold: yield* ClusterWake.threshold,
@@ -269,28 +297,41 @@ export const make = <
           },
           sends: {
             self: target(address.entityId),
-            save: ClusterTarget.makeSave({ messageStorage, sharding }),
+            save: (sent) => save(sent.target, "deliver", sent.event),
             poll: sharding.pollStorage
+          },
+          children: {
+            protocols: childProtocols,
+            save,
+            address: (target) => ClusterTarget.addressOf(sharding, target),
+            parent: parent === undefined || parentEntityId === undefined
+              ? undefined
+              : new ClusterTarget.Target(parent.protocol, parentEntityId)
           }
         })
-        return entity.of({
+        const handlers: Record<string, (request: Request) => Effect.Effect<unknown, never, any>> = {
           send: (request) => instance.apply({ requestId: request.requestId, event: request.payload }),
-          wake: (request) => instance.wake(request.payload)
-        })
+          deliver: (request) => instance.deliver({ requestId: request.requestId, event: request.payload }),
+          wake: (request) => instance.wake(request.payload),
+          start: (request) => instance.start({ requestId: request.requestId, input: request.payload.input }),
+          stop: (request) => instance.stop(request.requestId),
+          ended: (request) => instance.childEnded(request.payload.entityId)
+        }
+        return entity.of(handlers as never)
       })
-    ) as Layer.Layer<
-      never,
-      never,
-      Storage | MessageStorage.MessageStorage | Sharding.Sharding | EnqueueR | Services
-    >
+    )
+    return children.length === 0
+      ? layer
+      : Layer.mergeAll(layer, ...children.map(([, child]) => child.toLayer()))
+  }
 
   const client = Effect.gen(function*() {
     const makeEntityClient = yield* entity.client
     const sharding = yield* Sharding.Sharding
-    return (entityId: string): Client<Hosted> => {
+    return (entityId: string): Client<any> => {
       const rpc = makeEntityClient(entityId)
       const id = EntityId.make(entityId)
-      const reader = ClusterRead.make<Hosted>({
+      const reader = ClusterRead.make({
         machine,
         definitionId,
         version: options.version,
@@ -309,11 +350,5 @@ export const make = <
     }
   })
 
-  return {
-    machine,
-    entity: entity as unknown as Entity.Entity<Type, SendRpc<MachineEvents<M>>>,
-    client,
-    target,
-    toLayer
-  }
+  return { machine, entity, protocol, client, target, toLayer }
 }

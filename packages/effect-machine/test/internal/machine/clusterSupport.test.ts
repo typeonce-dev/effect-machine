@@ -27,7 +27,7 @@ const supportOf = (machine: Machine.Machine.Any) => ClusterWork.supportOf(toImpl
 // `ClusterMachine.make` decides by types, and `supportOf` decides for machines
 // without types. Every machine below is given to both.
 describe("what ClusterMachine refuses at compile time and at run time", () => {
-  it("agrees on each kind of invocation that a host may not support", () => {
+  it("agrees on each kind of invocation that a host may not support, and runs a child machine", () => {
     const refused = {
       Stream: definition.handle({
         initial,
@@ -45,14 +45,26 @@ describe("what ClusterMachine refuses at compile time and at run time", () => {
     ClusterMachine.make("Stream", refused.Stream, options)
     // @ts-expect-error { invocations: "Logic" }
     ClusterMachine.make("Logic", refused.Logic, options)
-    // @ts-expect-error { invocations: "Child" }
+    // A child machine runs as an entity of its own.
     ClusterMachine.make("Child", refused.Child, options)
 
     for (const [kind, machine] of Object.entries(refused)) {
       const support = supportOf(machine)
+      if (kind === "Child") {
+        assert.strictEqual(support._tag, "Hosted")
+        continue
+      }
       assert(support._tag === "Unsupported")
       assert.match(support.message, new RegExp(`^${kind} invocation ".*" of state "Busy"`))
     }
+  })
+
+  it("refuses the snapshots of a child machine", () => {
+    const support = supportOf(
+      definition.handle({ initial, states: { Busy: { invoke: { src: "child", onSnapshot: { stay: true } } } } })
+    )
+    assert(support._tag === "Unsupported")
+    assert.match(support.message, /^Child snapshot invocation "child" of state "Busy"/)
   })
 
   it("agrees on a machine of effects and timers", () => {

@@ -26,6 +26,7 @@ export const makeTestStorage = () => {
   const requests = new Map<string, Set<Snowflake.Snowflake>>()
   const transactionFlags: Array<boolean> = []
   const history: Array<ClusterMachine.Checkpoint> = []
+  const keys: Array<string> = []
   let commits = 0
   let commitAttempts = 0
   let loads = 0
@@ -90,6 +91,7 @@ export const makeTestStorage = () => {
             if (origin._tag === "Request") processed.add(origin.requestId)
             entries.set(key, checkpoint)
             history.push(checkpoint)
+            keys.push(key)
             commits += 1
             return ClusterMachine.CommitResult.Committed()
           })),
@@ -105,6 +107,9 @@ export const makeTestStorage = () => {
     transactionFlags,
     /** Every checkpoint that was committed, in order, including rolled back ones. */
     history,
+    /** The checkpoints of one entity in `history`. */
+    historyOf: (entityType: string, entityId: string) =>
+      history.filter((_, index) => keys[index] === storageKey(entityType, entityId)),
     get commits() {
       return commits
     },

@@ -47,7 +47,7 @@ describe("ClusterMachine", () => {
     expect<Effect.Success<ReturnType<Service["loadForRequest"]>>>().type.toBe<ClusterMachine.LoadResult>()
   })
   it("keeps the parts of an active and of a failed status apart", () => {
-    expect<ClusterMachine.Checkpoint["status"]["_tag"]>().type.toBe<"Active" | "Failed">()
+    expect<ClusterMachine.Checkpoint["status"]["_tag"]>().type.toBe<"Active" | "Failed" | "Stopped">()
     expect<ClusterMachine.Checkpoint.Status.Active>().type.not.toHaveProperty("failure")
     expect<ClusterMachine.Checkpoint.Status.Failed>().type.not.toHaveProperty("invocations")
     expect<{ readonly _tag: "Active"; readonly invocations: {}; readonly failure: string }>().type.not
@@ -56,7 +56,8 @@ describe("ClusterMachine", () => {
   })
   it("gives an invocation one progress, and only a waiting timer a due time", () => {
     type Invocations = ClusterMachine.Checkpoint.Invocations
-    expect<Invocations[string][string]["_tag"]>().type.toBe<"Settled" | "Waiting">()
+    expect<Invocations[string][string]["_tag"]>().type.toBe<"Settled" | "Waiting" | "Child">()
+    expect<ClusterMachine.Checkpoint.Progress.Child["entityId"]>().type.toBe<string>()
     expect<ClusterMachine.Checkpoint.Progress.Settled>().type.not.toHaveProperty("dueAt")
     expect<ClusterMachine.Checkpoint.Progress.Waiting["dueAt"]>().type.toBe<number>()
     expect<{ readonly _tag: "Waiting" }>().type.not.toBeAssignableTo<ClusterMachine.Checkpoint.Progress>()
@@ -422,7 +423,7 @@ describe("ClusterMachine", () => {
     >()
     expect<Extract<Read, { readonly status: "done" }>["output"]>().type.toBe<string>()
     expect<Extract<Read, { readonly status: "failed" }>["failure"]>().type.toBe<string>()
-    expect<Read["status"]>().type.toBe<"active" | "done" | "failed">()
+    expect<Read["status"]>().type.toBe<"active" | "done" | "failed" | "stopped">()
   })
 
   it("names a Cluster machine as a target that checks the events sent to it", () => {
