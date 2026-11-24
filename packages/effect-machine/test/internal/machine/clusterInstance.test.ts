@@ -106,7 +106,8 @@ const makeHarness = Effect.gen(function*() {
         ...(options.withTransaction && { withTransaction: options.withTransaction })
       }),
       enqueue: options.enqueue ?? (() => Effect.void),
-      keepAlive: options.keepAlive ?? (() => Effect.void)
+      keepAlive: options.keepAlive ?? (() => Effect.void),
+      wake: { threshold: 60_000, save: () => Effect.void }
     })
   return { counts, make, memory, revision }
 })
