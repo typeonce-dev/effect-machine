@@ -288,11 +288,7 @@ export const make = <R>(options: Options<R>): Effect.Effect<ClusterInstance<R>, 
       context,
       onEnd: (ended, exit) => untilDone(deliver(ended, exit))
     })
-    const keepAlive = new ClusterKeepAlive({
-      set: options.keepAlive,
-      fork: (effect) => work.fork(effect),
-      turn: (effect) => turn((restore) => restore(effect))
-    })
+    const keepAlive = new ClusterKeepAlive(options.keepAlive)
 
     const annotate = Effect.annotateLogs({ module: "ClusterMachine", definitionId, address })
 

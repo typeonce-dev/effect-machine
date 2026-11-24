@@ -698,12 +698,6 @@ export const layerMemory: Layer.Layer<Storage> = internal.layerMemory
  * A storage or `enqueue` failure never fails the machine. An outcome that cannot
  * be stored is retried for as long as the entity lives.
  *
- * The keep-alive request of an entity is replaced every five minutes. Message
- * storage delivers a request again once its claim expires, and a live entity
- * answers a keep-alive request that is delivered again, which would leave
- * nothing to bring the entity up after a crash. A crash during the few
- * milliseconds of a replacement leaves the entity down until its next request.
- *
  * An entity stays in memory while a timer waits, so a very long timer holds
  * memory for as long as it waits. Due times are read from the wall clock of the
  * runner, so runners whose clocks differ complete a timer that moves between them
