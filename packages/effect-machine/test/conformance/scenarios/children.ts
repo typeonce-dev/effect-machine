@@ -1,6 +1,6 @@
-import { Effect, Schema, Stream } from "effect"
+import { Effect, Schema, type Scope, Stream } from "effect"
 import { Machine } from "../../../src/index.js"
-import type { Fixture } from "../support/fixture.js"
+import type { Failure, Fixture } from "../support/fixture.js"
 import type { Scenario, Step } from "../support/scenario.js"
 import {
   die,
@@ -266,6 +266,97 @@ const logic: Scenario = {
       })
     ),
     send({ _tag: "Cancel" }, { happens: [{ Idle: {} }], stopped: ["counter(first)"] })
+  ]
+}
+
+const scopedStream: Scenario = {
+  name: "closes the scope of a stream with its end, and with its stop",
+  machine: (fixture) =>
+    Machine.make({
+      root: Machine.state({ states: { Idle: {}, Collecting: {} } }),
+      events: Machine.events({ Collect: { name: Schema.String }, Cancel: {} }),
+      streams: {
+        numbers: (name: string) =>
+          Stream.concat(
+            Stream.drain(
+              Stream.fromEffect(Effect.addFinalizer(() => Effect.sync(() => fixture.note(`release ${name}`))))
+            ),
+            fixture.stream("numbers", name)
+          )
+      }
+    }).handle({
+      initial: { target: "Idle" },
+      states: {
+        Idle: { on: { Collect: { target: "Collecting" } } },
+        Collecting: {
+          invoke: {
+            src: "numbers",
+            input: ({ event }) => event._tag === "Collect" ? event.name : "again",
+            onElement: { stay: true },
+            onDone: { target: "Idle" },
+            onFailure: { target: "Idle" }
+          },
+          on: { Cancel: { target: "Idle" } }
+        }
+      }
+    }),
+  start,
+  steps: [
+    send({ _tag: "Collect", name: "a" }, { happens: [{ Collecting: {} }, started("numbers", "a")] }),
+    succeed("numbers", undefined, { happens: [{ Idle: {} }], log: ["release a"] }),
+    named(
+      "collect again",
+      send({ _tag: "Collect", name: "b" }, { happens: [{ Collecting: {} }, started("numbers", "b")] })
+    ),
+    send({ _tag: "Cancel" }, { happens: [{ Idle: {} }], stopped: ["numbers(b)"], log: ["release b"] })
+  ]
+}
+
+const scopedLogic: Scenario = {
+  name: "closes the scope of process logic with its end, and with its stop",
+  machine: (fixture) =>
+    Machine.make({
+      root: Machine.state({ states: { Idle: {}, Running: {} } }),
+      events: Machine.events({ Run: { name: Schema.String }, Cancel: {} }),
+      logic: {
+        task: (name: string) =>
+          Machine.logic<number, never, void, Failure, Scope.Scope, never, Scope.Scope>({
+            initial: () =>
+              Effect.as(Effect.addFinalizer(() => Effect.sync(() => fixture.note(`release ${name} initial`))), 0),
+            run: () =>
+              Effect.andThen(
+                Effect.addFinalizer(() => Effect.sync(() => fixture.note(`release ${name} run`))),
+                Effect.asVoid(fixture.work("task", name))
+              )
+          })
+      }
+    }).handle({
+      initial: { target: "Idle" },
+      states: {
+        Idle: { on: { Run: { target: "Running" } } },
+        Running: {
+          invoke: {
+            src: "task",
+            id: "task",
+            address: Machine.childAddress<never>("task"),
+            input: ({ event }) => event._tag === "Run" ? event.name : "again",
+            onDone: { target: "Idle" },
+            onFailure: { target: "Idle" }
+          },
+          on: { Cancel: { target: "Idle" } }
+        }
+      }
+    }),
+  start,
+  steps: [
+    send({ _tag: "Run", name: "a" }, { happens: [{ Running: {} }, started("task", "a")] }),
+    succeed("task", "done", { happens: [{ Idle: {} }], log: ["release a run", "release a initial"] }),
+    named("run again", send({ _tag: "Run", name: "b" }, { happens: [{ Running: {} }, started("task", "b")] })),
+    send({ _tag: "Cancel" }, {
+      happens: [{ Idle: {} }],
+      stopped: ["task(b)"],
+      log: ["release b run", "release b initial"]
+    })
   ]
 }
 
@@ -550,11 +641,13 @@ const stoppedByOwner: Scenario = {
 
 export const children: ReadonlyArray<Scenario> = [
   stream,
+  scopedStream,
   chunk,
   paced,
   stoppedStream,
   failingStream,
   logic,
+  scopedLogic,
   child,
   failingChild,
   owned,
