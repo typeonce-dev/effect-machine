@@ -70,11 +70,12 @@ export const clusterHost: Host = {
           Effect.catchTag("Rejected", (rejected) => Effect.succeed(answerOf(rejected))),
           Effect.orDie
         ),
+      // An erased machine leaves the services of its schemas unknown.
       outcome: runner.client.snapshot.pipe(
         Effect.map(outcomeOf),
         Effect.provideService(ClusterMachine.Storage, storage.service),
         Effect.orDie
-      ),
+      ) as Effect.Effect<Outcome>,
       stop: unsupported("Stop"),
       restart: Effect.fnUntraced(function*(downtimeMillis) {
         yield* runner.stop

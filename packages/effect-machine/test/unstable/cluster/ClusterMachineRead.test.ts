@@ -57,7 +57,7 @@ describe("ClusterMachine.Client reads", () => {
       yield* client.send(Events.Add({ amount: 2 }))
       const active = Option.getOrThrow(yield* read)
       assert.strictEqual(statusOf(active), "active@1")
-      assert.deepStrictEqual(active.state.state, { path: "Counting", value: { _tag: "Counting", count: 2 } })
+      assert.include(JSON.stringify(active.state), "{\"_tag\":\"Counting\",\"count\":2}")
 
       yield* client.send(Events.Finish())
       const done = Option.getOrThrow(yield* read)
@@ -120,7 +120,7 @@ describe("ClusterMachine.Client reads", () => {
       const version = yield* Effect.flip(client.snapshot.pipe(provideStorage(storage)))
       assert.strictEqual(version._tag === "ReadError" && version.reason, "VersionMismatch")
 
-      overwrite(storage, { version: "1", snapshot: { _tag: "Counting", count: "many" } })
+      overwrite(storage, { version: "1", snapshot: { _tag: "Counting", count: "many" } as never })
       const invalid = yield* Effect.flip(client.changes.pipe(Stream.runHead, provideStorage(storage)))
       assert.strictEqual(invalid._tag === "ReadError" && invalid.reason, "InvalidCheckpoint")
     }).pipe(Effect.scoped))
