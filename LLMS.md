@@ -356,10 +356,17 @@ machine.
 
 The same requirements say what a machine needs of the host that runs it.
 `Machine.InvocationSupport<"Stream">`, `<"Logic">`, and `<"Child">` mark a machine
-whose states invoke that kind, and `Machine.MachineRuntime` marks one whose work
-uses `Machine.spawn`, `Machine.sendTo`, or `Machine.stopChild`. `LocalMachine` and
-`AtomMachine` run all of them. `ClusterMachine.make` runs Effects and timers, and
-does not compile for any other machine. Its error lists what to replace.
+whose states invoke that kind. `Machine.MachineRuntime` marks one whose work uses
+`Machine.spawn`, or `Machine.sendTo` or `Machine.stopChild` with a child address,
+and `Machine.ChildMachineRuntime` one whose work uses `Machine.sendTo` or
+`Machine.stopChild` with the descriptor of a child machine. `LocalMachine` and
+`AtomMachine` run all of them. `ClusterMachine.make` runs Effects, timers, and
+child machines, and provides `Machine.ChildMachineRuntime`. It does not compile
+for a machine that invokes a Stream or a `Logic`, or needs
+`Machine.MachineRuntime`, and its error lists what to replace. Cluster stores
+each step and runs work again after a crash, so it runs only work that ends with
+one outcome: the progress of a Stream and the state of a `Logic` live in memory
+and would be lost. Model such work as a child machine.
 
 Model a per-instance capability, such as a router or a callback owned by a UI
 component, as such a service. Do not put functions in state data or startup

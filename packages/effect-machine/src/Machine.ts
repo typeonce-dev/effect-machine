@@ -578,7 +578,9 @@ export type {
  * Every host runs Effects and timers, so no requirement stands for them.
  * `LocalMachine` supports every kind, also when `AtomMachine` hosts the machine,
  * and `LocalMachine.RequiredServices` removes them all. `ClusterMachine` supports
- * none, and `ClusterMachine.make` does not compile for a machine that has one.
+ * child machines, which it runs as entities of their own, and
+ * `ClusterMachine.make` does not compile for a machine that invokes a Stream or
+ * a `Logic`, whose progress it cannot store.
  *
  * **Gotchas**
  *
