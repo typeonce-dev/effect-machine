@@ -74,7 +74,7 @@
     "test:types": "tstyche"
   },
   "peerDependencies": {
-    "effect": "^4.1.5"
+    "effect": "^4.0.0"
   },
   "devDependencies": {
     "@effect/vitest": "4.1.5",
