@@ -17,15 +17,19 @@ import {
 } from "effect/cluster"
 import { Digest } from "effect/crypto"
 import * as SqlClient from "effect/sql/SqlClient"
+import type { SqlError } from "effect/sql/SqlError"
 import { TestClock } from "effect/testing"
 import { Machine } from "../../../src/index.js"
 import { ClusterMachine, SqlMachineStorage } from "../../../src/unstable/cluster/index.js"
 import { config } from "./support/harness.js"
 
-const dialects = [
+const dialects: ReadonlyArray<{
+  readonly name: string
+  readonly client: () => Layer.Layer<SqlClient.SqlClient, SqlError>
+}> = [
   { name: "SQLite", client: () => SqliteClient.layer({ filename: ":memory:" }) },
   { name: "PostgreSQL", client: () => PgliteClient.layer() }
-] as const
+]
 
 const Events = Machine.events({ Add: { amount: Schema.Number } })
 const Emitted = Machine.emittedEvents({ Added: { total: Schema.Number } })
