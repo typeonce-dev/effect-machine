@@ -97,7 +97,7 @@ applied once. Work sends with `Machine.sendTo` and stops a child with
 ### What is refused, and why
 
 These do not compile with `ClusterMachine.make`. The error names the property
-`~effect/ClusterMachine/UnsupportedProcessLocal` and lists what to replace:
+`~effect/cluster/ClusterMachine/UnsupportedProcessLocal` and lists what to replace:
 
 - a state that invokes a Stream or a `Logic`;
 - work that requires `Machine.MachineRuntime`, such as `Machine.spawn`, or
