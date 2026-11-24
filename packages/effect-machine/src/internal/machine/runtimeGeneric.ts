@@ -40,11 +40,11 @@ import {
   notifyActiveSnapshot,
   offerProcessMailbox,
   pollCompactMailbox,
-  type ProcessAddress,
-  type ProcessContext,
+  type ProcessEndpoint,
+  type ProcessInitialContext,
   type ProcessLogic,
   type ProcessMessage,
-  type ProcessScope,
+  type ProcessRunContext,
   publishInspectedSent,
   receiveProcessMailbox,
   type RuntimeSnapshot,
@@ -138,7 +138,7 @@ export const startGenericInternal: StartProcess = Effect.fnUntraced(
             )
           ) as Effect.Effect<AcknowledgedDelivery<State>, Error | StoppedError>
 
-    const self: ProcessAddress<Event> = {
+    const self: ProcessEndpoint<Event> = {
       id,
       sessionId,
       // Initialization must finish constructing a state before a stopped
@@ -227,7 +227,7 @@ export const startGenericInternal: StartProcess = Effect.fnUntraced(
             )
           )
         )
-    const sendToTarget: ProcessScope<Event>["sendTo"] = inspector === undefined
+    const sendToTarget: ProcessInitialContext<Event>["sendTo"] = inspector === undefined
       ? ((target: unknown, event: unknown) =>
         isMachineTarget(target) ? target.send(event) : sendTo(target as ChildSelector, event))
       : ((target: unknown, event: unknown) =>
@@ -235,7 +235,7 @@ export const startGenericInternal: StartProcess = Effect.fnUntraced(
           ? sendMachineTarget(target, event, subject, currentCausation())
           : sendTo(target as ChildSelector, event, subject, currentCausation()))
 
-    const scope: ProcessScope<Event> = {
+    const scope: ProcessInitialContext<Event> = {
       self,
       parent,
       spawn,
@@ -561,7 +561,7 @@ export const startGenericInternal: StartProcess = Effect.fnUntraced(
 
     const acknowledgedContext:
       | Pick<
-        ProcessContext<State, Event>,
+        ProcessRunContext<State, Event>,
         "receiveMessage" | "pollMessage" | "completeMessage"
       >
       | undefined = logic.execution?._tag !== "Compiled" ? undefined : {
@@ -617,7 +617,7 @@ export const startGenericInternal: StartProcess = Effect.fnUntraced(
           )
           : Effect.succeed(undefined)
       ).pipe(Effect.asVoid)
-    const updateState: ProcessContext<State, Event>["updateState"] = inspector === undefined
+    const updateState: ProcessRunContext<State, Event>["updateState"] = inspector === undefined
       ? updateStateDirect
       : (f) =>
         SynchronizedRef.get(current).pipe(
@@ -650,7 +650,7 @@ export const startGenericInternal: StartProcess = Effect.fnUntraced(
           ),
           Effect.asVoid
         )
-    const context: ProcessContext<State, Event> = {
+    const context: ProcessRunContext<State, Event> = {
       ...scope,
       ...(logic.execution?._tag === "Compiled" && !logic.execution.childless ? { ownedChildren } : undefined),
       ...acknowledgedContext,

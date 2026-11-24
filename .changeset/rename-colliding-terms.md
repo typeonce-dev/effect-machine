@@ -32,3 +32,13 @@ A `MachineId` of Effect Cluster names the runner that generates an id. A checkpo
 | Log annotation `machineId` of `ClusterMachine`          | `definitionId`           |
 
 Stop the instances of the previous version, then rename `machineId` to `definitionId` in every stored checkpoint and keep its value. A checkpoint that still has `machineId` is rejected as `"DefinitionIdMismatch"`. Deploy clients together with runners: neither version decodes a `Rejected` reply, stored or sent, that has the other version's reason.
+
+`Logic.Scope` sat next to Effect's `Scope` in the same signatures and meant something else. The capabilities given to `Logic` are renamed:
+
+| Before          | After                  |
+| --------------- | ---------------------- |
+| `Logic.Scope`   | `Logic.InitialContext` |
+| `Logic.Context` | `Logic.RunContext`     |
+| `Logic.Address` | `Logic.Endpoint`       |
+
+`ChildAddress` keeps its name: it is the typed id a parent uses to reach a child, which is what an address is in Effect Cluster. `Logic.Endpoint` is the object that sends to and stops a process.

@@ -1070,17 +1070,17 @@ export const logic = <
     readonly initial:
       | State
       | ((
-        scope: Logic.Scope<Event>
+        scope: Logic.InitialContext<Event>
       ) => Effect.Effect<State, InitialError, InitialRequirements>)
     readonly run: (
-      context: Logic.Context<State, Event>
+      context: Logic.RunContext<State, Event>
     ) => Effect.Effect<Output, Error, Requirements>
   }
 ): Logic<State, Event, Error, Requirements | InitialRequirements, Output, InitialError> => ({
   initial: (scope) =>
     typeof options.initial === "function"
       ? (options.initial as (
-        scope: Logic.Scope<Event>
+        scope: Logic.InitialContext<Event>
       ) => Effect.Effect<State, InitialError, InitialRequirements>)(scope)
       : Effect.succeed(options.initial),
   run: options.run

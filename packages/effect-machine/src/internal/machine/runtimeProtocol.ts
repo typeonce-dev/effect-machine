@@ -165,7 +165,7 @@ export interface MachineRef<out State, in Event, out Error = never, out Output =
   /** @internal */
   readonly inspectionSubject?: Inspection.Subject
   /** @internal */
-  readonly sendInspected?: ProcessAddress<Event>["sendInspected"]
+  readonly sendInspected?: ProcessEndpoint<Event>["sendInspected"]
   readonly [acknowledgedSend]?: (
     event: Event
   ) => Effect.Effect<AcknowledgedDelivery<State>, Error | StoppedError>
@@ -185,7 +185,7 @@ export interface PreparedProcess<
   readonly start: Effect.Effect<MachineRef<State, Event, Error, Output, Emitted>, StartError, StartRequirements>
 }
 
-export interface ProcessAddress<in Event> {
+export interface ProcessEndpoint<in Event> {
   readonly id: string
   readonly sessionId: string
   readonly inspectionSubject?: Inspection.Subject
@@ -214,9 +214,9 @@ export const sendMachineTarget = (
     ? target.sendInspected(event, source, causedBy)
     : target.send(event)
 
-export interface ProcessScope<Event> {
-  readonly self: ProcessAddress<Event>
-  readonly parent: ProcessAddress<unknown> | undefined
+export interface ProcessInitialContext<Event> {
+  readonly self: ProcessEndpoint<Event>
+  readonly parent: ProcessEndpoint<unknown> | undefined
   readonly spawn: ProcessSpawn<Event>
   readonly sendParent: (event: unknown) => Effect.Effect<void, StoppedError>
   readonly emit: (event: unknown) => Effect.Effect<void>
@@ -234,7 +234,7 @@ export interface ProcessScope<Event> {
   ) => void
 }
 
-export interface ProcessContext<State, Event> extends ProcessScope<Event> {
+export interface ProcessRunContext<State, Event> extends ProcessInitialContext<Event> {
   readonly receive: Effect.Effect<Event>
   /** @internal */
   readonly poll?: Effect.Effect<Option.Option<Event>>
@@ -256,7 +256,7 @@ export interface ProcessContext<State, Event> extends ProcessScope<Event> {
 /**
  * Owner-local execution context for compiled statecharts.
  *
- * Unlike `ProcessContext`, synchronous mailbox and state operations do not
+ * Unlike `ProcessRunContext`, synchronous mailbox and state operations do not
  * introduce an Effect boundary. The compiled drain still returns an Effect so
  * machine commands, invokes, observation callbacks, interruption, and the Effect
  * scheduler remain explicit at their actual boundaries.
@@ -264,7 +264,7 @@ export interface ProcessContext<State, Event> extends ProcessScope<Event> {
  * @internal
  */
 export interface CompiledProcessContext<State, Event> {
-  readonly scope: ProcessScope<Event>
+  readonly scope: ProcessInitialContext<Event>
   readonly ownedChildren: OwnedChildRuntime
   readonly poll: () => Option.Option<Event>
   readonly pollMessage: () => Option.Option<ProcessMessage<Event>>
@@ -295,7 +295,7 @@ type CompiledProcessDrain<State, Event, Error, Requirements, Output> =
   | {
     readonly _tag: "Process"
     readonly run: (
-      context: ProcessContext<State, Event>
+      context: ProcessRunContext<State, Event>
     ) => Effect.Effect<Option.Option<Output>, Error, Requirements>
   }
   | OwnedCompiledProcessDrain<State, Event, Error, Requirements, Output>
@@ -339,10 +339,10 @@ export interface CompiledProcessExecution<
   readonly _tag: "Compiled"
   readonly childless: boolean
   readonly initial?: (
-    scope: ProcessScope<Event>
+    scope: ProcessInitialContext<Event>
   ) => Effect.Effect<CompiledProcessInitial<State, Output>, InitialError, Requirements>
   readonly initialSync?: (
-    scope: ProcessScope<Event>
+    scope: ProcessInitialContext<Event>
   ) => CompiledProcessInitial<State, Output>
   readonly drain: CompiledProcessDrain<State, Event, Error, Requirements, Output>
 }
@@ -479,8 +479,8 @@ export interface ProcessLogic<
     readonly kind: Inspection.Subject["kind"]
     readonly definition?: MachineDefinition.Any
   }
-  initial(scope: ProcessScope<Event>): Effect.Effect<State, InitialError, Requirements>
-  run(context: ProcessContext<State, Event>): Effect.Effect<Output, Error, Requirements>
+  initial(scope: ProcessInitialContext<Event>): Effect.Effect<State, InitialError, Requirements>
+  run(context: ProcessRunContext<State, Event>): Effect.Effect<Output, Error, Requirements>
 }
 
 interface ProcessSpawn<OwnerEvent = unknown> {
@@ -520,7 +520,7 @@ interface ProcessSpawn<OwnerEvent = unknown> {
 
 export const provideMachineRuntime = <A, E, R, Event>(
   effect: Effect.Effect<A, E, R>,
-  scope: ProcessScope<Event>
+  scope: ProcessInitialContext<Event>
 ): Effect.Effect<A, E, Exclude<R, MachineRuntime>> => Effect.provideService(effect, MachineRuntime, scope)
 
 export const notifyActiveSnapshot = <State, Error, Output>(
@@ -681,7 +681,7 @@ export interface StartInternalOptions {
   /** Runs synchronously once the process has terminated, with its reference. */
   readonly onStopSync?: (ref: MachineRef<any, any, any, any>) => void
   readonly skipStoppedOutcome?: boolean
-  readonly parent?: ProcessAddress<unknown>
+  readonly parent?: ProcessEndpoint<unknown>
   readonly runtime: ProcessRuntime
   readonly sendParent?: (event: unknown) => Effect.Effect<void, StoppedError>
   readonly origin?: Inspection.Origin
@@ -771,7 +771,7 @@ class OwnedChildRuntimeImpl extends InvocationGenerations implements OwnedChildR
 
   constructor(
     private readonly registry: ChildRegistry,
-    private readonly self: ProcessAddress<any>,
+    private readonly self: ProcessEndpoint<any>,
     private readonly runtime: ProcessRuntime,
     private readonly services?: Context.Context<any>,
     private readonly sendAcknowledged?: (
@@ -819,7 +819,7 @@ class OwnedChildRuntimeImpl extends InvocationGenerations implements OwnedChildR
         ownerPath: options.path,
         ownerActive: true
       })
-      const parent: ProcessAddress<unknown> = {
+      const parent: ProcessEndpoint<unknown> = {
         ...this.self,
         send: (event) => options.sendParent(isCurrent, event),
         sendInspected: (event, source, causedBy) =>
@@ -1001,7 +1001,7 @@ export const childlessRuntime: ChildRuntime = {
 }
 
 export const makeChildRuntimeSync = (
-  self: ProcessAddress<any>,
+  self: ProcessEndpoint<any>,
   runtime: ProcessRuntime,
   services?: Context.Context<any>,
   sendAcknowledged?: (
@@ -1265,7 +1265,7 @@ export const makeChildRuntimeSync = (
 }
 
 export const makeChildRuntime = (
-  self: ProcessAddress<any>,
+  self: ProcessEndpoint<any>,
   runtime: ProcessRuntime,
   services?: Context.Context<any>,
   sendAcknowledged?: (

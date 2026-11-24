@@ -1258,7 +1258,7 @@ export interface MachineRef<out State, in Event, out Error = never, out Output =
  * Stateful process logic used by `spawn` and state-owned invocations.
  *
  * Logic describes a process by what it needs from a host: the capabilities of
- * `Logic.Scope` and `Logic.Context`. `LocalMachine` runs it as a process owned by
+ * `Logic.InitialContext` and `Logic.RunContext`. `LocalMachine` runs it as a process owned by
  * the machine. `ClusterMachine.make` does not compile for a machine that invokes
  * it.
  *
@@ -1274,10 +1274,10 @@ export interface Logic<
   out InitialError = never
 > {
   /** Creates the initial process state and may spawn scoped child processes. */
-  initial(scope: Logic.Scope<Event>): Effect.Effect<State, InitialError, Requirements>
+  initial(context: Logic.InitialContext<Event>): Effect.Effect<State, InitialError, Requirements>
 
   /** Runs the stateful process loop until it produces output or fails. */
-  run(context: Logic.Context<State, Event>): Effect.Effect<Output, Error, Requirements>
+  run(context: Logic.RunContext<State, Event>): Effect.Effect<Output, Error, Requirements>
 }
 
 /**
@@ -1293,7 +1293,7 @@ export declare namespace Logic {
    * @category models
    * @since 0.4.0
    */
-  export interface Address<in Event> {
+  export interface Endpoint<in Event> {
     /** Parent-local address id. */
     readonly id: string
 
@@ -1353,14 +1353,14 @@ export declare namespace Logic {
    * @category models
    * @since 0.4.0
    */
-  export interface Scope<Event> {
-    /** Address of the process being initialized. */
-    readonly self: Address<Event>
+  export interface InitialContext<Event> {
+    /** Endpoint of the process being initialized. */
+    readonly self: Endpoint<Event>
 
-    /** Address of the owning process, when one exists. */
-    readonly parent: Address<unknown> | undefined
+    /** Endpoint of the owning process, when one exists. */
+    readonly parent: Endpoint<unknown> | undefined
 
-    /** Starts a child process owned by this scope. */
+    /** Starts a child process owned by this process. */
     readonly spawn: Spawn<Event>
 
     /** Sends an event to a machine target or typed parent-local child address. */
@@ -1382,7 +1382,7 @@ export declare namespace Logic {
    * @category models
    * @since 0.4.0
    */
-  export interface Context<State, Event> extends Scope<Event> {
+  export interface RunContext<State, Event> extends InitialContext<Event> {
     /** Waits for the next event delivered to this process. */
     readonly receive: Effect.Effect<Event>
 
@@ -4267,8 +4267,8 @@ export declare namespace Machine {
 
   export type LogicStateOf<Value> = Effect.Success<LogicInitialEffectOf<Value>>
   export type LogicEventOf<Value> = Value extends { readonly initial: infer Initial } ?
-    Initial extends (scope: infer LogicScope, ...args: ReadonlyArray<any>) => any ?
-      LogicScope extends Logic.Scope<infer Event> ? Event : never
+    Initial extends (context: infer LogicInitialContext, ...args: ReadonlyArray<any>) => any ?
+      LogicInitialContext extends Logic.InitialContext<infer Event> ? Event : never
     : never
     : never
   export type LogicErrorOf<Value> = Effect.Error<LogicRunEffectOf<Value>>
@@ -7490,14 +7490,14 @@ export const logic: <
   InitialError = never,
   InitialRequirements = never
 >(options: {
-  /** The first state, or an Effect that produces it from the process scope before `run` starts. */
+  /** The first state, or an Effect that produces it from the initial context before `run` starts. */
   readonly initial:
     | State
     | ((
-      scope: Logic.Scope<Event>
+      context: Logic.InitialContext<Event>
     ) => Effect.Effect<State, InitialError, InitialRequirements>)
   readonly run: (
-    context: Logic.Context<State, Event>
+    context: Logic.RunContext<State, Event>
   ) => Effect.Effect<Output, Error, Requirements>
 }) => Logic<State, Event, Error, Requirements | InitialRequirements, Output, InitialError> = internal.logic
 

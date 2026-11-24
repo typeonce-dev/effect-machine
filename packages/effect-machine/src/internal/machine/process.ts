@@ -424,7 +424,7 @@ const makeProcessLogic = (
   const initialArgs = entry._tag === "Initial" ? entry.args : []
   const compiledInitial = entry._tag === "Initial" ? executionPlan.initial : undefined
   const makeCompiledInitial = compiledInitial === undefined ? undefined : (
-    scope: internalRuntimeProtocol.ProcessScope<Machine.EventOf<any>>
+    scope: internalRuntimeProtocol.ProcessInitialContext<Machine.EventOf<any>>
   ) => {
     try {
       const planned = compiledInitial(initialArgs, scope)
@@ -445,7 +445,7 @@ const makeProcessLogic = (
     }
   }
   const makeInitial = (
-    scope: internalRuntimeProtocol.ProcessScope<Machine.EventOf<any>>
+    scope: internalRuntimeProtocol.ProcessInitialContext<Machine.EventOf<any>>
   ) =>
     compiledInitial === undefined
       ? internalRuntimeProtocol.provideMachineRuntime(

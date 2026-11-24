@@ -737,8 +737,8 @@ describe("Machine", () => {
         const worker = Machine.childAddress<SignIn>("worker")
         const incompatibleWorker = Machine.childAddress<Down>("incompatible-worker")
         const child = Machine.logic<number, SignIn>({ initial: 0, run: () => Effect.never })
-        expect(scope).type.toBe<Machine.Logic.Scope<SignIn>>()
-        expect(scope.self).type.toBe<Machine.Logic.Address<SignIn>>()
+        expect(scope).type.toBe<Machine.Logic.InitialContext<SignIn>>()
+        expect(scope.self).type.toBe<Machine.Logic.Endpoint<SignIn>>()
         expect(scope.spawn).type.toBeCallableWith(child, { id: worker })
         expect(scope.spawn).type.not.toBeCallableWith(child, { id: incompatibleWorker })
         expect(scope.sendTo).type.toBeCallableWith(worker, new SignIn({ userId: "user-1" }))
@@ -749,7 +749,7 @@ describe("Machine", () => {
         return Effect.succeed(0)
       },
       run: (context) => {
-        expect(context).type.toBe<Machine.Logic.Context<number, SignIn>>()
+        expect(context).type.toBe<Machine.Logic.RunContext<number, SignIn>>()
         return Effect.void
       }
     })
