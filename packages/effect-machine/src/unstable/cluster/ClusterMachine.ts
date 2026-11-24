@@ -1167,6 +1167,14 @@ export { StorageCheckFailure }
  * failure is stored as text and not as the error of the child. A stopped child
  * is stored as `Stopped`, and a machine that fails or ends stops its children.
  *
+ * When a state of the parent takes the snapshots of a child with `onSnapshot`,
+ * each step of the child that plans its initial state or takes a transition, and
+ * leaves it active, sends its parent the encoded snapshot in the transaction of
+ * its checkpoint. The parent applies each one once, as Cluster delivers it,
+ * while it runs that child. A transition on a snapshot that cannot
+ * be applied fails the parent. A child whose parent takes none of its snapshots
+ * sends none.
+ *
  * The compiler reads only the requirements of a machine, so these uses of a local
  * process compile and fail at run time:
  *
@@ -1175,8 +1183,6 @@ export { StorageCheckFailure }
  *   rejects the request as `UnsupportedProcessLocal`, or fails the machine when
  *   the step applies an outcome. Planning-time raised events remain part of the
  *   current macrostep.
- * - A child invocation that declares `onSnapshot`. It rejects every request as
- *   `UnsupportedProcessLocal`.
  * - Work that uses an operation of `children` from the context of its input
  *   mapper. It fails the machine.
  * - A machine whose requirements are `any`, such as an erased one. When any of its

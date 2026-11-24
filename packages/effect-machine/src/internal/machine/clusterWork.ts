@@ -345,10 +345,8 @@ export type Support =
   | { readonly _tag: "Hosted" }
   | { readonly _tag: "Unsupported"; readonly message: string }
 
-// The snapshots of a child are not sent to its parent yet.
 const unsupportedKind = (definition: CapturedInvocation.CapturedInvocation): string | undefined => {
-  if ("effect" in definition || "after" in definition) return undefined
-  if ("child" in definition) return definition.onSnapshot === undefined ? undefined : "Child snapshot"
+  if ("effect" in definition || "after" in definition || "child" in definition) return undefined
   if ("stream" in definition) return "Stream"
   return "Logic"
 }

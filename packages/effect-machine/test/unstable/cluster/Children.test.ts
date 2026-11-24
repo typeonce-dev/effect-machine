@@ -44,6 +44,8 @@ const counter = Machine.make({
 })
 
 const Counter = Machine.child("counter", counter)
+// The same machine, invoked by a state that takes its snapshots.
+const Watched = Machine.child("watched", counter)
 
 const host = Machine.make({
   id: "Host",
@@ -52,7 +54,10 @@ const host = Machine.make({
       Idle: {},
       Hosting: { fields: { counted: Schema.Number } },
       Ready: { fields: { result: Schema.String } },
-      Doomed: {}
+      Doomed: {},
+      Watching: { fields: { seen: Schema.Number } },
+      Glancing: {},
+      Blind: {}
     }
   }),
   events: Machine.events({
@@ -62,14 +67,23 @@ const host = Machine.make({
     Break: {},
     Cancel: {},
     Doom: {},
+    Watch: {},
+    Glance: {},
     Counted: { count: Schema.Number }
   }),
   effects: { fail: Effect.andThen(Effect.sleep("10 seconds"), Effect.die("broken host")) },
-  children: { counter: Counter }
+  children: { counter: Counter, watched: Watched }
 }).handle({
   initial: { target: "Idle" },
   states: {
-    Idle: { on: { Host: { target: "Hosting", data: { counted: 0 } }, Doom: { target: "Doomed" } } },
+    Idle: {
+      on: {
+        Host: { target: "Hosting", data: { counted: 0 } },
+        Doom: { target: "Doomed" },
+        Watch: { target: "Watching", data: { seen: -1 } },
+        Glance: { target: "Glancing" }
+      }
+    },
     Hosting: {
       invoke: {
         src: "counter",
@@ -85,6 +99,31 @@ const host = Machine.make({
       }
     },
     Ready: { on: { Add: { stay: true, commands: ({ event }, enqueue) => enqueue.sendTo(Counter, event) } } },
+    Watching: {
+      invoke: {
+        src: "watched",
+        input: () => "watcher",
+        onDone: { target: "Idle" },
+        onSnapshot: {
+          update: {
+            Watching: ({ snapshot }) => {
+              const leaf = snapshot.state.state
+              const seen = leaf.path === "Counting" ? leaf.value.count : -1
+              if (seen > 9) throw new Error("seen too much")
+              return { seen }
+            }
+          }
+        }
+      },
+      on: {
+        Add: { stay: true, commands: ({ event }, enqueue) => enqueue.sendTo(Watched, { _tag: "Add", by: event.by }) }
+      }
+    },
+    // Leaves with the first snapshot of its child.
+    Glancing: {
+      invoke: { src: "watched", input: () => "glancer", onDone: { target: "Idle" }, onSnapshot: { target: "Blind" } }
+    },
+    Blind: {},
     // Fails while its child runs.
     Doomed: { invoke: [{ src: "counter", input: () => "doomed", onDone: { target: "Idle" } }, { src: "fail" }] }
   }
@@ -102,6 +141,7 @@ const start = Effect.gen(function*() {
 
 // A child is an entity of type `Type/childId`.
 const childType = "Worker/counter"
+const watchedType = "Worker/watched"
 const checkpointOf = (storage: TestStorage, entityType: string, entityId: string) =>
   storage.entries.get(storageKey(entityType, entityId))
 const leafOf = (storage: TestStorage, entityType = "Worker", entityId = "worker-1") =>
@@ -206,5 +246,62 @@ describe("ClusterMachine child machines", () => {
       yield* settle
       assert.strictEqual(checkpointOf(storage, "Worker", "worker-1")?.status._tag, "Failed")
       assert.deepStrictEqual(checkpointOf(storage, childType, "worker-1/counter/1")?.status, { _tag: "Stopped" })
+    }).pipe(Effect.scoped))
+
+  it.effect("give a parent the snapshots of its child, each once", () =>
+    Effect.gen(function*() {
+      const { messages, runner, storage } = yield* start
+      yield* runner.send({ _tag: "Watch" })
+      yield* settle
+      assert.deepStrictEqual(leafOf(storage)?.value, { _tag: "Watching", seen: 0 })
+      yield* runner.send({ _tag: "Add", by: 2 })
+      yield* runner.send({ _tag: "Add", by: 3 })
+      yield* settle
+      assert.deepStrictEqual(leafOf(storage)?.value, { _tag: "Watching", seen: 5 })
+      const commits = storage.commits
+
+      // Cluster delivers a snapshot again.
+      const snapshot = messages.driver.journal.find((envelope) =>
+        envelope._tag === "Request" && envelope.tag === "snapshot"
+      )
+      assert.isTrue(snapshot?._tag === "Request")
+      if (snapshot?._tag !== "Request") return
+      yield* messages.storage.clearReplies(Snowflake.Snowflake(snapshot.requestId))
+      yield* runner.sharding.pollStorage
+      yield* settle
+      assert.strictEqual(storage.commits, commits)
+      assert.deepStrictEqual(leafOf(storage)?.value, { _tag: "Watching", seen: 5 })
+    }).pipe(Effect.scoped))
+
+  it.effect("send no snapshot to a parent that takes none", () =>
+    Effect.gen(function*() {
+      const { messages, runner } = yield* start
+      yield* runner.send({ _tag: "Host", name: "ada" })
+      yield* runner.send({ _tag: "Add", by: 2 })
+      yield* settle
+      assert.isFalse(
+        messages.driver.journal.some((envelope) => envelope._tag === "Request" && envelope.tag === "snapshot")
+      )
+    }).pipe(Effect.scoped))
+
+  it.effect("stop a child whose snapshot makes its parent leave the state", () =>
+    Effect.gen(function*() {
+      const { runner, storage } = yield* start
+      yield* runner.send({ _tag: "Glance" })
+      yield* settle
+      assert.deepStrictEqual(leafOf(storage), { path: "Blind" })
+      assert.deepStrictEqual(checkpointOf(storage, watchedType, "worker-1/watched/1")?.status, { _tag: "Stopped" })
+    }).pipe(Effect.scoped))
+
+  it.effect("fail a parent whose transition on a snapshot throws, and stop its child", () =>
+    Effect.gen(function*() {
+      const { runner, storage } = yield* start
+      yield* runner.send({ _tag: "Watch" })
+      yield* runner.send({ _tag: "Add", by: 10 })
+      yield* settle
+      const parent = checkpointOf(storage, "Worker", "worker-1")
+      assert.strictEqual(parent?.status._tag, "Failed")
+      assert.match(parent?.status._tag === "Failed" ? parent.status.failure : "", /seen too much/)
+      assert.deepStrictEqual(checkpointOf(storage, watchedType, "worker-1/watched/1")?.status, { _tag: "Stopped" })
     }).pipe(Effect.scoped))
 })

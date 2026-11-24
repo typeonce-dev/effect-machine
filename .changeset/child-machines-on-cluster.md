@@ -15,7 +15,7 @@ Hosting: {
 }
 ```
 
-`enqueue.sendTo` with the descriptor of a child sends to the child that runs, and drops the event when none does. A child's `parent` is the target of its parent. A child that ends tells its parent, which applies its output as the end of the invocation. A child that fails fails its parent, also when the parent declares `onFailure`. A machine that fails or ends stops its children. A child invocation with `onSnapshot` is still refused.
+`enqueue.sendTo` with the descriptor of a child sends to the child that runs, and drops the event when none does. A child's `parent` is the target of its parent. A child that ends tells its parent, which applies its output as the end of the invocation. A child that fails fails its parent, also when the parent declares `onFailure`. A machine that fails or ends stops its children.
 
 A child is type checked as its own Cluster machine: a child that invokes a Stream or a `Logic`, or requires `Machine.MachineRuntime`, still makes its parent refused, and the error names what the child uses.
 
