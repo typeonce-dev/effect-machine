@@ -12,11 +12,14 @@ import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Option from "effect/Option"
 import * as Predicate from "effect/Predicate"
+import * as Schedule from "effect/Schedule"
 import type * as Scope from "effect/Scope"
 import * as Semaphore from "effect/Semaphore"
 import type * as Machine from "../../Machine.js"
 import type { Checkpoint } from "../../unstable/cluster/ClusterMachine.js"
 import * as CapturedInvocation from "./capturedInvocation.js"
+import { isChildMachine } from "./child.js"
+import * as ClusterChild from "./clusterChild.js"
 import { renderFailure } from "./clusterFailure.js"
 import { ClusterKeepAlive, untilDone } from "./clusterKeepAlive.js"
 import * as ClusterProgress from "./clusterProgress.js"
@@ -28,6 +31,7 @@ import * as Configuration from "./configuration.js"
 import { toImpl } from "./implementation.js"
 import * as InvocationChanges from "./invocationChanges.js"
 import type { InvocationEvent } from "./invocationEvent.js"
+import * as InvocationEventModule from "./invocationEvent.js"
 import * as InvocationOutcome from "./invocationOutcome.js"
 import * as InvocationResolution from "./invocationResolution.js"
 import * as internalMachine from "./machine.js"
@@ -43,6 +47,15 @@ type Restore = <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.Effect<A, E, 
 export interface Input {
   readonly requestId: Snowflake
   readonly event: unknown
+}
+
+/**
+ * A request: an event, or the start or stop of a child machine by its parent.
+ * A start carries the arguments of the initial plan.
+ */
+interface RequestInput extends Input {
+  readonly lifecycle?: "Start" | "Stop" | undefined
+  readonly initial?: ReadonlyArray<unknown> | undefined
 }
 
 /**
@@ -111,6 +124,24 @@ export interface ClusterInstance<R> {
    * for that due time, which ignores a message whose activation has ended.
    */
   readonly wake: (timer: Timer) => Effect.Effect<void, never, R>
+
+  /**
+   * Applies an event that another machine sent. An event that cannot be applied
+   * fails the machine, and a failure of the infrastructure is retried.
+   */
+  readonly deliver: (input: Input) => Effect.Effect<void, never, R>
+
+  /** Starts a child machine with its input. A child that started ignores it. */
+  readonly start: (input: { readonly requestId: Snowflake; readonly input: unknown }) => Effect.Effect<void, never, R>
+
+  /** Stops a child machine, which then rejects every later request. */
+  readonly stop: (requestId: Snowflake) => Effect.Effect<void, never, R>
+
+  /**
+   * Applies the end of the child `entityId`, read from `Storage`, when this
+   * machine still runs it.
+   */
+  readonly childEnded: (entityId: string) => Effect.Effect<void, never, R>
 }
 
 /** @internal */
@@ -147,6 +178,16 @@ export interface Options<R> {
     readonly save: (sent: ClusterTarget.Sent) => Effect.Effect<void, unknown>
     readonly poll: Effect.Effect<void>
   } | undefined
+  /**
+   * The child machines that the states invoke, by their ids, how to save a
+   * request to one, and the parent of this machine when it is a child itself.
+   */
+  readonly children?: {
+    readonly protocols: ReadonlyMap<string, ClusterTarget.Protocol>
+    readonly save: ClusterTarget.Save
+    readonly address: (target: ClusterTarget.Target) => EntityAddress
+    readonly parent: ClusterTarget.Target | undefined
+  } | undefined
 }
 
 /** A timer that waits, as its delayed message names it. */
@@ -165,20 +206,32 @@ type Memory =
     readonly progress: ClusterProgress.Progress
   }
   | { readonly _tag: "Failed"; readonly revision: number; readonly failure: string }
+  /** A child that its parent stopped. */
+  | { readonly _tag: "Stopped"; readonly revision: number }
 
 /** A memory from which a step can be planned. */
-type Base = Exclude<Memory, { readonly _tag: "Failed" }>
+type Base = Exclude<Memory, { readonly _tag: "Failed" | "Stopped" }>
 
 type StepInput =
-  | ({ readonly _tag: "Request" } & Input)
+  | ({ readonly _tag: "Request" } & Input & {
+    /** Arguments of the initial plan, which the start of a child carries. */
+    readonly initial?: ReadonlyArray<unknown> | undefined
+  })
   | { readonly _tag: "Invocation"; readonly key: Checkpoint.InvocationKey; readonly event: InvocationEvent }
 
 /** The part of a machine plan that a step keeps. */
 interface PlannedStep {
   readonly state: Snapshot
   readonly emitted: ReadonlyArray<unknown>
-  readonly sent: ReadonlyArray<ClusterTarget.Sent>
+  readonly commands: ReadonlyArray<Machine.Command>
   readonly changes: InvocationChanges.InvocationChanges | undefined
+}
+
+/** A request that a step saves, to another machine. */
+interface Outgoing {
+  readonly target: ClusterTarget.Target
+  readonly tag: string
+  readonly payload: unknown
 }
 
 /** A stored step, from the revision it was planned on. */
@@ -192,7 +245,7 @@ interface StoredStep {
   /** Timers whose delayed messages the step saved. */
   readonly woken: ReadonlyArray<Timer>
 
-  /** Whether the step saved an event it sends. */
+  /** Whether the step saved a request to another machine. */
   readonly sent: boolean
 }
 
@@ -290,6 +343,7 @@ const refuse = (options: {
 export type ReadStatus =
   | { readonly _tag: "Active"; readonly progress: ClusterProgress.Progress }
   | { readonly _tag: "Failed"; readonly failure: string }
+  | { readonly _tag: "Stopped" }
 
 /** Reads the status of a checkpoint, whose store may hold anything. */
 export const readStatus = (status: unknown): ReadStatus | undefined => {
@@ -299,6 +353,7 @@ export const readStatus = (status: unknown): ReadStatus | undefined => {
       ? { _tag: "Failed", failure: status.failure }
       : undefined
   }
+  if (status._tag === "Stopped") return { _tag: "Stopped" }
   if (status._tag !== "Active" || !Predicate.hasProperty(status, "invocations")) return undefined
   const progress = ClusterProgress.fromStored(status.invocations)
   return progress && { _tag: "Active", progress }
@@ -319,11 +374,12 @@ export const make = <R>(options: Options<R>): Effect.Effect<ClusterInstance<R>, 
     const support = ClusterWork.supportOf(toImpl(machine).handlers)
     const hostsWork = support._tag === "Hosted"
     const targets = options.sends
-    const capabilities = ClusterWork.makeCapabilities(definitionId, targets?.self)
+    const parent = options.children?.parent
+    const capabilities = ClusterWork.makeCapabilities(definitionId, targets?.self, parent)
     // Planned with the target of its own entity as `self`.
     const planned = options.sends === undefined
       ? machine
-      : Planner.withMachineReferences(machine, { self: options.sends.self, parent: undefined })
+      : Planner.withMachineReferences(machine, { self: options.sends.self, parent })
     const clock = yield* Clock.Clock
     const semaphore = Semaphore.makeUnsafe(1)
 
@@ -469,6 +525,9 @@ export const make = <R>(options: Options<R>): Effect.Effect<ClusterInstance<R>, 
       if (status._tag === "Failed") {
         return { _tag: "Failed", revision: checkpoint.revision, failure: status.failure }
       }
+      if (status._tag === "Stopped") {
+        return { _tag: "Stopped", revision: checkpoint.revision }
+      }
       const state: Snapshot = yield* internalMachine.decodeSnapshot(machine, checkpoint.snapshot).pipe(
         Effect.mapError((error) => reject("InvalidCheckpoint", String(error.cause)))
       )
@@ -500,52 +559,155 @@ export const make = <R>(options: Options<R>): Effect.Effect<ClusterInstance<R>, 
       return unknown && `Expected only timers to wait, received invocation ${unknown[0].id} of state ${unknown[0].path}`
     }
 
+    const wasFinal = (base: Base): boolean => base._tag === "Active" && internalMachine.isFinal(machine, base.state)
+
+    // The child that runs for a child descriptor in a progress.
+    const childTarget = (
+      progress: ClusterProgress.Progress,
+      child: Machine.ChildMachine.Any
+    ): ClusterTarget.Target | undefined => {
+      const protocol = options.children?.protocols.get(child.id)
+      const running = ClusterProgress.children(progress).find(([key]) => key.id === child.id)
+      return protocol && running && new ClusterTarget.Target(protocol, running[1])
+    }
+
     // The events that commands send to Cluster machines, in order, decoded by
-    // the protocols of their targets.
+    // the protocols of their targets. A child is the one that runs once the step
+    // is stored, and an event sent to a child that does not run is dropped, as a
+    // local runtime drops it.
     const sendsOf = Effect.fnUntraced(function*(
       commands: ReadonlyArray<Machine.Command>,
-      sent: Array<ClusterTarget.Sent>
-    ): Effect.fn.Return<void, Rejected> {
+      progress: ClusterProgress.Progress
+    ): Effect.fn.Return<Array<Outgoing>, Rejected> {
+      const sent: Array<Outgoing> = []
       for (const command of commands) {
-        if (command._tag !== "SendTo" || !ClusterTarget.isTarget(command.target) || options.sends === undefined) {
+        const child = command._tag === "SendTo" && isChildMachine(command.target) ? command.target : undefined
+        if (
+          command._tag !== "SendTo" || options.sends === undefined ||
+          (child === undefined && !ClusterTarget.isTarget(command.target))
+        ) {
           return yield* fail(
             "UnsupportedProcessLocal",
             command._tag === "SendTo"
-              ? "Machine commands on Cluster send only to a ClusterMachine target"
+              ? "Machine commands on Cluster send only to a ClusterMachine target or an invoked child machine"
               : "Machine commands require a managed local process"
           )
         }
-        const target = command.target
+        const target = child === undefined ? command.target as ClusterTarget.Target : childTarget(progress, child)
+        if (target === undefined) continue
         const event = yield* target.protocol.decode(command.event).pipe(
           Effect.mapError((rejected) =>
             reject("TransitionFailure", `The step sends ${target.sessionId} an event it refuses: ${rejected.message}`)
           )
         )
-        sent.push({ target, event })
+        sent.push({ target, tag: "send", payload: event })
       }
+      return sent
     })
 
-    const plan = Effect.fnUntraced(function*(base: Base, event: unknown): Effect.fn.Return<PlannedStep, unknown> {
+    // Starts the child machines of the states of a step that run no child yet.
+    // Each gets an entity of its own, named by the revision of the step.
+    const startChildren = (
+      state: Snapshot,
+      progress: ClusterProgress.Progress,
+      changes: InvocationChanges.InvocationChanges | undefined,
+      revision: number
+    ): { readonly progress: ClusterProgress.Progress; readonly starts: ReadonlyArray<Outgoing> } => {
+      const children = options.children
+      if (children === undefined || children.protocols.size === 0 || internalMachine.isFinal(machine, state)) {
+        return { progress, starts: [] }
+      }
+      const configuration = Configuration.normalizeConfigurationSync(machine, state)
+      const starts: Array<Outgoing> = []
+      for (const path of entryPaths(configuration)) {
+        const groups = InvocationResolution.resolve(
+          machine,
+          configuration,
+          [path],
+          entryEvent(changes, path),
+          capabilities
+        )
+        for (const invocation of groups.flatMap((group) => group.invocations)) {
+          if (invocation._tag !== "Child" || ClusterProgress.get(progress, invocation) !== undefined) continue
+          const protocol = children.protocols.get(invocation.child.id)
+          if (protocol === undefined) continue
+          const entityId = ClusterChild.entityIdOf(address.entityId, invocation.child.id, revision)
+          progress = ClusterProgress.child(progress, invocation, entityId)
+          starts.push({
+            target: new ClusterTarget.Target(protocol, entityId),
+            tag: "start",
+            payload: { input: invocation.input?.() }
+          })
+        }
+      }
+      return { progress, starts }
+    }
+
+    // Stops the children that ran before a step and do not after it, except the
+    // one whose end the step applies.
+    const stopsOf = (
+      before: ClusterProgress.Progress,
+      after: ClusterProgress.Progress,
+      ended: Checkpoint.InvocationKey | undefined
+    ): ReadonlyArray<Outgoing> => {
+      const children = options.children
+      if (children === undefined) return []
+      const kept = new Set(ClusterProgress.children(after).map(([, entityId]) => entityId))
+      return ClusterProgress.children(before).flatMap(([key, entityId]): Array<Outgoing> => {
+        const protocol = children.protocols.get(key.id)
+        return protocol === undefined || kept.has(entityId) ||
+            (ended !== undefined && key.path === ended.path && key.id === ended.id)
+          ? []
+          : [{ target: new ClusterTarget.Target(protocol, entityId), tag: "stop", payload: undefined }]
+      })
+    }
+
+    // Tells the parent of a child that it ended, in the step that ends it.
+    const endedFor = (ends: boolean): ReadonlyArray<Outgoing> => {
+      const parent = options.children?.parent
+      return parent === undefined || !ends
+        ? []
+        : [{ target: parent, tag: "ended", payload: { entityId: address.entityId } }]
+    }
+
+    const saveOutgoing = (outgoing: ReadonlyArray<Outgoing>): Effect.Effect<void, unknown> =>
+      Effect.forEach(
+        outgoing,
+        ({ payload, tag, target }) =>
+          tag === "send" && targets !== undefined
+            ? targets.save({ target, event: payload })
+            : options.children === undefined
+            ? Effect.die(new Error(`Cannot save ${tag} for ${target.sessionId} without children`))
+            : options.children.save(target, tag, payload),
+        { discard: true }
+      )
+
+    const plan = Effect.fnUntraced(function*(base: Base, input: StepInput): Effect.fn.Return<PlannedStep, unknown> {
       const emitted: Array<unknown> = []
-      const sent: Array<ClusterTarget.Sent> = []
+      const commands: Array<Machine.Command> = []
+      const initialArgs = input._tag === "Request" ? input.initial : undefined
       let state: Snapshot
       if (base._tag === "Active") {
         state = base.state
       } else {
-        const initial = yield* internalMachine.planInitial(planned, ...options.input)
-        yield* sendsOf(initial.commands, sent)
+        if (options.children?.parent !== undefined && initialArgs === undefined) {
+          return yield* fail("InvalidEvent", "A child machine takes events once its parent has started it")
+        }
+        const initial = yield* internalMachine.planInitial(planned, ...initialArgs ?? options.input)
+        commands.push(...initial.commands)
         state = initial.state
         emitted.push(...initial.emittedEvents)
       }
       let changes: InvocationChanges.InvocationChanges | undefined
-      if (!internalMachine.isFinal(machine, state)) {
-        const step = yield* internalMachine.plan(planned, state, event)
-        yield* sendsOf(step.commands, sent)
+      // The start of a child plans its initial state only.
+      if (initialArgs === undefined && !internalMachine.isFinal(machine, state)) {
+        const step = yield* internalMachine.plan(planned, state, input.event)
+        commands.push(...step.commands)
         state = step.next
         emitted.push(...step.emittedEvents)
         changes = InvocationChanges.fromMicrosteps(step.microsteps)
       }
-      return { state, emitted, sent, changes }
+      return { state, emitted, commands, changes }
     })
 
     // Gives a due time to the timers of a state that have none, from now on.
@@ -556,7 +718,7 @@ export const make = <R>(options: Options<R>): Effect.Effect<ClusterInstance<R>, 
     ): ClusterTimer.Schedule => {
       if (!hostsWork) return { progress, unscheduled: [] }
       if (internalMachine.isFinal(machine, state)) {
-        return { progress: ClusterProgress.cancelTimers(progress), unscheduled: [] }
+        return { progress: ClusterProgress.stopChildren(ClusterProgress.cancelTimers(progress)), unscheduled: [] }
       }
       const configuration = Configuration.normalizeConfigurationSync(machine, state)
       return ClusterTimer.schedule({
@@ -601,11 +763,12 @@ export const make = <R>(options: Options<R>): Effect.Effect<ClusterInstance<R>, 
         readonly checkpoint: Checkpoint
         readonly next: Memory
         readonly unscheduled: ReadonlyArray<ClusterTimer.Unscheduled>
+        readonly outgoing: ReadonlyArray<Outgoing>
       },
       unknown,
       R
     > {
-      const planned = yield* plan(base, input.event)
+      const planned = yield* plan(base, input)
       const snapshot = yield* internalMachine.encodeSnapshot(machine, planned.state).pipe(
         Effect.mapError((error) => reject("SnapshotEncodeFailure", String(error.cause)))
       )
@@ -614,10 +777,24 @@ export const make = <R>(options: Options<R>): Effect.Effect<ClusterInstance<R>, 
       }
       const revision = base.revision + 1
       // Last, so a step that is refused evaluates no duration.
-      const { progress, unscheduled } = yield* Effect.sync(() => progressAfter(base, input, planned))
+      const scheduled = yield* Effect.sync(() => progressAfter(base, input, planned))
+      const { starts, progress } = yield* Effect.try({
+        try: () => startChildren(planned.state, scheduled.progress, planned.changes, revision),
+        catch: (error) => reject("TransitionFailure", `The input of a child machine cannot be built: ${String(error)}`)
+      })
+      const unscheduled = scheduled.unscheduled
+      const sent = yield* sendsOf(planned.commands, progress)
+      const before = base._tag === "Active" ? base.progress : ClusterProgress.empty
+      const outgoing = [
+        ...stopsOf(before, progress, input._tag === "Invocation" ? input.key : undefined),
+        ...starts,
+        ...sent,
+        ...endedFor(internalMachine.isFinal(machine, planned.state) && !wasFinal(base))
+      ]
       return {
         planned,
         unscheduled,
+        outgoing,
         checkpoint: {
           definitionId,
           version,
@@ -642,7 +819,7 @@ export const make = <R>(options: Options<R>): Effect.Effect<ClusterInstance<R>, 
         readonly confirm: boolean
       }
     ): Effect.fn.Return<StepResult, Refused | Conflicted, R> {
-      const { checkpoint, next, planned, unscheduled } = yield* prepare(base, input).pipe(
+      const { checkpoint, next, outgoing, planned, unscheduled } = yield* prepare(base, input).pipe(
         refuse({ memory: base, confirm: options.confirm, stage: "Decision" })
       )
       const committed = yield* storage.commit(address, checkpoint).pipe(
@@ -670,13 +847,11 @@ export const make = <R>(options: Options<R>): Effect.Effect<ClusterInstance<R>, 
             Effect.mapError((error) => reject("PersistenceFailure", String(error))),
             refuse({ memory: undefined, confirm: false, stage: "Infrastructure" })
           )
-          // In the transaction of the checkpoint, so each event is sent once.
-          if (targets !== undefined) {
-            yield* Effect.forEach(planned.sent, targets.save, { discard: true }).pipe(
-              Effect.mapError((error) => reject("PersistenceFailure", String(error))),
-              refuse({ memory: undefined, confirm: false, stage: "Infrastructure" })
-            )
-          }
+          // In the transaction of the checkpoint, so each request is saved once.
+          yield* saveOutgoing(outgoing).pipe(
+            Effect.mapError((error) => reject("PersistenceFailure", String(error))),
+            refuse({ memory: undefined, confirm: false, stage: "Infrastructure" })
+          )
           return {
             memory: next,
             stored: {
@@ -684,15 +859,46 @@ export const make = <R>(options: Options<R>): Effect.Effect<ClusterInstance<R>, 
               changes: planned.changes,
               unscheduled,
               woken,
-              sent: planned.sent.length > 0
+              sent: outgoing.length > 0
             }
           }
         }
       }
     })
 
+    // Stores a child as stopped, in the state it has, and stops its own children.
+    const stopStep = Effect.fnUntraced(function*(
+      requestId: Snowflake,
+      base: Extract<Memory, { readonly _tag: "Active" }>
+    ): Effect.fn.Return<StepResult, Refused | Conflicted, R> {
+      const snapshot = yield* internalMachine.encodeSnapshot(machine, base.state).pipe(
+        Effect.mapError((error) => reject("SnapshotEncodeFailure", String(error.cause))),
+        refuse({ memory: base, confirm: true, stage: "Decision" })
+      )
+      const revision = base.revision + 1
+      const committed = yield* storage.commit(address, {
+        definitionId,
+        version,
+        revision,
+        origin: { _tag: "Request", requestId },
+        snapshot,
+        status: { _tag: "Stopped" }
+      }).pipe(
+        Effect.mapError(persistenceFailure),
+        refuse({ memory: undefined, confirm: true, stage: "Infrastructure" })
+      )
+      if (committed._tag === "Duplicate") return { memory: base, stored: undefined }
+      if (committed._tag === "RevisionConflict") return yield* new Conflicted()
+      const stops = stopsOf(base.progress, ClusterProgress.empty, undefined)
+      yield* saveOutgoing(stops).pipe(
+        Effect.mapError((error) => reject("PersistenceFailure", String(error))),
+        refuse({ memory: undefined, confirm: false, stage: "Infrastructure" })
+      )
+      return { memory: { _tag: "Stopped", revision }, stored: undefined }
+    })
+
     const requestStep = Effect.fnUntraced(function*(
-      input: Input,
+      input: RequestInput,
       known: Memory | undefined
     ): Effect.fn.Return<StepResult, Refused | Conflicted, R> {
       if (support._tag === "Unsupported") {
@@ -713,16 +919,32 @@ export const make = <R>(options: Options<R>): Effect.Effect<ClusterInstance<R>, 
       }
 
       const confirm = known !== undefined
-      return base._tag === "Failed"
-        ? yield* fail("MachineFailed", base.failure).pipe(refuse({ memory: base, confirm, stage: "Decision" }))
-        : yield* step({ _tag: "Request", ...input }, base, { confirm })
+      // A start of a child that started, and a stop of one that does not run,
+      // change nothing.
+      if (input.lifecycle === "Start" && base._tag !== "Absent") return { memory: base, stored: undefined }
+      if (input.lifecycle === "Stop") {
+        return base._tag === "Active" ? yield* stopStep(input.requestId, base) : { memory: base, stored: undefined }
+      }
+      if (base._tag === "Failed") {
+        return yield* fail("MachineFailed", base.failure).pipe(refuse({ memory: base, confirm, stage: "Decision" }))
+      }
+      if (base._tag === "Stopped") {
+        return yield* fail("MachineFailed", "The child machine was stopped by its parent").pipe(
+          refuse({ memory: base, confirm, stage: "Decision" })
+        )
+      }
+      return yield* step(
+        { _tag: "Request", requestId: input.requestId, event: input.event, initial: input.initial },
+        base,
+        { confirm }
+      )
     })
 
     // Runs after the failed transaction, so the answer excludes its writes. A
     // commit whose transaction failed afterwards may still have taken effect.
     const confirm = (
       restore: Restore,
-      input: Input,
+      input: RequestInput,
       refused: { readonly rejected: Rejected; readonly memory: Memory | undefined }
     ): Effect.Effect<SendResult, Conflicted> =>
       restore(messageStorage.withTransaction(loadForRequest(input))).pipe(
@@ -745,7 +967,7 @@ export const make = <R>(options: Options<R>): Effect.Effect<ClusterInstance<R>, 
         })
       )
 
-    const attempt = (restore: Restore, input: Input): Effect.Effect<SendResult, Conflicted, R> =>
+    const attempt = (restore: Restore, input: RequestInput): Effect.Effect<SendResult, Conflicted, R> =>
       Effect.suspend(() => {
         const known = memory
         memory = undefined
@@ -959,7 +1181,8 @@ export const make = <R>(options: Options<R>): Effect.Effect<ClusterInstance<R>, 
     const amend = (
       restore: Restore,
       amended: Pick<Checkpoint, "origin" | "status">,
-      woken: ReadonlyArray<Timer> = []
+      woken: ReadonlyArray<Timer> = [],
+      outgoing: ReadonlyArray<Outgoing> = []
     ): Effect.Effect<number, unknown> =>
       Effect.suspend(() => {
         const revision = memory?.revision
@@ -975,6 +1198,7 @@ export const make = <R>(options: Options<R>): Effect.Effect<ClusterInstance<R>, 
             return yield* new Conflicted()
           }
           yield* saveWakes(woken)
+          yield* saveOutgoing(outgoing)
           return checkpoint.revision
         })))
       })
@@ -983,18 +1207,35 @@ export const make = <R>(options: Options<R>): Effect.Effect<ClusterInstance<R>, 
     // failure is stored.
     const storeFailure = (
       restore: Restore,
-      key: Checkpoint.InvocationKey,
+      cause: Checkpoint.InvocationKey | { readonly requestId: Snowflake },
       failure: string
     ): Effect.Effect<boolean> =>
-      amend(restore, {
-        origin: { _tag: "Invocation", path: key.path, id: key.id },
-        status: { _tag: "Failed", failure }
-      }).pipe(
+      // A machine that fails stops its children, and a child tells its parent.
+      amend(
+        restore,
+        {
+          origin: "requestId" in cause
+            ? { _tag: "Request", requestId: cause.requestId }
+            : { _tag: "Invocation", path: cause.path, id: cause.id },
+          status: { _tag: "Failed", failure }
+        },
+        [],
+        [
+          ...stopsOf(
+            memory === undefined ? ClusterProgress.empty : progressOf(memory),
+            ClusterProgress.empty,
+            undefined
+          ),
+          ...endedFor(true)
+        ]
+      ).pipe(
         Effect.matchCauseEffect({
           onFailure: (cause) => notDone("Could not store the failure of a Cluster machine", cause),
           onSuccess: (revision) => {
             memory = { _tag: "Failed", revision, failure }
             return Effect.logError("A Cluster machine failed", failure).pipe(
+              // The runner reads the requests to its children and parent now.
+              Effect.andThen(options.sends?.poll ?? Effect.void),
               Effect.andThen(align(restore, undefined)),
               Effect.as(true)
             )
@@ -1019,19 +1260,20 @@ export const make = <R>(options: Options<R>): Effect.Effect<ClusterInstance<R>, 
             if (memory === undefined || memory._tag !== "Active") return Effect.succeed(false)
             return decision._tag === "Fail"
               ? storeFailure(restore, ended.invocation, renderFailure(decision.cause))
-              : applyOutcome(restore, ended, memory, decision.event)
+              : applyOutcome(restore, ended.invocation, memory, decision.event, () => work.settle(ended))
           })
         )
       )
 
     const applyOutcome = (
       restore: Restore,
-      ended: ClusterWork.Work,
+      invocation: Checkpoint.InvocationKey,
       base: Base,
-      event: InvocationEvent
+      event: InvocationEvent,
+      settle: () => void
     ): Effect.Effect<boolean, never, R> => {
       memory = undefined
-      const key = { path: ended.invocation.path, id: ended.invocation.id }
+      const key = { path: invocation.path, id: invocation.id }
       return restore(
         messageStorage.withTransaction(step({ _tag: "Invocation", key, event }, base, { confirm: false }))
       ).pipe(
@@ -1046,7 +1288,7 @@ export const make = <R>(options: Options<R>): Effect.Effect<ClusterInstance<R>, 
           },
           onSuccess: (result) => {
             memory = result.memory
-            work.settle(ended)
+            settle()
             return Effect.as(align(restore, result.stored), true)
           }
         }),
@@ -1092,8 +1334,168 @@ export const make = <R>(options: Options<R>): Effect.Effect<ClusterInstance<R>, 
         }
       }).pipe(annotate)
 
+    // How a child ended, read from `Storage`. `undefined` means it has not.
+    const readChild = Effect.fnUntraced(function*(
+      target: ClusterTarget.Target
+    ): Effect.fn.Return<
+      | { readonly _tag: "Done"; readonly output: unknown }
+      | { readonly _tag: "Failed"; readonly failure: string }
+      | undefined,
+      unknown,
+      R
+    > {
+      const children = options.children
+      if (children === undefined) return undefined
+      const loaded = yield* storage.load(children.address(target)).pipe(
+        // A store that cannot be read now is read again.
+        Effect.retry({ schedule: Schedule.spaced("1 second") })
+      )
+      if (Option.isNone(loaded)) return undefined
+      const status = readStatus(loaded.value.status)
+      if (status?._tag === "Failed") return { _tag: "Failed", failure: status.failure }
+      if (status?._tag !== "Active") return undefined
+      const child = target.protocol.machine
+      const state: Snapshot = yield* internalMachine.decodeSnapshot(child, loaded.value.snapshot)
+      if (!internalMachine.isFinal(child, state)) return undefined
+      const output = yield* Planner.getFinalOutputEffect(child, state, Planner.InitialEvent)
+      return { _tag: "Done", output }
+    })
+
+    const childEnded = (entityId: string): Effect.Effect<void, never, R> =>
+      turn((restore) =>
+        Effect.gen(function*() {
+          if (memory === undefined) yield* reload(restore)
+          const current = memory
+          if (current?._tag !== "Active") return
+          const running = ClusterProgress.children(current.progress).find(([, id]) => id === entityId)
+          const protocol = running && options.children?.protocols.get(running[0].id)
+          if (running === undefined || protocol === undefined) return
+          const [key] = running
+          const ended = yield* Effect.exit(readChild(new ClusterTarget.Target(protocol, entityId)))
+          if (Exit.isFailure(ended)) {
+            yield* storeFailure(
+              restore,
+              key,
+              `The end of child ${entityId} cannot be read: ${renderFailure(ended.cause)}`
+            )
+            return
+          }
+          if (ended.value === undefined) return
+          if (ended.value._tag === "Failed") {
+            yield* storeFailure(restore, key, ended.value.failure)
+            return
+          }
+          yield* applyOutcome(
+            restore,
+            key,
+            current,
+            InvocationEventModule.done(key.path, key.id, { current: true }, ended.value.output),
+            () => {}
+          )
+        }).pipe(annotate)
+      )
+
+    // One attempt to apply an event that another machine sent. Nobody waits for
+    // its answer, so an event that cannot be applied fails the machine, as it
+    // does locally, and a failure of the infrastructure is retried. The value is
+    // whether nothing is left to do.
+    const deliverOnce = (input: Input): Effect.Effect<boolean, never, R> =>
+      turn((restore) =>
+        Effect.suspend(() => {
+          // Loaded with the request, so a refusal is never one of an earlier
+          // delivery that committed.
+          memory = undefined
+          return restore(messageStorage.withTransaction(requestStep(input, undefined))).pipe(
+            Effect.matchCauseEffect({
+              onFailure: (cause): Effect.Effect<boolean, never, R> => {
+                if (Cause.hasInterrupts(cause)) return propagate(cause)
+                const error = Option.getOrUndefined(Cause.findErrorOption(cause))
+                if (!(error instanceof Refused) || error.failure === undefined || Cause.hasDies(cause)) {
+                  return notDone("Could not apply an event that another machine sent", cause)
+                }
+                memory = error.memory
+                // A machine that ended takes no event, as a local one that stopped,
+                // and neither does a child that has not started.
+                if (error.rejected.reason === "MachineFailed" || (memory?._tag === "Absent" && parent !== undefined)) {
+                  return Effect.succeed(true)
+                }
+                return memory?._tag === "Absent"
+                  ? storeInitialFailure(restore, input.requestId, error.failure)
+                  : storeFailure(restore, input, error.failure)
+              },
+              onSuccess: (result) => {
+                memory = result.memory
+                return Effect.as(align(restore, result.stored), true)
+              }
+            })
+          )
+        })
+      ).pipe(annotate)
+
+    // Stores a machine without a checkpoint as failed in its initial state, when
+    // the first event another machine sent it cannot be applied. A machine
+    // whose initial state cannot be planned stores nothing, and drops the event.
+    const storeInitialFailure = (
+      restore: Restore,
+      requestId: Snowflake,
+      failure: string
+    ): Effect.Effect<boolean, never, R> =>
+      Effect.suspend(() => {
+        memory = undefined
+        return restore(messageStorage.withTransaction(Effect.gen(function*() {
+          const initial = yield* Effect.option(internalMachine.planInitial(planned, ...options.input))
+          if (Option.isNone(initial)) return false
+          const snapshot = yield* internalMachine.encodeSnapshot(machine, initial.value.state)
+          const committed = yield* storage.commit(address, {
+            definitionId,
+            version,
+            revision: 1,
+            origin: { _tag: "Request", requestId },
+            snapshot,
+            status: { _tag: "Failed", failure }
+          })
+          if (committed._tag === "RevisionConflict") return yield* new Conflicted()
+          yield* saveOutgoing(endedFor(true))
+          return true
+        }))).pipe(
+          Effect.matchCauseEffect({
+            onFailure: (cause) => notDone("Could not store the failure of a Cluster machine", cause),
+            onSuccess: (stored) => {
+              memory = stored ? { _tag: "Failed", revision: 1, failure } : undefined
+              return Effect.logError(
+                stored ? "A Cluster machine failed" : "A Cluster machine cannot plan its initial state",
+                failure
+              ).pipe(Effect.as(true))
+            }
+          }),
+          annotate
+        )
+      })
+
+    const lifecycle = (input: RequestInput): Effect.Effect<void, never, R> =>
+      turn((restore) =>
+        attempt(restore, input).pipe(
+          Effect.catchTag("Conflicted", () => attempt(restore, input)),
+          Effect.catchTag("Conflicted", () => Effect.void),
+          // A stop saves the stops of the children of the child.
+          Effect.tap(() => input.lifecycle === "Stop" ? options.sends?.poll ?? Effect.void : Effect.void),
+          Effect.tap(() => align(restore, undefined)),
+          Effect.asVoid
+        )
+      )
+
     return {
       wake,
+      childEnded,
+      deliver: (input) => untilDone(deliverOnce(input)),
+      start: ({ input, requestId }) =>
+        lifecycle({
+          requestId,
+          event: undefined,
+          lifecycle: "Start",
+          initial: machine.input === undefined ? [] : [input]
+        }),
+      stop: (requestId) => lifecycle({ requestId, event: undefined, lifecycle: "Stop" }),
       apply: (input) =>
         turn((restore) =>
           attempt(restore, input).pipe(

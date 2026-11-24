@@ -617,10 +617,9 @@ describe("ClusterMachine", () => {
             Count: {},
             Other: { invoke: { src: "process", id: "process", address: Machine.childAddress("process") } }
           }
-        }),
-      Child: () => Machine.make(base).handle({ initial, states: { Count: {}, Other: { invoke: { src: "child" } } } })
+        })
     }
-    for (const kind of ["Stream", "Logic", "Child"] as const) {
+    for (const kind of ["Stream", "Logic"] as const) {
       it.effect(`rejects every request to a machine that invokes a ${kind}, in whatever state`, () =>
         Effect.gen(function*() {
           const bridge = adapt(`Invoked${kind}`, machines[kind]())

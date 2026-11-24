@@ -32,11 +32,22 @@ const Ledger = ClusterMachine.make(
   "Ledger",
   Machine.make({
     root: Machine.state({ states: { Open: { fields: { total: Schema.Number } } } }),
-    events: Machine.events({ Add: { amount: Schema.Number } })
+    events: Machine.events({ Add: { amount: Schema.Number }, Spoil: {} })
   }).handle({
     initial: { target: "Open", data: { total: 0 } },
     states: {
-      Open: { on: { Add: { update: { Open: ({ event, state }) => ({ total: state.total + event.amount }) } } } }
+      Open: {
+        on: {
+          Add: { update: { Open: ({ event, state }) => ({ total: state.total + event.amount }) } },
+          Spoil: {
+            update: {
+              Open: () => {
+                throw new Error("spoiled ledger")
+              }
+            }
+          }
+        }
+      }
     }
   }),
   { version: "1" }
@@ -49,6 +60,7 @@ const OrderEvents = Machine.events({
   Pay: { amount: Schema.Number },
   Overpay: {},
   PayLocally: {},
+  Spoil: {},
   Report: {},
   Ask: {},
   Answer: {}
@@ -80,6 +92,10 @@ const order = Machine.make({
           commands: (_, enqueue) => enqueue.sendTo(Ledger.target("ledger-1"), { _tag: "Add", amount: "all" } as never)
         },
         PayLocally: { target: "Paid", commands: (_, enqueue) => enqueue.sendTo(local, {}) },
+        Spoil: {
+          target: "Paid",
+          commands: (_, enqueue) => enqueue.sendTo(Ledger.target("ledger-1"), { _tag: "Spoil" })
+        },
         Report: { target: "Reporting" },
         Ask: { target: "Asked", commands: ({ self }, enqueue) => enqueue.sendTo(self, { _tag: "Answer" }) }
       }
@@ -126,7 +142,7 @@ const leafOf = (storage: TestStorage) =>
 type Driver = MessageStorage.MemoryDriver["Service"]
 const sendsTo = (driver: Driver, entityType: string) =>
   driver.journal.filter((envelope) =>
-    envelope._tag === "Request" && envelope.tag === "send" && envelope.address.entityType === entityType
+    envelope._tag === "Request" && envelope.tag === "deliver" && envelope.address.entityType === entityType
   )
 
 describe("ClusterMachine machines that send to each other", () => {
@@ -156,6 +172,17 @@ describe("ClusterMachine machines that send to each other", () => {
       assert.deepStrictEqual(totalOf(storage, "ledger-1"), { _tag: "Open", total: 5 })
     }).pipe(Effect.scoped))
 
+  it.effect("fail a target that cannot apply an event sent to it, as a local machine fails", () =>
+    Effect.gen(function*() {
+      const { orders, storage } = yield* start()
+      yield* orders.send({ _tag: "Spoil" })
+      yield* settle
+      assert.strictEqual(leafOf(storage), "Paid")
+      const ledger = storage.entries.get(storageKey("Ledger", "ledger-1"))
+      assert.strictEqual(ledger?.status._tag, "Failed")
+      assert.match(ledger?.status._tag === "Failed" ? ledger.status.failure : "", /spoiled ledger/)
+    }).pipe(Effect.scoped))
+
   it.effect("reject a step that sends an event its target refuses", () =>
     Effect.gen(function*() {
       const { messages, orders, storage } = yield* start()
@@ -180,7 +207,7 @@ describe("ClusterMachine machines that send to each other", () => {
       yield* orders.send({ _tag: "Ask" })
       yield* settle
       assert.strictEqual(leafOf(storage), "Answered")
-      assert.lengthOf(sendsTo(messages.driver, "Order").filter((envelope) => envelope._tag === "Request"), 2)
+      assert.lengthOf(sendsTo(messages.driver, "Order"), 1)
     }).pipe(Effect.scoped))
 
   it.effect("send from work, which names its own entity by its address", () =>

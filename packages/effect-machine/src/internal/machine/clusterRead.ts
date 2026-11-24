@@ -74,6 +74,7 @@ const decode = Effect.fnUntraced(function*(
     Effect.mapError((error) => invalid(String(error.cause)))
   )
   if (status._tag === "Failed") return { status: "failed", revision, state, failure: status.failure }
+  if (status._tag === "Stopped") return { status: "stopped", revision, state }
   if (!internalMachine.isFinal(machine, state)) return { status: "active", revision, state }
   const output = yield* Planner.getFinalOutputEffect(machine, state, Planner.InitialEvent).pipe(
     Effect.mapError((error) => invalid(String(error.cause)))
@@ -113,6 +114,8 @@ export const make = <M extends Machine.Machine.Any>(options: Options): Reader<M>
         ? Effect.die(new Error("A reader of a Cluster machine ended without a terminal checkpoint"))
         : read.value.status === "failed"
         ? Effect.fail(new MachineFailedError({ failure: read.value.failure }))
+        : read.value.status === "stopped"
+        ? Effect.fail(new MachineFailedError({ failure: "The child machine was stopped by its parent" }))
         : Effect.succeed(read.value.output)
     )
   )

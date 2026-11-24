@@ -317,8 +317,6 @@ describe("ClusterMachine", () => {
     ClusterMachine.make("Streaming", streaming, options)
     // @ts-expect-error { readonly invocations: "Logic"; readonly capabilities: never; }
     ClusterMachine.make("Working", working, options)
-    // @ts-expect-error { readonly invocations: "Child"; readonly capabilities: never; }
-    ClusterMachine.make("Owning", owning, options)
     // @ts-expect-error { readonly invocations: never; readonly capabilities: "MachineRuntime"; }
     ClusterMachine.make("Stopping", stopping, options)
   })
@@ -343,12 +341,17 @@ describe("ClusterMachine", () => {
     ClusterMachine.make("ChoosingInList", choosingInList, options)
   })
 
+  it("accepts a machine that invokes a child machine, which runs as an entity of its own", () => {
+    const layer = ClusterMachine.make("Owning", owning, options).toLayer()
+    expect<Layer.Services<typeof layer>>().type.toBe<Host>()
+  })
+
   it("names what the child machines of a machine use", () => {
-    // @ts-expect-error { readonly invocations: "Stream" | "Child"; readonly capabilities: never; }
+    // @ts-expect-error { readonly invocations: "Stream"; readonly capabilities: never; }
     ClusterMachine.make("OwningStreaming", owningStreaming, options)
-    // @ts-expect-error { readonly invocations: "Child"; readonly capabilities: "MachineRuntime"; }
+    // @ts-expect-error { readonly invocations: never; readonly capabilities: "MachineRuntime"; }
     ClusterMachine.make("OwningSending", owningSending, options)
-    // @ts-expect-error { readonly invocations: "Stream" | "Child"; readonly capabilities: never; }
+    // @ts-expect-error { readonly invocations: "Stream"; readonly capabilities: never; }
     ClusterMachine.make("OwningOwner", owningOwner, options)
   })
 

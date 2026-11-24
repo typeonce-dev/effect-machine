@@ -18,7 +18,7 @@ import * as Headers from "effect/http/Headers"
 import * as Option from "effect/Option"
 import type { Rpc } from "effect/rpc"
 import * as Schedule from "effect/Schedule"
-import type { MachineTarget } from "../../Machine.js"
+import type { Machine, MachineTarget } from "../../Machine.js"
 import type { Rejected } from "./clusterProtocol.js"
 import { StoppedError } from "./errors.js"
 
@@ -33,7 +33,9 @@ export const TypeId = "~effect/cluster/ClusterMachine/Target"
 export interface Protocol {
   // oxlint-disable-next-line typescript/no-explicit-any -- any protocol of a machine
   readonly entity: Entity.Entity<any, any>
+  readonly machine: Machine.Any
   readonly definitionId: string
+  readonly version: string
 
   /** Decodes an event as the client of the target does before it sends it. */
   readonly decode: (event: unknown) => Effect.Effect<unknown, Rejected>
@@ -114,25 +116,28 @@ export const addressOf = (sharding: Sharding.Sharding["Service"], target: Target
 }
 
 /**
- * Saves an event that a step sends as a persisted request to its target. It
+ * Saves a persisted request to a target, of one of the RPCs of its entity. It
  * joins an open transaction of `MessageStorage`.
  *
  * @internal
  */
+export type Save = (target: Target, tag: string, payload: unknown) => Effect.Effect<void, unknown>
+
+/** @internal */
 export const makeSave = (options: {
   readonly messageStorage: MessageStorage.MessageStorage["Service"]
   readonly sharding: Sharding.Sharding["Service"]
-}) =>
-(sent: Sent): Effect.Effect<void, unknown> =>
+}): Save =>
+(target, tag, payload) =>
   Effect.flatMap(options.sharding.getSnowflake, (requestId) => {
-    const rpc = sent.target.protocol.entity.protocol.requests.get("send") as Rpc.AnyWithProps
+    const rpc = target.protocol.entity.protocol.requests.get(tag) as Rpc.AnyWithProps
     return options.messageStorage.saveRequest(
       new Message.OutgoingRequest<any>({
         envelope: Envelope.makeRequest<any>({
           requestId,
-          address: addressOf(options.sharding, sent.target),
-          tag: "send",
-          payload: sent.event,
+          address: addressOf(options.sharding, target),
+          tag,
+          payload,
           headers: Headers.empty
         }),
         context: Context.empty() as Context.Context<unknown>,
