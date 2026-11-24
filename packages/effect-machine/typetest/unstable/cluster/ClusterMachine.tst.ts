@@ -1,5 +1,5 @@
-import { Context, Effect, type Layer, type Option, Schema, SchemaGetter } from "effect"
-import type { MessageStorage, Sharding, Snowflake } from "effect/cluster"
+import { Context, Effect, type Layer, type Option, Schema, SchemaGetter, type Stream } from "effect"
+import type { ClusterError, MessageStorage, Sharding, Snowflake } from "effect/cluster"
 import type { Rpc, RpcGroup } from "effect/rpc"
 import { describe, expect, it } from "tstyche"
 import { Machine } from "../../../src/index.js"
@@ -390,5 +390,38 @@ describe("ClusterMachine", () => {
       ClusterMachine.Rejected | ClusterMachine.ClientError
     >()
     expect<Effect.Services<ReturnType<typeof client.send>>>().type.toBe<never>()
+  })
+
+  it("reads a typed snapshot and output from the store", () => {
+    const Events = Machine.events({ Finish: {} })
+    const machine = Machine.make({
+      root: Machine.state({
+        states: {
+          Working: { fields: { step: Schema.Number } },
+          Done: { type: "final", output: Schema.String }
+        }
+      }),
+      events: Events
+    }).handle({
+      initial: { target: "Working", data: { step: 0 } },
+      states: { Working: { on: { Finish: { target: "Done" } } }, Done: { output: () => "finished" } }
+    })
+    const adapter = ClusterMachine.make("Job", machine, { version: "1", readInterval: "5 seconds" })
+    const client = null! as Effect.Success<typeof adapter.client> extends (id: string) => infer C ? C : never
+    type Read = ClusterMachine.Snapshot<typeof machine>
+
+    expect<Effect.Success<typeof client.snapshot>>().type.toBe<Option.Option<Read>>()
+    expect<Effect.Error<typeof client.snapshot>>().type.toBe<
+      ClusterMachine.ReadError | ClusterError.PersistenceError
+    >()
+    expect<Effect.Services<typeof client.snapshot>>().type.toBe<ClusterMachine.Storage>()
+    expect<Stream.Success<typeof client.changes>>().type.toBe<Read>()
+    expect<Effect.Success<typeof client.join>>().type.toBe<string>()
+    expect<Effect.Error<typeof client.join>>().type.toBe<
+      ClusterMachine.MachineFailedError | ClusterMachine.ReadError | ClusterError.PersistenceError
+    >()
+    expect<Extract<Read, { readonly status: "done" }>["output"]>().type.toBe<string>()
+    expect<Extract<Read, { readonly status: "failed" }>["failure"]>().type.toBe<string>()
+    expect<Read["status"]>().type.toBe<"active" | "done" | "failed">()
   })
 })
