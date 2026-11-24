@@ -36,7 +36,7 @@ export const clusterHost: Host = {
   capabilities: {
     invocations: ["Effect", "Timer"],
     ownedChildren: false,
-    commands: false,
+    commands: true,
     restart: true,
     stop: false,
     emissions: true,

@@ -122,22 +122,6 @@ export const differences: ReadonlyArray<Difference> = [
   {
     kind: "Deliberate",
     hosts: cluster,
-    scenario: "takes the events that its own work sends to it",
-    differs: "Fails the machine when its work sends to it.",
-    because: "An event sent through a local target is not durable.",
-    documentedIn: {
-      file: clusterDocs,
-      text: "Work that uses `self.send`, `self.sessionId`, or an operation of `children` from the context of its " +
-        "input mapper. It fails the machine."
-    },
-    steps: {
-      "work succeeds": { happens: [], outcome: failed("self.send is process-local and is not supported") },
-      "an event after it": { answers: ["Ended"], happens: [] }
-    }
-  },
-  {
-    kind: "Deliberate",
-    hosts: cluster,
     scenario: "evaluates a duration in order with the other invocations of its state",
     differs: "Evaluates durations before any work of the state starts.",
     because: "The due time is stored in the step that enters the state, and work starts once that is stored.",

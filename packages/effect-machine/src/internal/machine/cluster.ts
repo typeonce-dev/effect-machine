@@ -17,6 +17,7 @@ import type { Client, ClientError, ClusterMachine } from "../../unstable/cluster
 import * as ClusterInstance from "./clusterInstance.js"
 import { CommitResult, Rejected, SendResult, Storage } from "./clusterProtocol.js"
 import * as ClusterRead from "./clusterRead.js"
+import * as ClusterTarget from "./clusterTarget.js"
 import * as ClusterWake from "./clusterWake.js"
 import type { MachineSchemaDecodeError } from "./errors.js"
 import * as Protocol from "./protocol.js"
@@ -220,6 +221,26 @@ export const make = <
   // machine itself sends. The public type of the entity leaves it out.
   const entity = Entity.make(type, [rpc, ClusterWake.WakeRpc])
   const definitionId = machine.id ?? type
+  const publicTags: ReadonlySet<PropertyKey> = new Set(Reflect.ownKeys(machine.events))
+
+  type EntityClient = ReturnType<Effect.Success<typeof entity.client>>
+
+  const sendThroughClient = (rpc: EntityClient, event: unknown): Effect.Effect<void, Rejected | ClientError> =>
+    decodeInputEvent(machine, publicTags, event).pipe(
+      // The cast drops the encoding services of the event schemas, as the
+      // layer drops their decoding services.
+      Effect.flatMap((decoded) => rpc.send(decoded as never) as Effect.Effect<typeof SendResult.Type, ClientError>),
+      Effect.flatMap((result) => result._tag === "Accepted" ? Effect.void : Effect.fail(result))
+    )
+
+  const protocol: ClusterTarget.Protocol = {
+    entity,
+    definitionId,
+    decode: (event) => decodeInputEvent(machine, publicTags, event),
+    send: (entityId, event) =>
+      Effect.flatMap(entity.client, (makeEntityClient) => sendThroughClient(makeEntityClient(entityId), event))
+  }
+  const target = (entityId: string): ClusterTarget.Target => new ClusterTarget.Target(protocol, entityId)
 
   const toLayer = <EnqueueR = never>(layerOptions?: {
     readonly enqueue?: (event: Machine.Machine.EmittedEventOf<Emits>) => Effect.Effect<void, unknown, EnqueueR>
@@ -231,6 +252,7 @@ export const make = <
       Effect.gen(function*() {
         const address = yield* Entity.CurrentAddress
         const messageStorage = yield* MessageStorage.MessageStorage
+        const sharding = yield* Sharding.Sharding
         const instance = yield* ClusterInstance.make<Services | EnqueueR>({
           machine,
           definitionId,
@@ -243,7 +265,12 @@ export const make = <
           keepAlive: yield* makeKeepAlive,
           wake: {
             threshold: yield* ClusterWake.threshold,
-            save: ClusterWake.makeSave({ address, messageStorage, sharding: yield* Sharding.Sharding })
+            save: ClusterWake.makeSave({ address, messageStorage, sharding })
+          },
+          sends: {
+            self: target(address.entityId),
+            save: ClusterTarget.makeSave({ messageStorage, sharding }),
+            poll: sharding.pollStorage
           }
         })
         return entity.of({
@@ -257,7 +284,6 @@ export const make = <
       Storage | MessageStorage.MessageStorage | Sharding.Sharding | EnqueueR | Services
     >
 
-  const publicTags: ReadonlySet<PropertyKey> = new Set(Reflect.ownKeys(machine.events))
   const client = Effect.gen(function*() {
     const makeEntityClient = yield* entity.client
     const sharding = yield* Sharding.Sharding
@@ -278,15 +304,7 @@ export const make = <
       return {
         entityId,
         ...reader,
-        send: (event) =>
-          decodeInputEvent(machine, publicTags, event).pipe(
-            // The cast drops the encoding services of the event schemas, as the
-            // layer drops their decoding services.
-            Effect.flatMap((decoded) =>
-              rpc.send(decoded as never) as Effect.Effect<typeof SendResult.Type, ClientError>
-            ),
-            Effect.flatMap((result) => result._tag === "Accepted" ? Effect.void : Effect.fail(result))
-          )
+        send: (event) => sendThroughClient(rpc, event)
       }
     }
   })
@@ -295,6 +313,7 @@ export const make = <
     machine,
     entity: entity as unknown as Entity.Entity<Type, SendRpc<MachineEvents<M>>>,
     client,
+    target,
     toLayer
   }
 }

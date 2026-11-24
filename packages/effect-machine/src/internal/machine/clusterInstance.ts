@@ -21,6 +21,7 @@ import { renderFailure } from "./clusterFailure.js"
 import { ClusterKeepAlive, untilDone } from "./clusterKeepAlive.js"
 import * as ClusterProgress from "./clusterProgress.js"
 import { Accepted, Rejected, type RejectionReason, type Storage } from "./clusterProtocol.js"
+import * as ClusterTarget from "./clusterTarget.js"
 import * as ClusterTimer from "./clusterTimer.js"
 import * as ClusterWork from "./clusterWork.js"
 import * as Configuration from "./configuration.js"
@@ -135,6 +136,17 @@ export interface Options<R> {
     readonly threshold: number
     readonly save: (timer: Timer) => Effect.Effect<void, unknown>
   }
+  /**
+   * How the machine sends to Cluster machines: `self` names its own entity,
+   * `save` saves an event a step sends inside the transaction of its
+   * checkpoint, and `poll` lets the runner read what was saved. Without it, a
+   * step that sends is refused.
+   */
+  readonly sends?: {
+    readonly self: ClusterTarget.Target
+    readonly save: (sent: ClusterTarget.Sent) => Effect.Effect<void, unknown>
+    readonly poll: Effect.Effect<void>
+  } | undefined
 }
 
 /** A timer that waits, as its delayed message names it. */
@@ -165,6 +177,7 @@ type StepInput =
 interface PlannedStep {
   readonly state: Snapshot
   readonly emitted: ReadonlyArray<unknown>
+  readonly sent: ReadonlyArray<ClusterTarget.Sent>
   readonly changes: InvocationChanges.InvocationChanges | undefined
 }
 
@@ -178,6 +191,9 @@ interface StoredStep {
 
   /** Timers whose delayed messages the step saved. */
   readonly woken: ReadonlyArray<Timer>
+
+  /** Whether the step saved an event it sends. */
+  readonly sent: boolean
 }
 
 /** What a step leaves behind once the transaction around it has succeeded. */
@@ -302,7 +318,12 @@ export const make = <R>(options: Options<R>): Effect.Effect<ClusterInstance<R>, 
     const context = yield* Effect.context<R>()
     const support = ClusterWork.supportOf(toImpl(machine).handlers)
     const hostsWork = support._tag === "Hosted"
-    const capabilities = ClusterWork.makeCapabilities(definitionId)
+    const targets = options.sends
+    const capabilities = ClusterWork.makeCapabilities(definitionId, targets?.self)
+    // Planned with the target of its own entity as `self`.
+    const planned = options.sends === undefined
+      ? machine
+      : Planner.withMachineReferences(machine, { self: options.sends.self, parent: undefined })
     const clock = yield* Clock.Clock
     const semaphore = Semaphore.makeUnsafe(1)
 
@@ -479,30 +500,52 @@ export const make = <R>(options: Options<R>): Effect.Effect<ClusterInstance<R>, 
       return unknown && `Expected only timers to wait, received invocation ${unknown[0].id} of state ${unknown[0].path}`
     }
 
+    // The events that commands send to Cluster machines, in order, decoded by
+    // the protocols of their targets.
+    const sendsOf = Effect.fnUntraced(function*(
+      commands: ReadonlyArray<Machine.Command>,
+      sent: Array<ClusterTarget.Sent>
+    ): Effect.fn.Return<void, Rejected> {
+      for (const command of commands) {
+        if (command._tag !== "SendTo" || !ClusterTarget.isTarget(command.target) || options.sends === undefined) {
+          return yield* fail(
+            "UnsupportedProcessLocal",
+            command._tag === "SendTo"
+              ? "Machine commands on Cluster send only to a ClusterMachine target"
+              : "Machine commands require a managed local process"
+          )
+        }
+        const target = command.target
+        const event = yield* target.protocol.decode(command.event).pipe(
+          Effect.mapError((rejected) =>
+            reject("TransitionFailure", `The step sends ${target.sessionId} an event it refuses: ${rejected.message}`)
+          )
+        )
+        sent.push({ target, event })
+      }
+    })
+
     const plan = Effect.fnUntraced(function*(base: Base, event: unknown): Effect.fn.Return<PlannedStep, unknown> {
       const emitted: Array<unknown> = []
+      const sent: Array<ClusterTarget.Sent> = []
       let state: Snapshot
       if (base._tag === "Active") {
         state = base.state
       } else {
-        const initial = yield* internalMachine.planInitial(machine, ...options.input)
-        if (initial.commands.length > 0) {
-          return yield* fail("UnsupportedProcessLocal", "Machine commands require a managed local process")
-        }
+        const initial = yield* internalMachine.planInitial(planned, ...options.input)
+        yield* sendsOf(initial.commands, sent)
         state = initial.state
         emitted.push(...initial.emittedEvents)
       }
       let changes: InvocationChanges.InvocationChanges | undefined
       if (!internalMachine.isFinal(machine, state)) {
-        const planned = yield* internalMachine.plan(machine, state, event)
-        if (planned.commands.length > 0) {
-          return yield* fail("UnsupportedProcessLocal", "Machine commands require a managed local process")
-        }
-        state = planned.next
-        emitted.push(...planned.emittedEvents)
-        changes = InvocationChanges.fromMicrosteps(planned.microsteps)
+        const step = yield* internalMachine.plan(planned, state, event)
+        yield* sendsOf(step.commands, sent)
+        state = step.next
+        emitted.push(...step.emittedEvents)
+        changes = InvocationChanges.fromMicrosteps(step.microsteps)
       }
-      return { state, emitted, changes }
+      return { state, emitted, sent, changes }
     })
 
     // Gives a due time to the timers of a state that have none, from now on.
@@ -627,7 +670,23 @@ export const make = <R>(options: Options<R>): Effect.Effect<ClusterInstance<R>, 
             Effect.mapError((error) => reject("PersistenceFailure", String(error))),
             refuse({ memory: undefined, confirm: false, stage: "Infrastructure" })
           )
-          return { memory: next, stored: { base: base.revision, changes: planned.changes, unscheduled, woken } }
+          // In the transaction of the checkpoint, so each event is sent once.
+          if (targets !== undefined) {
+            yield* Effect.forEach(planned.sent, targets.save, { discard: true }).pipe(
+              Effect.mapError((error) => reject("PersistenceFailure", String(error))),
+              refuse({ memory: undefined, confirm: false, stage: "Infrastructure" })
+            )
+          }
+          return {
+            memory: next,
+            stored: {
+              base: base.revision,
+              changes: planned.changes,
+              unscheduled,
+              woken,
+              sent: planned.sent.length > 0
+            }
+          }
         }
       }
     })
@@ -772,6 +831,13 @@ export const make = <R>(options: Options<R>): Effect.Effect<ClusterInstance<R>, 
     // Makes the work and the keep-alive match the known memory. `stored` is the
     // step that led to it from the previous state.
     const align = (restore: Restore, stored: StoredStep | undefined): Effect.Effect<void> =>
+      Effect.andThen(
+        // The runner reads the events the step sent now, rather than at its next poll.
+        stored?.sent === true && options.sends !== undefined ? options.sends.poll : Effect.void,
+        alignStored(restore, stored)
+      )
+
+    const alignStored = (restore: Restore, stored: StoredStep | undefined): Effect.Effect<void> =>
       Effect.suspend(() => {
         if (!hostsWork || work.closed || memory === undefined) return Effect.void
         if (stored !== undefined) recordWakes(stored.woken)

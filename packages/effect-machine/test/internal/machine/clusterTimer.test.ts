@@ -102,7 +102,7 @@ describe("ClusterTimer", () => {
           configuration,
           paths: Planner.sortEntryPaths(machine, Configuration.getInitialEntryPaths(machine, configuration)),
           eventOf: (path) => path === "right" ? { _tag: "Go" } : Planner.InitialEvent,
-          capabilities: ClusterWork.makeCapabilities("Test"),
+          capabilities: ClusterWork.makeCapabilities("Test", undefined),
           progress,
           now
         })
