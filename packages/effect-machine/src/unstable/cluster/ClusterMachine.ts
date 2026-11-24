@@ -889,7 +889,7 @@ export type ReadFailureReason = typeof ReadFailureReason.Type
 export { MachineFailedError }
 
 type MachineServices<M extends Machine.Machine.Any> =
-  | Exclude<Machine.Machine.Services<M>, Machine.InvocationSupport<"Child">>
+  | Exclude<Machine.Machine.Services<M>, Machine.InvocationSupport<"Child"> | Machine.ChildMachineRuntime>
   | Machine.Machine.SnapshotDecodingServices<Machine.Machine.States<M>>
   | Machine.Machine.SnapshotEncodingServices<Machine.Machine.States<M>>
 
@@ -1101,7 +1101,11 @@ export { StorageCheckFailure }
  *
  * A machine that this host cannot run does not compile: one whose states invoke a
  * Stream or a `Logic`, or whose invoked work requires `Machine.MachineRuntime`,
- * as `Machine.spawn`, `Machine.sendTo`, and `Machine.stopChild` do. The error
+ * as `Machine.spawn` does, and `Machine.sendTo` and `Machine.stopChild` with a
+ * child address. With the descriptor of a child machine, they require only
+ * `Machine.ChildMachineRuntime`, which this host provides: they act on the
+ * child that runs when the work acts, through a persisted request saved outside
+ * the transaction of a step, and ignore a child that does not run. The error
  * names the property
  * `~effect/ClusterMachine/UnsupportedProcessLocal`, and lists there every
  * invocation kind and capability to replace with an Effect, a timer, or a child
@@ -1408,7 +1412,7 @@ export const make: <
     ParentEvents
   >,
   // A child machine runs as an entity that the layer of its parent registers.
-  | Exclude<R, Machine.InvocationSupport<"Child">>
+  | Exclude<R, Machine.InvocationSupport<"Child"> | Machine.ChildMachineRuntime>
   | Machine.Machine.SnapshotDecodingServices<States>
   | Machine.Machine.SnapshotEncodingServices<States>
 > = internal.make

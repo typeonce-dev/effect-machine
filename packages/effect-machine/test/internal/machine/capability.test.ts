@@ -26,7 +26,11 @@ const counter = Machine.logic<number, number>({
 type CounterRef = Machine.MachineRef<number, number, never, void>
 
 const startOwner = (
-  work: Effect.Effect<void, Machine.ChildAlreadyExistsError | Machine.StoppedError, Machine.MachineRuntime>,
+  work: Effect.Effect<
+    void,
+    Machine.ChildAlreadyExistsError | Machine.StoppedError,
+    Machine.MachineRuntime | Machine.ChildMachineRuntime
+  >,
   strategy: "generic" | "compiled"
 ) => {
   const owner = Machine.make({

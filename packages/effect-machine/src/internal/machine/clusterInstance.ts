@@ -6,6 +6,7 @@
 import * as Cause from "effect/Cause"
 import * as Clock from "effect/Clock"
 import type { EntityAddress, MessageStorage, Snowflake } from "effect/cluster"
+import * as Context from "effect/Context"
 import * as Data from "effect/Data"
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
@@ -17,6 +18,7 @@ import type * as Scope from "effect/Scope"
 import * as Semaphore from "effect/Semaphore"
 import type * as Machine from "../../Machine.js"
 import type { Checkpoint } from "../../unstable/cluster/ClusterMachine.js"
+import { ChildMachineRuntime } from "./capability.js"
 import * as CapturedInvocation from "./capturedInvocation.js"
 import { isChildMachine } from "./child.js"
 import * as ClusterChild from "./clusterChild.js"
@@ -202,6 +204,11 @@ export interface Options<R> {
     readonly parent: ClusterTarget.Target | undefined
     /** Whether this machine sends its parent its snapshots. */
     readonly snapshots: boolean
+    /**
+     * Saves a request to a child from work, outside the transaction of a step,
+     * and lets the runner read it.
+     */
+    readonly dispatch: (target: ClusterTarget.Target, tag: string, payload: unknown) => Effect.Effect<void, unknown>
   } | undefined
 }
 
@@ -387,7 +394,22 @@ const accepted = new Accepted({})
 export const make = <R>(options: Options<R>): Effect.Effect<ClusterInstance<R>, never, R | Scope.Scope> =>
   Effect.gen(function*() {
     const { address, definitionId, enqueue, machine, messageStorage, storage, version } = options
-    const context = yield* Effect.context<R>()
+    // Work acts on the children that run when it acts, read from memory or,
+    // while a turn changes memory, from `Storage`.
+    const childRuntime: ChildMachineRuntime["Service"] = {
+      sendTo: (child, event) =>
+        Effect.flatMap(runningChild(child), (target) =>
+          target === undefined ? Effect.void : Effect.flatMap(
+            Effect.orDie(target.protocol.decode(event)),
+            (decoded) => dispatchToChild(target, "deliver", decoded)
+          )),
+      stopChild: (child) =>
+        Effect.flatMap(
+          runningChild(child),
+          (target) => target === undefined ? Effect.void : dispatchToChild(target, "stop", undefined)
+        )
+    }
+    const context = Context.add(yield* Effect.context<R>(), ChildMachineRuntime, childRuntime)
     const support = ClusterWork.supportOf(toImpl(machine).handlers)
     const hostsWork = support._tag === "Hosted"
     const targets = options.sends
@@ -587,6 +609,32 @@ export const make = <R>(options: Options<R>): Effect.Effect<ClusterInstance<R>, 
       const running = ClusterProgress.children(progress).find(([key]) => key.id === child.id)
       return protocol && running && new ClusterTarget.Target(protocol, running[1])
     }
+
+    const runningChild = (child: Machine.ChildMachine.Any): Effect.Effect<ClusterTarget.Target | undefined> =>
+      Effect.suspend(() => {
+        const known = memory
+        if (known !== undefined) {
+          return Effect.succeed(known._tag === "Active" ? childTarget(known.progress, child) : undefined)
+        }
+        return storage.load(address).pipe(
+          Effect.map((loaded) => {
+            const status = Option.isSome(loaded) ? readStatus(loaded.value.status) : undefined
+            return status?._tag === "Active" ? childTarget(status.progress, child) : undefined
+          }),
+          // A store that cannot be read now is read again.
+          Effect.retry({ schedule: Schedule.spaced("1 second") }),
+          Effect.orDie
+        )
+      })
+
+    const dispatchToChild = (target: ClusterTarget.Target, tag: string, payload: unknown): Effect.Effect<void> =>
+      options.children === undefined
+        ? Effect.void
+        : options.children.dispatch(target, tag, payload).pipe(
+          // A runner that cannot take the request now takes it later.
+          Effect.retry({ schedule: Schedule.spaced("1 second") }),
+          Effect.orDie
+        )
 
     // The events that commands send to Cluster machines, in order, decoded by
     // the protocols of their targets. A child is the one that runs once the step

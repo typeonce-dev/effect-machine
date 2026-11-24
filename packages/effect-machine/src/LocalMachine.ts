@@ -18,6 +18,7 @@ import type * as Stream from "effect/Stream"
 import * as internal from "./internal/machine/process.js"
 import type { EnsureExecutable } from "./internal/machine/readiness.js"
 import type {
+  ChildMachineRuntime,
   InfiniteTransitionError,
   InvocationSupport,
   Machine,
@@ -39,8 +40,9 @@ import type {
  *
  * **Details**
  *
- * Removes `Machine.MachineRuntime` from the machine's requirements, because the
- * running machine provides it to the work it runs, and every
+ * Removes `Machine.MachineRuntime` and `Machine.ChildMachineRuntime` from the
+ * machine's requirements, because the running machine provides them to the work
+ * it runs, and every
  * `Machine.InvocationSupport`, because a local machine runs every kind of
  * invocation.
  *
@@ -49,7 +51,7 @@ import type {
  */
 export type RequiredServices<Requirements> = Exclude<
   Requirements,
-  MachineRuntime | InvocationSupport<InvocationSupport.Kind>
+  MachineRuntime | ChildMachineRuntime | InvocationSupport<InvocationSupport.Kind>
 >
 
 /**

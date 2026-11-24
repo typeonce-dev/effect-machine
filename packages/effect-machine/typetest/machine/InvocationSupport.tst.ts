@@ -355,6 +355,36 @@ describe("ClusterMachine", () => {
     ClusterMachine.make("OwningOwner", owningOwner, options)
   })
 
+  it("runs work that acts on the child machine of its state, and refuses work on a child address", () => {
+    const Quiet = Machine.child("quiet", quiet)
+    expect(Machine.sendTo(Quiet, { _tag: "Start" })).type.toBe<
+      Effect.Effect<void, Machine.StoppedError, Machine.ChildMachineRuntime>
+    >()
+    expect(Machine.stopChild(Quiet)).type.toBe<Effect.Effect<void, never, Machine.ChildMachineRuntime>>()
+    expect(Machine.stopChild(address)).type.toBe<Effect.Effect<void, never, Machine.MachineRuntime>>()
+
+    const driving = Machine.make({
+      root,
+      events,
+      effects: { drive: Machine.sendTo(Quiet, { _tag: "Start" }), halt: Machine.stopChild(Quiet) },
+      children: { quiet: Quiet }
+    }).handle({
+      initial,
+      states: {
+        Busy: {
+          invoke: [{ src: "quiet" }, { src: "drive", onDone: { stay: true }, onFailure: { stay: true } }, {
+            src: "halt",
+            onDone: { stay: true }
+          }]
+        }
+      }
+    })
+    expect<Services<typeof driving>>().type.toBe<Machine.InvocationSupport<"Child"> | Machine.ChildMachineRuntime>()
+    expect<LocalMachine.RequiredServices<Services<typeof driving>>>().type.toBe<never>()
+    const layer = ClusterMachine.make("Driving", driving, options).toLayer()
+    expect<Layer.Services<typeof layer>>().type.toBe<Host>()
+  })
+
   it("hides no requirement of a machine", () => {
     expect<
       ClusterMachine.ClusterMachine<"Stopping", typeof stopping> extends
