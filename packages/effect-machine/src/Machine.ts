@@ -6429,6 +6429,13 @@ type Make = {
  * registered source by name with `invoke: { src }`, and only invoked sources
  * add to the machine's requirements.
  *
+ * Each run of invoked work owns a `Scope`, which every host closes when the run
+ * ends or is stopped. An Effect and a Stream get a new one for each run, and
+ * logic gets one from its `initial` through the end of its `run`. Finalizers
+ * added with `Effect.addFinalizer` or `Effect.acquireRelease` therefore run with
+ * the work, not when the machine stops. A timer acquires nothing, and a child
+ * machine has no scope of its own: its invoked work follows the same rule.
+ *
  * `Machine.events` defines the public input protocol. `Machine.internalEvents`
  * adds raised events and other machine-local deliveries.
  * `Machine.emittedEvents` defines outward ephemeral notifications. The

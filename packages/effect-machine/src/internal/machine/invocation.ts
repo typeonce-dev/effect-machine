@@ -5,6 +5,8 @@
  */
 
 import * as Effect from "effect/Effect"
+import * as Exit from "effect/Exit"
+import * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
 import type { ChildMachine, ChildOwner, Machine } from "../../Machine.js"
 import * as ChildRegistry from "./childRegistry.js"
@@ -30,12 +32,49 @@ export const makeKey = (path: string, id: string): string => `${path.length}:${p
 export const makeChildId = (path: string, id: string): string =>
   `${ChildRegistry.invocationChildIdPrefix}${makeKey(path, id)}`
 
+// Each run of invoked work owns a `Scope`, closed with the run's exit when the
+// work ends or is stopped, so its resources never outlive it.
 const oneShot = (
   effect: Effect.Effect<unknown, unknown, unknown>
 ): Runtime.ProcessLogic<void, unknown, unknown, unknown, unknown> => ({
   initial: () => Effect.void,
-  run: () => effect
+  run: () => Effect.scoped(effect)
 })
+
+// A timer acquires nothing, so it needs no scope of its own.
+const delay = (
+  duration: ReturnType<InvocationResolution.TimerInvocation["duration"]>
+): Runtime.ProcessLogic<void, unknown, unknown, unknown, unknown> => ({
+  initial: () => Effect.void,
+  run: () => Effect.flatMap(duration, Effect.sleep)
+})
+
+/**
+ * Gives a `Logic` process one `Scope` from its `initial` through the end of its
+ * `run`. The scope is forked from the owner's, so a process stopped before its
+ * `run` starts is still released when its owner stops.
+ */
+const scopedLogic = (logic: AnyProcessLogic): AnyProcessLogic => {
+  let scope: Scope.Closeable | undefined
+  return {
+    ...logic,
+    initial: (context) =>
+      Effect.flatMap(Effect.scope, (owner) => {
+        const own = scope = Scope.forkUnsafe(owner, "sequential")
+        return logic.initial(context).pipe(
+          Scope.provide(own),
+          Effect.onError((cause) => Scope.close(own, Exit.failCause(cause)))
+        )
+      }),
+    run: (context) => {
+      const own = scope!
+      return logic.run(context).pipe(
+        Scope.provide(own),
+        Effect.onExit((exit) => Scope.close(own, exit))
+      )
+    }
+  }
+}
 
 const streamLogic = (
   invocation: InvocationResolution.StreamInvocation,
@@ -49,7 +88,7 @@ const streamLogic = (
       if (send === undefined) {
         return Effect.die(new Error("Stream invocation requires an acknowledged parent machine"))
       }
-      return Stream.runForEach(
+      return Effect.scoped(Stream.runForEach(
         stream,
         (element) => {
           const decision = InvocationOutcome.decideElement(invocation, generation, element)
@@ -60,7 +99,7 @@ const streamLogic = (
               Effect.catchCause(() => Effect.interrupt)
             )
         }
-      )
+      ))
     }
   }
 }
@@ -144,7 +183,7 @@ const programLogic = (
     case "Effect":
       return traced(scope, invocation, oneShot(invocation.effect()))
     case "Timer":
-      return traced(scope, invocation, oneShot(Effect.flatMap(invocation.duration(), Effect.sleep)))
+      return traced(scope, invocation, delay(invocation.duration()))
     case "Stream":
       return traced(scope, invocation, streamLogic(invocation, generation))
   }
@@ -177,7 +216,7 @@ const spawn = (
     isProgram(invocation)
       ? () => programLogic(scope, invocation, generation)
       : invocation._tag === "Logic"
-      ? invocation.logic
+      ? () => scopedLogic(invocation.logic() as AnyProcessLogic)
       // The runtime builds the child's logic from this description, so a
       // running parent retains no closure for it.
       : invocation,
