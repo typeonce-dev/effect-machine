@@ -56,6 +56,8 @@ export interface Input {
 interface RequestInput extends Input {
   readonly lifecycle?: "Start" | "Stop" | undefined
   readonly initial?: ReadonlyArray<unknown> | undefined
+  /** An encoded snapshot of a child, which is the event of the request. */
+  readonly child?: { readonly entityId: string; readonly snapshot: unknown } | undefined
 }
 
 /**
@@ -142,6 +144,17 @@ export interface ClusterInstance<R> {
    * machine still runs it.
    */
   readonly childEnded: (entityId: string) => Effect.Effect<void, never, R>
+
+  /**
+   * Applies an encoded snapshot of the child `entityId` as a snapshot of its
+   * invocation, when this machine still runs it. A transition that cannot be
+   * applied fails the machine.
+   */
+  readonly childSnapshot: (input: {
+    readonly requestId: Snowflake
+    readonly entityId: string
+    readonly snapshot: unknown
+  }) => Effect.Effect<void, never, R>
 }
 
 /** @internal */
@@ -187,6 +200,8 @@ export interface Options<R> {
     readonly save: ClusterTarget.Save
     readonly address: (target: ClusterTarget.Target) => EntityAddress
     readonly parent: ClusterTarget.Target | undefined
+    /** Whether this machine sends its parent its snapshots. */
+    readonly snapshots: boolean
   } | undefined
 }
 
@@ -225,6 +240,8 @@ interface PlannedStep {
   readonly emitted: ReadonlyArray<unknown>
   readonly commands: ReadonlyArray<Machine.Command>
   readonly changes: InvocationChanges.InvocationChanges | undefined
+  /** Whether the step planned the initial state or took a transition. */
+  readonly moved: boolean
 }
 
 /** A request that a step saves, to another machine. */
@@ -670,6 +687,16 @@ export const make = <R>(options: Options<R>): Effect.Effect<ClusterInstance<R>, 
         : [{ target: parent, tag: "ended", payload: { entityId: address.entityId } }]
     }
 
+    // Gives the parent of a child the snapshot of a step that changed it, while
+    // the child is active, when the parent takes its snapshots.
+    const snapshotFor = (planned: PlannedStep, snapshot: Machine.Machine.EncodedSnapshot): ReadonlyArray<Outgoing> => {
+      const parent = options.children?.parent
+      return parent === undefined || options.children?.snapshots !== true || !planned.moved ||
+          internalMachine.isFinal(machine, planned.state)
+        ? []
+        : [{ target: parent, tag: "snapshot", payload: { entityId: address.entityId, snapshot } }]
+    }
+
     const saveOutgoing = (outgoing: ReadonlyArray<Outgoing>): Effect.Effect<void, unknown> =>
       Effect.forEach(
         outgoing,
@@ -699,6 +726,7 @@ export const make = <R>(options: Options<R>): Effect.Effect<ClusterInstance<R>, 
         emitted.push(...initial.emittedEvents)
       }
       let changes: InvocationChanges.InvocationChanges | undefined
+      let moved = base._tag !== "Active"
       // The start of a child plans its initial state only.
       if (initialArgs === undefined && !internalMachine.isFinal(machine, state)) {
         const step = yield* internalMachine.plan(planned, state, input.event)
@@ -706,8 +734,9 @@ export const make = <R>(options: Options<R>): Effect.Effect<ClusterInstance<R>, 
         state = step.next
         emitted.push(...step.emittedEvents)
         changes = InvocationChanges.fromMicrosteps(step.microsteps)
+        moved ||= step.microsteps.length > 0
       }
-      return { state, emitted, commands, changes }
+      return { state, emitted, commands, changes, moved }
     })
 
     // Gives a due time to the timers of a state that have none, from now on.
@@ -789,6 +818,7 @@ export const make = <R>(options: Options<R>): Effect.Effect<ClusterInstance<R>, 
         ...stopsOf(before, progress, input._tag === "Invocation" ? input.key : undefined),
         ...starts,
         ...sent,
+        ...snapshotFor(planned, snapshot),
         ...endedFor(internalMachine.isFinal(machine, planned.state) && !wasFinal(base))
       ]
       return {
@@ -933,8 +963,26 @@ export const make = <R>(options: Options<R>): Effect.Effect<ClusterInstance<R>, 
           refuse({ memory: base, confirm, stage: "Decision" })
         )
       }
+      let event = input.event
+      if (input.child !== undefined) {
+        // The snapshot of a child that no longer runs changes nothing.
+        const { entityId } = input.child
+        const running = base._tag === "Active"
+          ? ClusterProgress.children(base.progress).find(([, id]) => id === entityId)
+          : undefined
+        const protocol = running && options.children?.protocols.get(running[0].id)
+        if (running === undefined || protocol === undefined) return { memory: base, stored: undefined }
+        const [key] = running
+        const state = yield* internalMachine.decodeSnapshot(protocol.machine, input.child.snapshot).pipe(
+          Effect.mapError((error) =>
+            reject("TransitionFailure", `The snapshot of child ${entityId} cannot be decoded: ${String(error)}`)
+          ),
+          refuse({ memory: base, confirm, stage: "Decision" })
+        )
+        event = InvocationEventModule.snapshot(key.path, key.id, { current: true }, { status: "active", state })
+      }
       return yield* step(
-        { _tag: "Request", requestId: input.requestId, event: input.event, initial: input.initial },
+        { _tag: "Request", requestId: input.requestId, event, initial: input.initial },
         base,
         { confirm }
       )
@@ -1399,7 +1447,7 @@ export const make = <R>(options: Options<R>): Effect.Effect<ClusterInstance<R>, 
     // its answer, so an event that cannot be applied fails the machine, as it
     // does locally, and a failure of the infrastructure is retried. The value is
     // whether nothing is left to do.
-    const deliverOnce = (input: Input): Effect.Effect<boolean, never, R> =>
+    const deliverOnce = (input: RequestInput): Effect.Effect<boolean, never, R> =>
       turn((restore) =>
         Effect.suspend(() => {
           // Loaded with the request, so a refusal is never one of an earlier
@@ -1488,6 +1536,8 @@ export const make = <R>(options: Options<R>): Effect.Effect<ClusterInstance<R>, 
       wake,
       childEnded,
       deliver: (input) => untilDone(deliverOnce(input)),
+      childSnapshot: ({ entityId, requestId, snapshot }) =>
+        untilDone(deliverOnce({ requestId, event: undefined, child: { entityId, snapshot } })),
       start: ({ input, requestId }) =>
         lifecycle({
           requestId,

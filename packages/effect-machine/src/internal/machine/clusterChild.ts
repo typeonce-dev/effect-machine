@@ -59,6 +59,24 @@ export const childrenOf = (
 }
 
 /**
+ * The ids of the child machines that an invocation of a machine takes the
+ * snapshots of. Only such a child sends them.
+ *
+ * @internal
+ */
+export const snapshotsOf = (
+  handlers: Readonly<Record<string, { readonly invoke?: unknown } | undefined>>
+): ReadonlySet<string> => {
+  const ids = new Set<string>()
+  for (const path of Object.keys(handlers)) {
+    for (const definition of CapturedInvocation.list(handlers[path]?.invoke)) {
+      if ("child" in definition && definition.onSnapshot !== undefined) ids.add(definition.child.id)
+    }
+  }
+  return ids
+}
+
+/**
  * Starts a child with its input. A child that has started already ignores it.
  *
  * @internal
@@ -80,4 +98,13 @@ export const StopRpc = Rpc.make("stop").annotate(ClusterSchema.Persisted, true)
  * @internal
  */
 export const EndedRpc = Rpc.make("ended", { payload: { entityId: Schema.String } })
+  .annotate(ClusterSchema.Persisted, true)
+
+/**
+ * Gives a parent the encoded snapshot of its child `entityId` after a step that
+ * changed it.
+ *
+ * @internal
+ */
+export const SnapshotRpc = Rpc.make("snapshot", { payload: { entityId: Schema.String, snapshot: Schema.Unknown } })
   .annotate(ClusterSchema.Persisted, true)

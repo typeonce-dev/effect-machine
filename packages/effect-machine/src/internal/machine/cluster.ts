@@ -188,6 +188,8 @@ interface Request {
 interface Parent {
   readonly protocol: ClusterTarget.Protocol
   readonly childId: string
+  /** Whether an invocation of the parent takes the snapshots of the child. */
+  readonly snapshots: boolean
 }
 
 /** An adapter, and the adapters of the child machines that its states invoke. */
@@ -222,14 +224,15 @@ const build = (
   const deliver = Rpc.make("deliver", { payload: eventSchema }).annotate(ClusterSchema.Persisted, true)
   // `deliver` carries an event another machine sends, `wake` is the delayed
   // message of a long timer, `start` and `stop` come from the parent of a
-  // child, and `ended` from a child. Only machines send them.
+  // child, and `ended` and `snapshot` from a child. Only machines send them.
   const entity = Entity.make(type, [
     rpc,
     deliver,
     ClusterWake.WakeRpc,
     ClusterChild.makeStartRpc(machine.input ?? Schema.Undefined),
     ClusterChild.StopRpc,
-    ClusterChild.EndedRpc
+    ClusterChild.EndedRpc,
+    ClusterChild.SnapshotRpc
   ])
   const definitionId = machine.id ?? type
   const publicTags: ReadonlySet<PropertyKey> = new Set(Reflect.ownKeys(machine.events))
@@ -256,6 +259,7 @@ const build = (
   const target = (entityId: string): ClusterTarget.Target => new ClusterTarget.Target(protocol, entityId)
 
   // Each child runs as an entity of its own, with the version of its parent.
+  const snapshots = ClusterChild.snapshotsOf(toImpl(machine).handlers)
   const children = Array.from(
     ClusterChild.childrenOf(toImpl(machine).handlers),
     ([childId, child]) =>
@@ -263,7 +267,8 @@ const build = (
         childId,
         build(ClusterChild.entityTypeOf(type, childId), child.machine, { version: options.version }, [], {
           protocol,
-          childId
+          childId,
+          snapshots: snapshots.has(childId)
         })
       ] as const
   )
@@ -304,6 +309,7 @@ const build = (
             protocols: childProtocols,
             save,
             address: (target) => ClusterTarget.addressOf(sharding, target),
+            snapshots: parent?.snapshots ?? false,
             parent: parent === undefined || parentEntityId === undefined
               ? undefined
               : new ClusterTarget.Target(parent.protocol, parentEntityId)
@@ -315,7 +321,13 @@ const build = (
           wake: (request) => instance.wake(request.payload),
           start: (request) => instance.start({ requestId: request.requestId, input: request.payload.input }),
           stop: (request) => instance.stop(request.requestId),
-          ended: (request) => instance.childEnded(request.payload.entityId)
+          ended: (request) => instance.childEnded(request.payload.entityId),
+          snapshot: (request) =>
+            instance.childSnapshot({
+              requestId: request.requestId,
+              entityId: request.payload.entityId,
+              snapshot: request.payload.snapshot
+            })
         }
         return entity.of(handlers as never)
       })

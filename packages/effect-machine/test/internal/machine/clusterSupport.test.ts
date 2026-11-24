@@ -59,12 +59,11 @@ describe("what ClusterMachine refuses at compile time and at run time", () => {
     }
   })
 
-  it("refuses the snapshots of a child machine", () => {
+  it("hosts the snapshots of a child machine", () => {
     const support = supportOf(
       definition.handle({ initial, states: { Busy: { invoke: { src: "child", onSnapshot: { stay: true } } } } })
     )
-    assert(support._tag === "Unsupported")
-    assert.match(support.message, /^Child snapshot invocation "child" of state "Busy"/)
+    assert.strictEqual(support._tag, "Hosted")
   })
 
   it("agrees on a machine of effects and timers", () => {
