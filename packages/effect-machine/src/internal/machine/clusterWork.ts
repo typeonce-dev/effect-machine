@@ -49,12 +49,16 @@ const refusedChildren: ChildOwner<any> = {
 
 /**
  * Capabilities of a Cluster host. Its machine has no parent, and refuses every
- * operation that needs a local process.
+ * operation that needs a local process. Its `self` is the target of its own
+ * entity, when the host sends to Cluster machines.
  *
  * @internal
  */
-export const makeCapabilities = (definitionId: string): InvocationResolution.InvocationCapabilities => ({
-  self: new HostedTarget(definitionId),
+export const makeCapabilities = (
+  definitionId: string,
+  self: MachineTarget<any> | undefined
+): InvocationResolution.InvocationCapabilities => ({
+  self: self ?? new HostedTarget(definitionId),
   parent: undefined,
   children: refusedChildren
 })

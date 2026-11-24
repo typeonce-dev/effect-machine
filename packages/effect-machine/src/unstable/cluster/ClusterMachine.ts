@@ -559,6 +559,62 @@ export interface ClusterMachine<
   readonly client: Effect.Effect<(entityId: string) => Client<M>, never, Sharding.Sharding>
 
   /**
+   * Names the entity of this machine with `entityId`, as a {@link Target} that
+   * another Cluster machine sends to with `enqueue.sendTo`.
+   *
+   * **Example** (Sending to another Cluster machine)
+   *
+   * ```ts import.meta.vitest
+   * import { Machine } from "@typeonce/effect-machine"
+   * import { ClusterMachine } from "@typeonce/effect-machine/cluster"
+   * import { Schema } from "effect"
+   *
+   * const Ledger = ClusterMachine.make(
+   *   "Ledger",
+   *   Machine.make({
+   *     root: Machine.state({ states: { Open: { fields: { total: Schema.Number } } } }),
+   *     events: Machine.events({ Add: { amount: Schema.Number } })
+   *   }).handle({
+   *     initial: { target: "Open", data: { total: 0 } },
+   *     states: {
+   *       Open: { on: { Add: { update: { Open: ({ event, state }) => ({ total: state.total + event.amount }) } } } }
+   *     }
+   *   }),
+   *   { version: "1" }
+   * )
+   *
+   * const Order = ClusterMachine.make(
+   *   "Order",
+   *   Machine.make({
+   *     root: Machine.state({ states: { Open: { fields: { ledger: Schema.String } }, Paid: {} } }),
+   *     events: Machine.events({ Pay: { amount: Schema.Number } })
+   *   }).handle({
+   *     initial: { target: "Open", data: { ledger: "ledger-1" } },
+   *     states: {
+   *       Open: {
+   *         on: {
+   *           Pay: {
+   *             target: "Paid",
+   *             // Saved with the checkpoint of this step, and applied once.
+   *             commands: ({ event, state }, enqueue) =>
+   *               enqueue.sendTo(Ledger.target(state.ledger), { _tag: "Add", amount: event.amount })
+   *           }
+   *         }
+   *       },
+   *       Paid: {}
+   *     }
+   *   }),
+   *   { version: "1" }
+   * )
+   *
+   * Order.entity.type // => "Order"
+   * ```
+   *
+   * @since 0.48.0
+   */
+  readonly target: (entityId: string) => Target<Machine.Machine.EventInputOf<MachineEvents<M>>>
+
+  /**
    * Creates the Cluster entity layer for this machine.
    *
    * **Gotchas**
@@ -595,6 +651,56 @@ export type ClientError =
   | ClusterError.AlreadyProcessingMessage
   | ClusterError.PersistenceError
   | ClusterError.EntityNotAssignedToRunner
+
+/**
+ * A Cluster machine named by its entity type and id, as Cluster addresses an
+ * entity, that a model sends to.
+ *
+ * **Details**
+ *
+ * `target` of an adapter makes one, and a Cluster machine is given one for its
+ * own entity as `self`. A step that sends to it with `enqueue.sendTo` saves the
+ * event as a persisted request to the entity, in the same `MessageStorage`
+ * transaction as its checkpoint, so the event is sent if and only if the step
+ * is stored. The request has an id of its own, which the target records when it
+ * applies the request, so Cluster may deliver it again and it is applied once.
+ * The answer of the target is not read: an event the target rejects, such as
+ * one sent after it failed, is dropped, as a local send to a child that stopped
+ * is ignored.
+ *
+ * `send` sends through the client of the target, from the work of a Cluster
+ * machine or from any effect that has `Sharding`, and waits for the target to
+ * accept the event. It sends again when a runner cannot take the request, and
+ * fails with `StoppedError` once the target failed. Work runs at least once, so
+ * an event that work sends may be sent more than once.
+ *
+ * **Gotchas**
+ *
+ * The types check the event against the input events of the target, but not
+ * that the target was made by this module: a step on Cluster that sends to a
+ * local reference or to a child is rejected as `UnsupportedProcessLocal`, and so
+ * is `enqueue.stop`. A target made here is not a local reference either, so a
+ * local machine cannot send to it.
+ *
+ * The runner that stores the step reads the request at once. A target owned by
+ * another runner reads it at its next poll of `MessageStorage`, after up to
+ * `entityMessagePollInterval`.
+ *
+ * Its `sessionId` is the address of the entity, `Type/entityId`, which stays
+ * the same across runners and restarts.
+ *
+ * @category models
+ * @since 0.48.0
+ */
+export interface Target<in Event> extends Machine.MachineTarget<Event> {
+  readonly "~effect/cluster/ClusterMachine/Target": "~effect/cluster/ClusterMachine/Target"
+
+  /** Entity type of the machine. */
+  readonly entityType: string
+
+  /** Entity id of the machine. */
+  readonly entityId: string
+}
 
 /**
  * A client for one Cluster machine, addressed by its entity id.
@@ -1005,17 +1111,21 @@ export { StorageCheckFailure }
  * state that was stored with a timer the machine no longer declares is rejected
  * as `InvalidCheckpoint`, so migrate such checkpoints.
  *
+ * Machines send to each other through a {@link Target}, which names an entity
+ * by its type and id: `target` of an adapter makes one, and `self` is the one of
+ * the machine's own entity. An event that a step sends with `enqueue.sendTo` is
+ * saved with its checkpoint and applied once, and work sends with `send` of a
+ * target. There is no `parent`.
+ *
  * The compiler reads only the requirements of a machine, so these uses of a local
  * process compile and fail at run time:
  *
- * - A step whose plan contains a command, from `enqueue.sendTo` or
- *   `enqueue.stop`, and an action-time `runtime.raise`. They reject the request as
- *   `UnsupportedProcessLocal`, or fail the machine when the step applies an
+ * - A step whose plan sends to a target that is not a {@link Target}, such as a
+ *   child, or stops a child with `enqueue.stop`. It rejects the request as
+ *   `UnsupportedProcessLocal`, or fails the machine when the step applies an
  *   outcome. Planning-time raised events remain part of the current macrostep.
- * - Work that uses `self.send`, `self.sessionId`, or an operation of `children`
- *   from the context of its input mapper. It fails the machine. Machines cannot
- *   address each other yet: that `self` only names the machine, and there is no
- *   `parent`.
+ * - Work that uses an operation of `children` from the context of its input
+ *   mapper. It fails the machine.
  * - A machine whose requirements are `any`, such as an erased one. When any of its
  *   states declares an unsupported invocation, it rejects every request as
  *   `UnsupportedProcessLocal`. Work of such a machine that requires

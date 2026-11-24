@@ -1970,8 +1970,6 @@ describe("ClusterMachine", () => {
 
     describe("host capabilities", () => {
       const refused: Record<string, (context: any) => Effect.Effect<unknown, any, any>> = {
-        "self.send": ({ self }) => self.send({ _tag: "Note" }),
-        "self.sessionId": ({ self }) => Effect.sync(() => self.sessionId),
         "children.spawn": ({ children }) => children.spawn(UnsupportedChild),
         "children.sendTo": ({ children }) => children.sendTo(UnsupportedChild, { _tag: "Note" }),
         "children.stop": ({ children }) => children.stop(UnsupportedChild)
