@@ -20,7 +20,7 @@ describe("machine invocation ownership", () => {
     Effect.gen(function*() {
       // Generation bookkeeping never reaches the process address or runtime.
       const owned = RuntimeProtocol.makeChildRuntimeSync(
-        {} as RuntimeProtocol.ProcessAddress<unknown>,
+        {} as RuntimeProtocol.ProcessEndpoint<unknown>,
         {} as RuntimeProtocol.ProcessRuntime
       ).owned
       const left = owned.beginGeneration("Active.left")

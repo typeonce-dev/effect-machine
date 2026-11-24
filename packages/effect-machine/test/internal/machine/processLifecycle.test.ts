@@ -228,7 +228,7 @@ describe("machine process lifecycle", () => {
 
   it.effect("provides empty child operations for childless process logic", () =>
     Effect.gen(function*() {
-      const processScope = yield* Deferred.make<MachineRuntimeProtocol.ProcessScope<never>>()
+      const processScope = yield* Deferred.make<MachineRuntimeProtocol.ProcessInitialContext<never>>()
       const ref = yield* MachineRuntime.startProcess({
         execution: { _tag: "Childless" },
         initial: (scope) => Deferred.succeed(processScope, scope).pipe(Effect.as(0)),
@@ -512,7 +512,7 @@ describe("machine process lifecycle", () => {
 
   it.effect("interrupts the worker before publishing an externally requested failure", () =>
     Effect.gen(function*() {
-      const runtime = yield* Deferred.make<MachineRuntimeProtocol.ProcessScope<never>>()
+      const runtime = yield* Deferred.make<MachineRuntimeProtocol.ProcessInitialContext<never>>()
       const cleanupCount = yield* Ref.make(0)
       const logic: MachineRuntimeProtocol.ProcessLogic<number, never, string> = {
         initial: (scope) => Deferred.succeed(runtime, scope).pipe(Effect.as(1)),
@@ -696,7 +696,7 @@ describe("machine process lifecycle", () => {
         Array.from({ length: 50 }),
         () =>
           Effect.gen(function*() {
-            const parentScope = yield* Deferred.make<MachineRuntimeProtocol.ProcessScope<never>>()
+            const parentScope = yield* Deferred.make<MachineRuntimeProtocol.ProcessInitialContext<never>>()
             const parent = yield* MachineRuntime.startProcess({
               initial: (scope) => Deferred.succeed(parentScope, scope).pipe(Effect.as(undefined)),
               run: () => Effect.never
@@ -729,7 +729,7 @@ describe("machine process lifecycle", () => {
 
   it.effect("publishes every named child replacement in order", () =>
     Effect.gen(function*() {
-      const parentScope = yield* Deferred.make<MachineRuntimeProtocol.ProcessScope<never>>()
+      const parentScope = yield* Deferred.make<MachineRuntimeProtocol.ProcessInitialContext<never>>()
       const parent = yield* MachineRuntime.startProcess({
         initial: (scope) => Deferred.succeed(parentScope, scope).pipe(Effect.as(undefined)),
         run: () => Effect.never
@@ -762,7 +762,7 @@ describe("machine process lifecycle", () => {
 
   it.effect("preserves registry-wide childChanges emission ticks", () =>
     Effect.gen(function*() {
-      const parentScope = yield* Deferred.make<MachineRuntimeProtocol.ProcessScope<never>>()
+      const parentScope = yield* Deferred.make<MachineRuntimeProtocol.ProcessInitialContext<never>>()
       const parent = yield* MachineRuntime.startProcess({
         initial: (scope) => Deferred.succeed(parentScope, scope).pipe(Effect.as(undefined)),
         run: () => Effect.never
@@ -790,7 +790,7 @@ describe("machine process lifecycle", () => {
 
   it.effect("buffers ordered childChanges while a subscriber is stalled", () =>
     Effect.gen(function*() {
-      const parentScope = yield* Deferred.make<MachineRuntimeProtocol.ProcessScope<never>>()
+      const parentScope = yield* Deferred.make<MachineRuntimeProtocol.ProcessInitialContext<never>>()
       const parent = yield* MachineRuntime.startProcess({
         initial: (scope) => Deferred.succeed(parentScope, scope).pipe(Effect.as(undefined)),
         run: () => Effect.never
@@ -874,7 +874,7 @@ describe("machine process lifecycle", () => {
 
   it.effect("keeps child interruption parallel with scoped resource finalization", () =>
     Effect.gen(function*() {
-      const parentScope = yield* Deferred.make<MachineRuntimeProtocol.ProcessScope<never>>()
+      const parentScope = yield* Deferred.make<MachineRuntimeProtocol.ProcessInitialContext<never>>()
       const childInterrupted = yield* Deferred.make<void>()
       const resourceFinalized = yield* Deferred.make<void>()
       const release = yield* Deferred.make<void>()
@@ -915,7 +915,7 @@ describe("machine process lifecycle", () => {
 
   it.effect("does not orphan a child when parent stop races child initialization", () =>
     Effect.gen(function*() {
-      const parentScope = yield* Deferred.make<MachineRuntimeProtocol.ProcessScope<never>>()
+      const parentScope = yield* Deferred.make<MachineRuntimeProtocol.ProcessInitialContext<never>>()
       const childInitializing = yield* Deferred.make<void>()
       const releaseChild = yield* Deferred.make<void>()
       const resourceCleanup = yield* Ref.make(0)
@@ -960,7 +960,7 @@ describe("machine process lifecycle", () => {
         Array.from({ length: 50 }),
         () =>
           Effect.gen(function*() {
-            const parentScope = yield* Deferred.make<MachineRuntimeProtocol.ProcessScope<never>>()
+            const parentScope = yield* Deferred.make<MachineRuntimeProtocol.ProcessInitialContext<never>>()
             const race = yield* Deferred.make<void>()
             const parentLogic: MachineRuntimeProtocol.ProcessLogic<undefined, never> = {
               initial: (scope) => Deferred.succeed(parentScope, scope).pipe(Effect.as(undefined)),
@@ -1005,7 +1005,7 @@ describe("machine process lifecycle", () => {
 
   it.effect("delivers done, failure, and stopped child outcomes exactly once", () =>
     Effect.gen(function*() {
-      const parentScope = yield* Deferred.make<MachineRuntimeProtocol.ProcessScope<never>>()
+      const parentScope = yield* Deferred.make<MachineRuntimeProtocol.ProcessInitialContext<never>>()
       const outcomes = yield* Ref.make<ReadonlyArray<string>>([])
       const parentLogic: MachineRuntimeProtocol.ProcessLogic<undefined, never> = {
         initial: (scope) => Deferred.succeed(parentScope, scope).pipe(Effect.as(undefined)),
@@ -1045,7 +1045,7 @@ describe("machine process lifecycle", () => {
 
   it.effect("isolates child terminalization from outcome callback defects", () =>
     Effect.gen(function*() {
-      const parentScope = yield* Deferred.make<MachineRuntimeProtocol.ProcessScope<never>>()
+      const parentScope = yield* Deferred.make<MachineRuntimeProtocol.ProcessInitialContext<never>>()
       const parentLogic: MachineRuntimeProtocol.ProcessLogic<undefined, never> = {
         initial: (scope) => Deferred.succeed(parentScope, scope).pipe(Effect.as(undefined)),
         run: () => Effect.never
@@ -1068,7 +1068,7 @@ describe("machine process lifecycle", () => {
 
   it.effect("delivers committed active child snapshots directly and in order", () =>
     Effect.gen(function*() {
-      const parentScope = yield* Deferred.make<MachineRuntimeProtocol.ProcessScope<never>>()
+      const parentScope = yield* Deferred.make<MachineRuntimeProtocol.ProcessInitialContext<never>>()
       const snapshots = yield* Ref.make<ReadonlyArray<number>>([])
       const parent = yield* MachineRuntime.startProcess({
         initial: (scope) => Deferred.succeed(parentScope, scope).pipe(Effect.as(undefined)),
@@ -1097,7 +1097,7 @@ describe("machine process lifecycle", () => {
 
   it.effect("isolates active child state updates from snapshot callback defects", () =>
     Effect.gen(function*() {
-      const parentScope = yield* Deferred.make<MachineRuntimeProtocol.ProcessScope<never>>()
+      const parentScope = yield* Deferred.make<MachineRuntimeProtocol.ProcessInitialContext<never>>()
       const parent = yield* MachineRuntime.startProcess({
         initial: (scope) => Deferred.succeed(parentScope, scope).pipe(Effect.as(undefined)),
         run: () => Effect.never

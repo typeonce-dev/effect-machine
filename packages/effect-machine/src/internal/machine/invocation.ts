@@ -65,7 +65,7 @@ const streamLogic = (
   }
 }
 
-const makeChildOwner = (scope: Runtime.ProcessScope<any>): ChildOwner<any> => ({
+const makeChildOwner = (scope: Runtime.ProcessInitialContext<any>): ChildOwner<any> => ({
   spawn: <const Child extends ChildMachine.Any>(
     child: Child & ChildMachine.Executable<Child> & ChildMachine.ParentCompatibility<Child, any>,
     ...options: ChildMachine.SpawnArgs<Child>
@@ -82,7 +82,7 @@ const runSequentialDiscard = <E, R>(
     : Effect.all(effects, { discard: true })
 
 const sendLifecycle = (
-  scope: Runtime.ProcessScope<any>,
+  scope: Runtime.ProcessInitialContext<any>,
   event: InvocationEvent.InvocationEvent,
   invocationSessionId?: string
 ): Effect.Effect<void> =>
@@ -109,12 +109,12 @@ const isProgram = (invocation: InvocationResolution.ResolvedInvocation): invocat
 }
 
 const traced = (
-  scope: Runtime.ProcessScope<any>,
+  scope: Runtime.ProcessInitialContext<any>,
   invocation: ProgramInvocation,
   logic: AnyProcessLogic
 ): AnyProcessLogic => ({
   ...logic,
-  run: (context: Runtime.ProcessContext<any, any>) =>
+  run: (context: Runtime.ProcessRunContext<any, any>) =>
     Effect.withSpan(
       Effect.suspend(() => logic.run(context)),
       "Machine.invoke",
@@ -136,7 +136,7 @@ const traced = (
 // Source construction keeps its startup failure boundary. Only the hosted
 // program is wrapped; child statecharts retain their execution descriptors.
 const programLogic = (
-  scope: Runtime.ProcessScope<any>,
+  scope: Runtime.ProcessInitialContext<any>,
   invocation: ProgramInvocation,
   generation: InvocationEvent.Generation
 ): AnyProcessLogic => {
@@ -168,7 +168,7 @@ const childId = (invocation: InvocationResolution.ResolvedInvocation): string =>
 // A running invocation retains this closure context, so every closure below
 // shares it and captures only the scope, the description, and the generation.
 const spawn = (
-  scope: Runtime.ProcessScope<any>,
+  scope: Runtime.ProcessInitialContext<any>,
   ownedChildren: Runtime.OwnedChildRuntime,
   invocation: InvocationResolution.ResolvedInvocation,
   generation: InvocationEvent.Generation
@@ -224,7 +224,7 @@ const spawn = (
 // Keep caller-chosen ids out of the namespace reserved for runtime-owned
 // invocation ids; runtime-owned ids skip this check.
 const start = (
-  scope: Runtime.ProcessScope<any>,
+  scope: Runtime.ProcessInitialContext<any>,
   ownedChildren: Runtime.OwnedChildRuntime,
   invocation: InvocationResolution.ResolvedInvocation,
   generation: InvocationEvent.Generation
@@ -241,7 +241,7 @@ const start = (
  */
 export const startAll = (
   machine: Machine.Any,
-  scope: Runtime.ProcessScope<any>,
+  scope: Runtime.ProcessInitialContext<any>,
   ownedChildren: Runtime.OwnedChildRuntime,
   configuration: Configuration.ActiveConfiguration,
   paths: ReadonlyArray<string>,

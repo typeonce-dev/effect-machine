@@ -8,14 +8,14 @@ import * as Effect from "effect/Effect"
 import type { Machine, MachineSchemaDecodeError, StoppedError } from "../../Machine.js"
 import type { RuntimeCommand } from "./command.js"
 import { decodeEmit } from "./protocol.js"
-import type { ProcessScope } from "./runtimeProtocol.js"
+import type { ProcessInitialContext } from "./runtimeProtocol.js"
 
 /** Publishes emissions planned by a machine to its process observers. */
 export interface LiveRuntime {
   readonly emit: (event: unknown) => Effect.Effect<void, MachineSchemaDecodeError | StoppedError>
 }
 
-export const makeLiveRuntime = <Events>(machine: Machine.Any, scope: ProcessScope<Events>): LiveRuntime => ({
+export const makeLiveRuntime = <Events>(machine: Machine.Any, scope: ProcessInitialContext<Events>): LiveRuntime => ({
   emit: (event) =>
     decodeEmit(machine, event).pipe(
       Effect.flatMap((event) => scope.emit(event))
@@ -24,7 +24,7 @@ export const makeLiveRuntime = <Events>(machine: Machine.Any, scope: ProcessScop
 
 export const runCommands = <Event>(
   commands: Iterable<RuntimeCommand>,
-  scope: ProcessScope<Event>
+  scope: ProcessInitialContext<Event>
 ) =>
   Effect.forEach(commands, (command) =>
     command._tag === "SendTo"

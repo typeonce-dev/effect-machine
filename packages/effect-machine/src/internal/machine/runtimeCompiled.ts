@@ -46,12 +46,12 @@ import {
   offerCompactMailbox,
   type OwnedChildRuntime,
   pollCompactMailbox,
-  type ProcessAddress,
-  type ProcessContext,
+  type ProcessEndpoint,
+  type ProcessInitialContext,
   type ProcessLogic,
   type ProcessMessage,
+  type ProcessRunContext,
   type ProcessRuntime,
-  type ProcessScope,
   publishInspectedSent,
   type RuntimeSnapshot,
   sendMachineTarget,
@@ -110,10 +110,10 @@ class CompiledProcess implements MachineRef<any, any, any, any> {
     index: 0,
     closed: false
   }
-  private readonly address: ProcessAddress<unknown>
+  private readonly address: ProcessEndpoint<unknown>
   private childRuntime: ChildRuntime = childlessRuntime
-  private processScope!: ProcessScope<unknown>
-  private processContext: ProcessContext<unknown, unknown> | undefined
+  private processScope!: ProcessInitialContext<unknown>
+  private processContext: ProcessRunContext<unknown, unknown> | undefined
   private compiledContext: CompiledProcessContext<unknown, unknown> | undefined
   private current!: VersionedSnapshot<unknown, unknown, unknown>
   /**
@@ -1192,7 +1192,7 @@ class CompiledProcessContextImpl implements CompiledProcessContext<unknown, unkn
   executionState: unknown
 
   constructor(
-    readonly scope: ProcessScope<unknown>,
+    readonly scope: ProcessInitialContext<unknown>,
     readonly ownedChildren: OwnedChildRuntime,
     private readonly process: CompiledProcess
   ) {}
