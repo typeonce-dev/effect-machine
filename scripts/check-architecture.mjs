@@ -296,6 +296,9 @@ export const checkArchitecture = ({
       "src/internal/machine/clusterProtocol.ts",
       "src/internal/machine/clusterStorageCheck.ts"
     ])],
+    ["src/unstable/cluster/ClusterMachineProxy.ts", new Set([
+      "src/internal/machine/clusterProxy.ts"
+    ])],
     ["src/unstable/cluster/SqlMachineStorage.ts", new Set([
       "src/internal/machine/clusterSqlStorage.ts",
       "src/internal/machine/clusterProtocol.ts"
