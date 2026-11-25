@@ -116,6 +116,27 @@ const makeKeepAlive = Effect.gen(function*() {
       : Effect.provideContext(Entity.keepAlive(enabled), context)
 })
 
+/** Internal metadata captured for a `ClusterMachine` adapter, used by sibling internal bridges. */
+export interface AdapterMeta {
+  readonly type: string
+  readonly machine: Machine.Machine.Any
+  readonly definitionId: string
+  readonly version: string
+  readonly readInterval: Duration.Input
+  readonly decodeEvent: (event: unknown) => Effect.Effect<unknown, Rejected>
+}
+
+const adapterMeta = new WeakMap<object, AdapterMeta>()
+
+/** Reads the internal metadata of a `ClusterMachine` created by {@link make}. */
+export const getAdapterMeta = (adapter: object): AdapterMeta => {
+  const meta = adapterMeta.get(adapter)
+  if (meta === undefined) {
+    throw new Error("Expected a ClusterMachine created by ClusterMachine.make")
+  }
+  return meta
+}
+
 export const make = <
   const Type extends string,
   States extends Machine.Machine.StateSchemas,
@@ -364,5 +385,14 @@ const build = (
     }
   })
 
-  return { machine, entity, protocol, client, target, toLayer }
+  const built: Built = { machine, entity, protocol, client, target, toLayer }
+  adapterMeta.set(built, {
+    type,
+    machine,
+    definitionId,
+    version: options.version,
+    readInterval: options.readInterval ?? "1 second",
+    decodeEvent: (event) => decodeInputEvent(machine, publicTags, event)
+  })
+  return built
 }

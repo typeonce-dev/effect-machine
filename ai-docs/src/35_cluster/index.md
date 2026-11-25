@@ -147,3 +147,40 @@ checkpoint, the events it sends, and the reply commit in one transaction. Its
 To write a store of your own, run `ClusterMachine.checkStorage` against it in
 your tests, with the `withTransaction` of its `MessageStorage`. It fails with
 the first part of the contract the store breaks.
+
+### Run in a Web Worker or over RPC
+
+`ClusterMachine` and `SqlMachineStorage` have no Node.js dependencies, so a
+single-node Cluster can run inside a Web Worker or `SharedWorker` with
+`SingleRunner.layer` and a browser SQL client such as `@effect/sql-sqlite-wasm`
+or `@effect/sql-pglite`.
+
+When the runner and its database live in another thread or process, callers do
+not have direct access to `Sharding` or `ClusterMachine.Storage`.
+`ClusterMachineProxy` from `@typeonce/effect-machine/cluster` exposes `send`,
+`snapshot`, `changes`, and `join` over any `effect/rpc` transport (Web Workers,
+`SharedWorker`, Node worker threads, WebSockets, or HTTP):
+
+```ts
+// Inside the Web Worker: serve one machine over RpcServer.Protocol
+const WorkerLive = ClusterMachineProxy.toLayer(Invoice).pipe(
+  Layer.provide(Invoice.toLayer()),
+  Layer.provide(ClusterLive),
+  Layer.provide(RpcServer.layerProtocolWorkerRunner)
+)
+
+// On the main thread: zero Sharding, zero Storage, zero SQL
+const program = Effect.gen(function*() {
+  const client = (yield* ClusterMachineProxy.client(Invoice))("invoice-1")
+  yield* client.send(Events.Send({ invoiceId: "inv-1" }))
+  const latest = yield* client.snapshot
+  const receipt = yield* client.join
+})
+```
+
+To host several machines on one worker or server, merge their groups with
+`ClusterMachineProxy.toRpcGroup(A).merge(ClusterMachineProxy.toRpcGroup(B))` and
+provide each with `ClusterMachineProxy.layerHandlers`. When using
+`RpcClient.layerProtocolWorker` with `size: 1`, set `concurrency` above `1` (for
+example `{ size: 1, concurrency: 100 }`) so streaming `changes` or `join` calls
+do not block concurrent `send` calls.

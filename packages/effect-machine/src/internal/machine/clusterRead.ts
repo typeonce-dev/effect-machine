@@ -35,6 +35,18 @@ export interface Reader<M extends Machine.Machine.Any> {
   >
 }
 
+/** Validated wire representation of a committed checkpoint, ready for RPC transport. */
+export type WireSnapshot =
+  | { readonly status: "active"; readonly revision: number; readonly snapshot: unknown }
+  | { readonly status: "done"; readonly revision: number; readonly snapshot: unknown }
+  | { readonly status: "failed"; readonly revision: number; readonly snapshot: unknown; readonly failure: string }
+  | { readonly status: "stopped"; readonly revision: number; readonly snapshot: unknown }
+
+export interface EncodedReader<M extends Machine.Machine.Any> {
+  readonly snapshot: Effect.Effect<Option.Option<WireSnapshot>, ReadError | PersistenceError, Services<M>>
+  readonly changes: Stream.Stream<WireSnapshot, ReadError | PersistenceError, Services<M>>
+}
+
 export interface Options {
   readonly machine: Machine.Machine.Any
   readonly definitionId: string
@@ -44,6 +56,68 @@ export interface Options {
 }
 
 const invalid = (message: string) => new ReadError({ reason: "InvalidCheckpoint", message })
+
+const toWire = (snapshot: Snapshot<Machine.Machine.Any>, encoded: unknown): WireSnapshot => {
+  switch (snapshot.status) {
+    case "active":
+      return { status: "active", revision: snapshot.revision, snapshot: encoded }
+    case "done":
+      return { status: "done", revision: snapshot.revision, snapshot: encoded }
+    case "failed":
+      return { status: "failed", revision: snapshot.revision, snapshot: encoded, failure: snapshot.failure }
+    case "stopped":
+      return { status: "stopped", revision: snapshot.revision, snapshot: encoded }
+  }
+}
+
+/** Decodes a validated wire snapshot back into a typed `ClusterMachine.Snapshot`. */
+export const decodeWire = <M extends Machine.Machine.Any>(
+  machine: M,
+  wire: WireSnapshot
+): Effect.Effect<
+  Snapshot<M>,
+  ReadError,
+  Machine.Machine.SnapshotDecodingServices<Machine.Machine.States<M>>
+> =>
+  Effect.gen(function*() {
+    const state = yield* internalMachine.decodeSnapshot(machine, wire.snapshot).pipe(
+      Effect.mapError((error) => invalid(String(error.cause)))
+    )
+    if (wire.status === "failed") {
+      return { status: "failed", revision: wire.revision, state, failure: wire.failure }
+    }
+    if (wire.status === "stopped") {
+      return { status: "stopped", revision: wire.revision, state }
+    }
+    if (wire.status === "active") {
+      return { status: "active", revision: wire.revision, state }
+    }
+    if (!internalMachine.isFinal(machine, state)) {
+      return yield* invalid("Expected a final state for a done snapshot")
+    }
+    const output = yield* Planner.getFinalOutputEffect(machine, state, Planner.InitialEvent).pipe(
+      Effect.mapError((error) => invalid(String(error.cause)))
+    )
+    return { status: "done", revision: wire.revision, state, output }
+  })
+
+/** Waits for the terminal snapshot of a change stream and returns its output or failure. */
+export const joinChanges = <M extends Machine.Machine.Any, E, R>(
+  changes: Stream.Stream<Snapshot<M>, E, R>
+): Effect.Effect<Machine.Machine.Output<M>, MachineFailedError | E, R> =>
+  changes.pipe(
+    Stream.filter((read) => read.status !== "active"),
+    Stream.runHead,
+    Effect.flatMap((read) =>
+      Option.isNone(read)
+        ? Effect.die(new Error("A reader of a Cluster machine ended without a terminal checkpoint"))
+        : read.value.status === "failed"
+        ? Effect.fail(new MachineFailedError({ failure: read.value.failure }))
+        : read.value.status === "stopped"
+        ? Effect.fail(new MachineFailedError({ failure: "The child machine was stopped by its parent" }))
+        : Effect.succeed(read.value.output)
+    )
+  )
 
 // Validates a checkpoint as an entity does when it loads one, so that a reader
 // refuses what the entity would refuse.
@@ -82,6 +156,35 @@ const decode = Effect.fnUntraced(function*(
   return { status: "done", revision, state, output }
 })
 
+const pollChanges = <A extends { readonly revision: number; readonly status: string }, E, R>(
+  snapshot: Effect.Effect<Option.Option<A>, E, R>,
+  interval: Duration.Input
+): Stream.Stream<A, E, R> =>
+  Stream.fromEffectSchedule(
+    snapshot,
+    Schedule.spaced(Duration.fromInputUnsafe(interval))
+  ).pipe(
+    Stream.filter(Option.isSome),
+    Stream.map((read) => read.value),
+    Stream.changesWith((left, right) => left.revision === right.revision),
+    Stream.takeUntil((read) => read.status !== "active")
+  )
+
+export const makeEncoded = <M extends Machine.Machine.Any>(options: Options): EncodedReader<M> => {
+  const snapshot = Effect.gen(function*() {
+    const storage = yield* Storage
+    return yield* storage.load(options.address)
+  }).pipe(
+    Effect.flatMap(Option.match({
+      onNone: () => Effect.succeedNone,
+      onSome: (checkpoint) =>
+        Effect.map(decode(options, checkpoint), (decoded) => Option.some(toWire(decoded, checkpoint.snapshot)))
+    }))
+  ) as EncodedReader<M>["snapshot"]
+
+  return { snapshot, changes: pollChanges(snapshot, options.interval) }
+}
+
 export const make = <M extends Machine.Machine.Any>(options: Options): Reader<M> => {
   const snapshot = Effect.gen(function*() {
     const storage = yield* Storage
@@ -96,29 +199,9 @@ export const make = <M extends Machine.Machine.Any>(options: Options): Reader<M>
   // Reads again after each interval and emits every revision it has not seen,
   // ending after a terminal one. Reading again is also how a reader follows an
   // entity that is passivated or moves: there is no subscription to lose.
-  const changes: Reader<M>["changes"] = Stream.fromEffectSchedule(
-    snapshot,
-    Schedule.spaced(Duration.fromInputUnsafe(options.interval))
-  ).pipe(
-    Stream.filter(Option.isSome),
-    Stream.map((read) => read.value),
-    Stream.changesWith((left, right) => left.revision === right.revision),
-    Stream.takeUntil((read) => read.status !== "active")
-  )
+  const changes: Reader<M>["changes"] = pollChanges(snapshot, options.interval)
 
-  const join: Reader<M>["join"] = changes.pipe(
-    Stream.filter((read) => read.status !== "active"),
-    Stream.runHead,
-    Effect.flatMap((read) =>
-      Option.isNone(read)
-        ? Effect.die(new Error("A reader of a Cluster machine ended without a terminal checkpoint"))
-        : read.value.status === "failed"
-        ? Effect.fail(new MachineFailedError({ failure: read.value.failure }))
-        : read.value.status === "stopped"
-        ? Effect.fail(new MachineFailedError({ failure: "The child machine was stopped by its parent" }))
-        : Effect.succeed(read.value.output)
-    )
-  )
+  const join: Reader<M>["join"] = joinChanges(changes)
 
   return { snapshot, changes, join }
 }
