@@ -184,7 +184,7 @@ describe("ClusterMachine", () => {
       ClusterMachine.Storage | MessageStorage.MessageStorage | Sharding.Sharding | PlanningService
     >()
   })
-  it("captures non-void machine input", () => {
+  it("supports per-entity and default non-void machine input, and checks JSON-encoded input schemas", () => {
     const inputStates = Machine.state({ fields: { input: Input }, states: { Count } })
     const inputMachine = Machine.make({
       id: "InputCounter",
@@ -200,12 +200,42 @@ describe("ClusterMachine", () => {
       root: ({ input }) => ({ input }),
       states: { Count: {} }
     })
-    expect(ClusterMachine.make).type.not.toBeCallableWith("InputCounterEntity", inputMachine, { version: "1" })
+    expect(ClusterMachine.make).type.toBeCallableWith("InputCounterEntity", inputMachine, { version: "1" })
     expect(ClusterMachine.make).type.toBeCallableWith(
       "InputCounterEntity",
       inputMachine,
       { version: "1" },
       new Input({ value: 1 })
+    )
+    expect(ClusterMachine.make).type.not.toBeCallableWith(
+      "InputCounterEntity",
+      inputMachine,
+      { version: "1" },
+      "not-an-input"
+    )
+    const inputAdapter = ClusterMachine.make("InputCounterEntity", inputMachine, { version: "1" })
+    const inputClient = null! as Effect.Success<typeof inputAdapter.client> extends (id: string) => infer C ? C : never
+    expect(inputClient.start).type.toBeCallableWith(new Input({ value: 1 }))
+    expect(inputClient.start).type.not.toBeCallableWith()
+    expect(inputClient.start).type.not.toBeCallableWith("not-an-input")
+
+    const noInputClient = null! as Effect.Success<typeof bridge.client> extends (id: string) => infer C ? C : never
+    expect(noInputClient.start).type.toBeCallableWith()
+    expect(noInputClient.start).type.not.toBeCallableWith(1)
+
+    const resourceInputMachine = Machine.make({
+      id: "ResourceInputCounter",
+      root: states,
+      events: Machine.eventsFromSchemas(Reset),
+      input: LocalResource
+    }).handle({
+      initial: { target: "Count", decoded: true, data: new Count({ value: 0 }) },
+      states: { Count: {} }
+    })
+    expect(ClusterMachine.make).type.not.toBeCallableWith(
+      "ResourceInputEntity",
+      resourceInputMachine,
+      { version: "1" }
     )
   })
   it("uses encoded Machine snapshots in checkpoints", () => {

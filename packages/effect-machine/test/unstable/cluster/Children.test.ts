@@ -47,6 +47,8 @@ const Counter = Machine.child("counter", counter)
 // The same machine, invoked by a state that takes its snapshots.
 const Watched = Machine.child("watched", counter)
 
+const LocalAddress = Machine.childAddress("local-child")
+
 const host = Machine.make({
   id: "Host",
   root: Machine.state({
@@ -67,6 +69,8 @@ const host = Machine.make({
     Finish: {},
     Break: {},
     Cancel: {},
+    StopChild: {},
+    StopAddress: {},
     Doom: {},
     Watch: {},
     Glance: {},
@@ -102,11 +106,18 @@ const host = Machine.make({
         Add: { stay: true, commands: ({ event }, enqueue) => enqueue.sendTo(Counter, { _tag: "Add", by: event.by }) },
         Finish: { stay: true, commands: (_, enqueue) => enqueue.sendTo(Counter, { _tag: "Finish" }) },
         Break: { stay: true, commands: (_, enqueue) => enqueue.sendTo(Counter, { _tag: "Break" }) },
+        StopChild: { stay: true, commands: (_, enqueue) => enqueue.stop(Counter) },
+        StopAddress: { stay: true, commands: (_, enqueue) => enqueue.stop(LocalAddress) },
         Counted: { update: { Hosting: ({ event }) => ({ counted: event.count }) } },
         Cancel: { target: "Idle" }
       }
     },
-    Ready: { on: { Add: { stay: true, commands: ({ event }, enqueue) => enqueue.sendTo(Counter, event) } } },
+    Ready: {
+      on: {
+        Add: { stay: true, commands: ({ event }, enqueue) => enqueue.sendTo(Counter, event) },
+        StopChild: { stay: true, commands: (_, enqueue) => enqueue.stop(Counter) }
+      }
+    },
     Watching: {
       invoke: {
         src: "watched",
@@ -331,5 +342,54 @@ describe("ClusterMachine child machines", () => {
       assert.deepStrictEqual(checkpointOf(storage, childType, "worker-1/counter/1")?.status, { _tag: "Stopped" })
       // The parent stays, as a local one does when its work stops its child.
       assert.deepStrictEqual(leafOf(storage), { path: "Driving" })
+    }).pipe(Effect.scoped))
+
+  it.effect("stop an invoked child with enqueue.stop, settle its progress, and ignore when not running", () =>
+    Effect.gen(function*() {
+      const { messages, runner, storage } = yield* start
+      yield* runner.send({ _tag: "Host", name: "ada" })
+      yield* runner.send({ _tag: "Add", by: 3 })
+      yield* settle
+      assert.deepStrictEqual(leafOf(storage, childType, "worker-1/counter/1")?.value, { _tag: "Counting", count: 3 })
+
+      // Stopping the child via enqueue.stop stays in Hosting, stops the child
+      // once, and marks its invocation progress as Settled so it will not restart.
+      const stopResult = yield* runner.send({ _tag: "StopChild" })
+      assert.strictEqual(stopResult._tag, "Accepted")
+      yield* settle
+      assert.deepStrictEqual(leafOf(storage)?.value, { _tag: "Hosting", counted: 3 })
+      assert.deepStrictEqual(progressOf(storage), { Hosting: { counter: { _tag: "Settled" } } })
+      assert.deepStrictEqual(checkpointOf(storage, childType, "worker-1/counter/1")?.status, { _tag: "Stopped" })
+      const stopEnvelopes = messages.driver.journal.filter((envelope) =>
+        envelope._tag === "Request" && envelope.tag === "stop"
+      )
+      assert.strictEqual(stopEnvelopes.length, 1)
+
+      // Subsequent sends and stops for the settled child are dropped without restarting it.
+      assert.strictEqual((yield* runner.send({ _tag: "Add", by: 4 }))._tag, "Accepted")
+      assert.strictEqual((yield* runner.send({ _tag: "StopChild" }))._tag, "Accepted")
+      yield* settle
+      assert.deepStrictEqual(childrenOf(storage), ["worker-1/counter/1"])
+      assert.deepStrictEqual(leafOf(storage, childType, "worker-1/counter/1")?.value, { _tag: "Counting", count: 3 })
+
+      // Exiting and re-entering Hosting starts a fresh child entity.
+      yield* runner.send({ _tag: "Cancel" })
+      yield* runner.send({ _tag: "Host", name: "grace" })
+      yield* settle
+      assert.strictEqual(childrenOf(storage).length, 2)
+    }).pipe(Effect.scoped))
+
+  it.effect("reject enqueue.stop with a local child address as UnsupportedProcessLocal", () =>
+    Effect.gen(function*() {
+      const { runner, storage } = yield* start
+      yield* runner.send({ _tag: "Host", name: "ada" })
+      yield* settle
+      const commitsBefore = storage.commits
+      const rejected = yield* runner.send({ _tag: "StopAddress" })
+      assert.strictEqual(rejected._tag, "Rejected")
+      if (rejected._tag === "Rejected") {
+        assert.strictEqual(rejected.reason, "UnsupportedProcessLocal")
+      }
+      assert.strictEqual(storage.commits, commitsBefore)
     }).pipe(Effect.scoped))
 })

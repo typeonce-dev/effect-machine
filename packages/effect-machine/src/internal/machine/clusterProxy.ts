@@ -76,6 +76,16 @@ export const toRpcGroup = <
   if (cached !== undefined) return cached
   const meta = Cluster.getAdapterMeta(adapter)
   const eventSchema = Schema.Union(Protocol.inputEventSchemas(meta.machine))
+  const startRpc = Rpc.make(`${meta.type}.start`, {
+    payload: meta.machine.input === undefined
+      ? Schema.Struct({ entityId: Schema.String })
+      : Schema.Struct({
+        entityId: Schema.String,
+        input: meta.machine.input
+      }),
+    success: Schema.Void,
+    error: SendErrorSchema
+  })
   const sendRpc = Rpc.make(`${meta.type}.send`, {
     payload: Schema.Struct({
       entityId: Schema.String,
@@ -95,7 +105,7 @@ export const toRpcGroup = <
     error: ReadErrorSchema,
     stream: true
   })
-  const group = RpcGroup.make(sendRpc, snapshotRpc, changesRpc)
+  const group = RpcGroup.make(startRpc, sendRpc, snapshotRpc, changesRpc)
   rpcGroups.set(adapter, group)
   return group as never
 }
@@ -135,6 +145,10 @@ export const layerHandlers = <
       }
 
       return {
+        [`${meta.type}.start`]: (payload: { readonly entityId: string; readonly input?: unknown }) =>
+          meta.machine.input === undefined
+            ? (makeClient(payload.entityId).start as () => Effect.Effect<void, any>)()
+            : (makeClient(payload.entityId).start as (input: unknown) => Effect.Effect<void, any>)(payload.input),
         [`${meta.type}.send`]: ({ entityId, event }: { readonly entityId: string; readonly event: never }) =>
           makeClient(entityId).send(event),
         [`${meta.type}.snapshot`]: ({ entityId }: { readonly entityId: string }) =>
@@ -180,11 +194,19 @@ export const client = <
     const meta = Cluster.getAdapterMeta(adapter)
     const group = toRpcGroup(adapter)
     const rpc = (yield* RpcClient.make(group)) as Record<string, (payload: any) => any>
+    const startTag = `${meta.type}.start`
     const sendTag = `${meta.type}.send`
     const snapshotTag = `${meta.type}.snapshot`
     const changesTag = `${meta.type}.changes`
 
     return (entityId: string): Public.Client<M> => {
+      const start = (...args: ReadonlyArray<unknown>) =>
+        meta.decodeInput(args[0]).pipe(
+          Effect.flatMap((decoded) =>
+            rpc[startTag]!(meta.machine.input === undefined ? { entityId } : { entityId, input: decoded })
+          )
+        )
+
       const send = (event: unknown) =>
         meta.decodeEvent(event).pipe(
           Effect.flatMap((decoded) => rpc[sendTag]!({ entityId, event: decoded }))
@@ -206,6 +228,6 @@ export const client = <
 
       const join = ClusterRead.joinChanges<M, any, any>(changes)
 
-      return { entityId, send, snapshot, changes, join } as Public.Client<M>
+      return { entityId, start, send, snapshot, changes, join } as Public.Client<M>
     }
   })

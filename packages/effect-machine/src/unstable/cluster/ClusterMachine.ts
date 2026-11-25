@@ -706,8 +706,9 @@ export type ClientError =
  * The types check the event against the input events of the target, but not
  * that the target was made by this module: a step on Cluster that sends to a
  * local reference is rejected as `UnsupportedProcessLocal`, and so is
- * `enqueue.stop`. A target made here is not a local reference either, so a local
- * machine cannot send to it.
+ * `enqueue.stop` with a local child address (whereas `enqueue.stop` with the
+ * descriptor of an invoked child stops that child). A target made here is not a
+ * local reference either, so a local machine cannot send to it.
  *
  * The runner that stores the step reads the request at once. A target owned by
  * another runner reads it at its next poll of `MessageStorage`, after up to
@@ -771,6 +772,15 @@ export interface Target<in Event> extends Machine.MachineTarget<Event> {
 export interface Client<M extends Machine.Machine.Any> {
   /** Entity id of the machine this client addresses. */
   readonly entityId: string
+
+  /**
+   * Starts the entity with its initial input, committing its initial state when
+   * it has no checkpoint yet. Succeeds as a no-op if the entity is already
+   * active, and rejects with `MachineFailed` if it failed or was stopped.
+   */
+  readonly start: (
+    ...input: [...Machine.Machine.InputArgs<Machine.Machine.InputSchema<M>>]
+  ) => Effect.Effect<void, Rejected | ClientError>
 
   /** Sends one input event and waits until it is committed or rejected. */
   readonly send: (
@@ -928,15 +938,22 @@ type NonJsonInputEvent<Events extends ReadonlyArray<Machine.Machine.TaggedSchema
     : never
 }[number]
 
+type NonJsonInput<Input extends Schema.Top> = Input extends typeof Schema.Void ? never
+  : IsJsonEncoded<Input> extends true ? never
+  : Input["Encoded"]
+
 type EnsureJsonEncoded<
   States extends Machine.Machine.StateSchemas,
-  InputEvents extends ReadonlyArray<Machine.Machine.TaggedSchema>
-> = [NonJsonState<States> | NonJsonOutput<States> | NonJsonInputEvent<InputEvents>] extends [never] ? unknown
+  InputEvents extends ReadonlyArray<Machine.Machine.TaggedSchema>,
+  Input extends Schema.Top
+> = [NonJsonState<States> | NonJsonOutput<States> | NonJsonInputEvent<InputEvents> | NonJsonInput<Input>] extends
+  [never] ? unknown
   : {
     readonly "~effect/cluster/ClusterMachine/NonJsonEncoded": {
       readonly states: NonJsonState<States>
       readonly outputs: NonJsonOutput<States>
       readonly inputEvents: NonJsonInputEvent<InputEvents>
+      readonly input: NonJsonInput<Input>
     }
   }
 
@@ -1051,7 +1068,13 @@ export { StorageCheckFailure }
  *
  * **Details**
  *
- * A missing checkpoint runs initial planning before the first event. Existing
+ * A missing checkpoint runs initial planning before the first event. An entity
+ * may also be started explicitly via `client.start(...input)`. For a machine
+ * that declares `input`, you may either omit the default input from
+ * `ClusterMachine.make` and pass per-entity input to `client.start(input)`
+ * (sending an event before start rejects as `InvalidEvent`), or pass a default
+ * input to `ClusterMachine.make` so `client.send` can auto-start while
+ * `client.start(input)` still starts an entity with a custom input. Existing
  * checkpoints are checked for their definition id and version, decoded, and
  * resumed without rerunning initial entry behavior. Final checkpoints accept
  * later requests as no-ops. The definition id is `machine.id` when present,
@@ -1176,7 +1199,10 @@ export { StorageCheckFailure }
  * its checkpoint, and the step that exits it saves its stop, so a child runs
  * exactly while its state is stored. `enqueue.sendTo` with the descriptor of a
  * child sends to the child that runs once the step is stored, and drops the
- * event when none does. The child's `parent` is the target of its parent. A
+ * event when none does. `enqueue.stop` with the descriptor of a child stops the
+ * running child in the same transaction, settles its invocation progress so it
+ * does not restart while the state stays active, and ignores a child that does
+ * not run. The child's `parent` is the target of its parent. A
  * child that ends tells its parent, which reads its output or its failure from
  * `Storage` and applies it as the end of the invocation. A failure of a child
  * fails its parent, also when the parent declares `onFailure`, because the
@@ -1195,10 +1221,11 @@ export { StorageCheckFailure }
  * process compile and fail at run time:
  *
  * - A step whose plan sends to a target that is neither a {@link Target} nor
- *   the descriptor of an invoked child, or stops a child with `enqueue.stop`. It
- *   rejects the request as `UnsupportedProcessLocal`, or fails the machine when
- *   the step applies an outcome. Planning-time raised events remain part of the
- *   current macrostep.
+ *   the descriptor of an invoked child, or stops a child address rather than
+ *   the descriptor of an invoked child with `enqueue.stop`. It rejects the
+ *   request as `UnsupportedProcessLocal`, or fails the machine when the step
+ *   applies an outcome. Planning-time raised events remain part of the current
+ *   macrostep.
  * - Work that uses an operation of `children` from the context of its input
  *   mapper. It fails the machine.
  * - A machine whose requirements are `any`, such as an erased one. When any of its
@@ -1396,7 +1423,7 @@ export const make: <
     >
     & EnsureExecutable<States, UnhandledStates, OutputStates>
     & Machine.Machine.RootCompatible<ParentEvents>
-    & EnsureJsonEncoded<States, InputEvents>
+    & EnsureJsonEncoded<States, InputEvents, Input>
     & EnsureSupported<R>,
   options: {
     readonly version: string
@@ -1406,7 +1433,7 @@ export const make: <
      */
     readonly readInterval?: Duration.Input | undefined
   },
-  ...input: [...Machine.Machine.InputArgs<Input>]
+  ...input: readonly [] | [...Machine.Machine.InputArgs<Input>]
 ) => ClusterMachine<
   Type,
   Machine.Machine<
