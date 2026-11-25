@@ -156,5 +156,79 @@ for (const dialect of dialects) {
         ),
         Effect.orDie
       ))
+
+    it.effect("commits or rolls back onCommit SQL projections atomically with the checkpoint", () =>
+      Effect.gen(function*() {
+        const failing = { next: false }
+        const adapter = ClusterMachine.make("SqlCounter", counter, { version: "1" })
+        const layer = adapter.toLayer({
+          enqueue: () => Effect.void,
+          onCommit: ({ checkpoint, entityId, snapshot }) =>
+            Effect.gen(function*() {
+              const sql = yield* SqlClient.SqlClient
+              const total = snapshot.state.state.value.total
+              yield* sql`
+                INSERT INTO projections (entity_id, revision, total)
+                VALUES (${entityId}, ${checkpoint.revision}, ${total})
+              `
+              if (failing.next) return yield* Effect.fail("projection failed")
+            })
+        }).pipe(
+          Layer.provideMerge(Sharding.layer),
+          Layer.provide(Runners.layerNoop),
+          Layer.provideMerge(SqlMessageStorage.layer),
+          Layer.provideMerge(SqlMachineStorage.layer),
+          Layer.provide(RunnerStorage.layerMemory),
+          Layer.provide(RunnerHealth.layerNoop),
+          Layer.provide(config()),
+          Layer.provide(Digest.layerWebCrypto)
+        )
+
+        yield* Effect.gen(function*() {
+          const sql = yield* SqlClient.SqlClient
+          yield* TestClock.adjust(1)
+          const client = (yield* adapter.client)("counter-proj")
+          const storage = yield* ClusterMachine.Storage
+
+          yield* client.send(Events.Add({ amount: 4 }))
+          assert.strictEqual(Option.getOrThrow(yield* storage.load(address("counter-proj"))).revision, 1)
+          const rows1 = yield* sql<{ readonly entity_id: string; readonly revision: number; readonly total: number }>`
+            SELECT entity_id, revision, total FROM projections ORDER BY revision
+          `
+          assert.deepStrictEqual(rows1, [{ entity_id: "counter-proj", revision: 1, total: 4 }])
+
+          // Failing onCommit rolls back both the checkpoint write and the projection insert.
+          failing.next = true
+          const failed = yield* Effect.flip(client.send(Events.Add({ amount: 10 })))
+          assert.strictEqual(failed._tag, "Rejected")
+          if (failed._tag === "Rejected") assert.strictEqual(failed.reason, "PersistenceFailure")
+          assert.strictEqual(Option.getOrThrow(yield* storage.load(address("counter-proj"))).revision, 1)
+          const rowsAfterFail = yield* sql`SELECT entity_id, revision, total FROM projections ORDER BY revision`
+          assert.strictEqual(rowsAfterFail.length, 1)
+
+          // Next attempt succeeds and commits both together.
+          failing.next = false
+          yield* client.send(Events.Add({ amount: 6 }))
+          assert.strictEqual(Option.getOrThrow(yield* storage.load(address("counter-proj"))).revision, 2)
+          const rows2 = yield* sql<{ readonly entity_id: string; readonly revision: number; readonly total: number }>`
+            SELECT entity_id, revision, total FROM projections ORDER BY revision
+          `
+          assert.deepStrictEqual(rows2, [
+            { entity_id: "counter-proj", revision: 1, total: 4 },
+            { entity_id: "counter-proj", revision: 2, total: 10 }
+          ])
+        }).pipe(Effect.provide(layer))
+      }).pipe(
+        Effect.provide(
+          Layer.effectDiscard(
+            Effect.flatMap(
+              SqlClient.SqlClient,
+              (sql) =>
+                sql`CREATE TABLE projections (entity_id TEXT NOT NULL, revision INTEGER NOT NULL, total INTEGER NOT NULL)`
+            )
+          ).pipe(Layer.provideMerge(dialect.client()))
+        ),
+        Effect.orDie
+      ))
   })
 }

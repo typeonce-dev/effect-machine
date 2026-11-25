@@ -10,10 +10,16 @@ import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import { Rpc } from "effect/rpc"
+import type * as Schedule from "effect/Schedule"
 import * as Schema from "effect/Schema"
 import type * as Machine from "../../Machine.js"
-import type { Checkpoint } from "../../unstable/cluster/ClusterMachine.js"
-import type { Client, ClientError, ClusterMachine } from "../../unstable/cluster/ClusterMachine.js"
+import type {
+  Checkpoint,
+  Client,
+  ClientError,
+  ClusterMachine,
+  LayerOptions
+} from "../../unstable/cluster/ClusterMachine.js"
 import * as ClusterChild from "./clusterChild.js"
 import * as ClusterInstance from "./clusterInstance.js"
 import { CommitResult, Rejected, SendResult, Storage } from "./clusterProtocol.js"
@@ -189,6 +195,7 @@ export const make = <
   options: {
     readonly version: string
     readonly readInterval?: Duration.Input | undefined
+    readonly shardGroup?: ((entityId: EntityId.EntityId) => string) | undefined
   },
   ...input: readonly [] | [...Machine.Machine.InputArgs<Input>]
 ): ClusterMachine<
@@ -229,6 +236,62 @@ interface Parent {
   readonly snapshots: boolean
 }
 
+/** Entity layer tuning options forwarded to `Entity.toLayer`. */
+interface EntityLayerOptions {
+  readonly maxIdleTime?: Duration.Input | undefined
+  readonly concurrency?: number | "unbounded" | undefined
+  readonly mailboxCapacity?: number | "unbounded" | undefined
+  readonly mailboxMetrics?: boolean | undefined
+  readonly disableFatalDefects?: boolean | undefined
+  readonly defectRetryPolicy?: Schedule.Schedule<any, unknown> | undefined
+  readonly spanAttributes?: Record<string, string> | undefined
+}
+
+const pickEntityLayerOptions = (
+  options: LayerOptions<any, any, any> | undefined
+): EntityLayerOptions | undefined => {
+  if (options === undefined) return undefined
+  const out: {
+    maxIdleTime?: Duration.Input
+    concurrency?: number | "unbounded"
+    mailboxCapacity?: number | "unbounded"
+    mailboxMetrics?: boolean
+    disableFatalDefects?: boolean
+    defectRetryPolicy?: Schedule.Schedule<any, unknown>
+    spanAttributes?: Record<string, string>
+  } = {}
+  let hasAny = false
+  if (options.maxIdleTime !== undefined) {
+    out.maxIdleTime = options.maxIdleTime
+    hasAny = true
+  }
+  if (options.concurrency !== undefined) {
+    out.concurrency = options.concurrency
+    hasAny = true
+  }
+  if (options.mailboxCapacity !== undefined) {
+    out.mailboxCapacity = options.mailboxCapacity
+    hasAny = true
+  }
+  if (options.mailboxMetrics !== undefined) {
+    out.mailboxMetrics = options.mailboxMetrics
+    hasAny = true
+  }
+  if (options.disableFatalDefects !== undefined) {
+    out.disableFatalDefects = options.disableFatalDefects
+    hasAny = true
+  }
+  if (options.defectRetryPolicy !== undefined) {
+    out.defectRetryPolicy = options.defectRetryPolicy
+    hasAny = true
+  }
+  if (options.spanAttributes !== undefined) {
+    out.spanAttributes = options.spanAttributes
+    hasAny = true
+  }
+  return hasAny ? out : undefined
+}
+
 /** An adapter, and the adapters of the child machines that its states invoke. */
 interface Built {
   readonly machine: Machine.Machine.Any
@@ -236,9 +299,7 @@ interface Built {
   readonly protocol: ClusterTarget.Protocol
   readonly client: Effect.Effect<(entityId: string) => Client<any>, never, Sharding.Sharding>
   readonly target: (entityId: string) => ClusterTarget.Target
-  readonly toLayer: (layerOptions?: {
-    readonly enqueue?: (event: any) => Effect.Effect<void, unknown, any>
-  }) => Layer.Layer<never, never, any>
+  readonly toLayer: (layerOptions?: LayerOptions<any, any, any>) => Layer.Layer<never, never, any>
 }
 
 const build = (
@@ -247,6 +308,7 @@ const build = (
   options: {
     readonly version: string
     readonly readInterval?: Duration.Input | undefined
+    readonly shardGroup?: ((entityId: EntityId.EntityId) => string) | undefined
   },
   input: ReadonlyArray<unknown>,
   parent: Parent | undefined
@@ -262,7 +324,7 @@ const build = (
   // `deliver` carries an event another machine sends, `wake` is the delayed
   // message of a long timer, `start` and `stop` come from the parent of a
   // child, and `ended` and `snapshot` from a child. Only machines send them.
-  const entity = Entity.make(type, [
+  const rawEntity = Entity.make(type, [
     rpc,
     deliver,
     ClusterWake.WakeRpc,
@@ -271,6 +333,9 @@ const build = (
     ClusterChild.EndedRpc,
     ClusterChild.SnapshotRpc
   ])
+  const entity = options.shardGroup === undefined
+    ? rawEntity
+    : rawEntity.annotate(ClusterSchema.ShardGroup, options.shardGroup)
   const definitionId = machine.id ?? type
   const publicTags: ReadonlySet<PropertyKey> = new Set(Reflect.ownKeys(machine.events))
 
@@ -308,25 +373,39 @@ const build = (
   }
   const target = (entityId: string): ClusterTarget.Target => new ClusterTarget.Target(protocol, entityId)
 
-  // Each child runs as an entity of its own, with the version of its parent.
+  // Each child runs as an entity of its own, with the version and shard group of its parent.
   const snapshots = ClusterChild.snapshotsOf(toImpl(machine).handlers)
   const children = Array.from(
     ClusterChild.childrenOf(toImpl(machine).handlers),
-    ([childId, child]) =>
-      [
+    ([childId, child]) => {
+      const childShardGroup = options.shardGroup === undefined
+        ? undefined
+        : (childEntityId: EntityId.EntityId) => {
+          const parentId = ClusterChild.parentEntityIdOf(childEntityId, childId)
+          return options.shardGroup!(parentId === undefined ? childEntityId : EntityId.make(parentId))
+        }
+      return [
         childId,
-        build(ClusterChild.entityTypeOf(type, childId), child.machine, { version: options.version }, [], {
-          protocol,
-          childId,
-          snapshots: snapshots.has(childId)
-        })
+        build(
+          ClusterChild.entityTypeOf(type, childId),
+          child.machine,
+          { version: options.version, shardGroup: childShardGroup },
+          [],
+          {
+            protocol,
+            childId,
+            snapshots: snapshots.has(childId)
+          }
+        )
       ] as const
+    }
   )
   const childProtocols: ReadonlyMap<string, ClusterTarget.Protocol> = new Map(
     children.map(([childId, child]) => [childId, child.protocol])
   )
 
   const toLayer: Built["toLayer"] = (layerOptions) => {
+    const entityLayerOptions = pickEntityLayerOptions(layerOptions)
     // Each live entity builds its own handlers, and so owns its own instance.
     const layer = entity.toLayer(
       Effect.gen(function*() {
@@ -345,6 +424,7 @@ const build = (
           messageStorage,
           // A child has no observers, so what it emits reaches nobody.
           enqueue: parent === undefined ? layerOptions?.enqueue : () => Effect.void,
+          onCommit: parent === undefined ? layerOptions?.onCommit : undefined,
           keepAlive: yield* makeKeepAlive,
           wake: {
             threshold: yield* ClusterWake.threshold,
@@ -382,11 +462,12 @@ const build = (
             })
         }
         return entity.of(handlers as never)
-      })
+      }),
+      entityLayerOptions
     )
     return children.length === 0
       ? layer
-      : Layer.mergeAll(layer, ...children.map(([, child]) => child.toLayer()))
+      : Layer.mergeAll(layer, ...children.map(([, child]) => child.toLayer(entityLayerOptions)))
   }
 
   const client = Effect.gen(function*() {

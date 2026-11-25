@@ -40,7 +40,19 @@ const InvoiceLive = Invoice.toLayer().pipe(
 
 `version` is stored with every checkpoint. A checkpoint written by another
 definition id or version is refused, so change it together with a migration of
-the stored checkpoints.
+the stored checkpoints. Pass `shardGroup` to `ClusterMachine.make` to route
+entities (and their invoked child entities) to named Cluster shard groups.
+
+`adapter.toLayer(options)` forwards standard Effect Cluster `Entity.toLayer`
+options (`maxIdleTime`, `concurrency`, `mailboxCapacity`, `mailboxMetrics`,
+`disableFatalDefects`, `defectRetryPolicy`, `spanAttributes`) to the entity and
+its children. It also accepts transactional hooks that run inside the same
+`MessageStorage` transaction as the checkpoint write:
+
+- `enqueue(event)` durably writes emitted events to an outbox table.
+- `onCommit({ entityId, checkpoint, snapshot })` runs after every committed
+  checkpoint (active, done, failed), so SQL read-model projections or audit
+  tables commit or roll back atomically with the machine state.
 
 State values, completion outputs, startup input, and public input events must
 have JSON encoded forms. A schema that does not is a compile error that names

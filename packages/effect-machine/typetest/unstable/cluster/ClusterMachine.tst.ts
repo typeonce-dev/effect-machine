@@ -1,5 +1,5 @@
-import { Context, Effect, type Layer, type Option, Schema, SchemaGetter, type Stream } from "effect"
-import type { ClusterError, MessageStorage, Sharding, Snowflake } from "effect/cluster"
+import { Context, Effect, type Layer, type Option, Schedule, Schema, SchemaGetter, type Stream } from "effect"
+import type { ClusterError, EntityId, MessageStorage, Sharding, Snowflake } from "effect/cluster"
 import type { Rpc, RpcGroup } from "effect/rpc"
 import { describe, expect, it } from "tstyche"
 import { Machine } from "../../../src/index.js"
@@ -482,5 +482,34 @@ describe("ClusterMachine", () => {
     expect(order((enqueue) => enqueue.sendTo(target, { _tag: "Remove", amount: 1 }))).type.toRaiseError()
     expect(order((enqueue) => enqueue.sendTo(target, { _tag: "Add", amount: "1" }))).type.toRaiseError()
     expect(order((enqueue) => enqueue.stop(target))).type.toRaiseError()
+  })
+
+  it("supports shardGroup, Entity.toLayer tuning options, and transactional onCommit with typed services", () => {
+    const sharded = ClusterMachine.make("ShardedCounter", machine, {
+      version: "1",
+      shardGroup: (entityId: EntityId.EntityId) => entityId.startsWith("eu:") ? "eu" : "us"
+    })
+    expect(sharded).type.toBeAssignableTo<ClusterMachine.ClusterMachine<"ShardedCounter", typeof machine>>()
+
+    const layer = sharded.toLayer({
+      enqueue: () => Effect.asVoid(PlanningService),
+      onCommit: (event) => {
+        expect(event).type.toBe<ClusterMachine.CommitEvent<typeof machine>>()
+        expect(event.entityId).type.toBe<string>()
+        expect(event.checkpoint).type.toBe<ClusterMachine.Checkpoint>()
+        expect(event.snapshot).type.toBe<ClusterMachine.Snapshot<typeof machine>>()
+        return Effect.flatMap(ActionService, (service) => service.run)
+      },
+      maxIdleTime: "30 seconds",
+      concurrency: 1,
+      mailboxCapacity: 64,
+      mailboxMetrics: true,
+      disableFatalDefects: false,
+      defectRetryPolicy: Schedule.spaced("1 second"),
+      spanAttributes: { region: "eu" }
+    })
+    expect<Layer.Services<typeof layer>>().type.toBe<
+      ClusterMachine.Storage | MessageStorage.MessageStorage | Sharding.Sharding | PlanningService | ActionService
+    >()
   })
 })

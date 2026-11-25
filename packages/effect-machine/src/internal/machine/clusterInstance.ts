@@ -17,7 +17,7 @@ import * as Schedule from "effect/Schedule"
 import type * as Scope from "effect/Scope"
 import * as Semaphore from "effect/Semaphore"
 import type * as Machine from "../../Machine.js"
-import type { Checkpoint } from "../../unstable/cluster/ClusterMachine.js"
+import type { Checkpoint, CommitEvent, Snapshot as ClusterSnapshot } from "../../unstable/cluster/ClusterMachine.js"
 import { ChildMachineRuntime } from "./capability.js"
 import * as CapturedInvocation from "./capturedInvocation.js"
 import { isChildMachine } from "./child.js"
@@ -175,6 +175,7 @@ export interface Options<R> {
   readonly storage: Storage["Service"]
   readonly messageStorage: MessageStorage.MessageStorage["Service"]
   readonly enqueue: ((event: any) => Effect.Effect<void, unknown, R>) | undefined
+  readonly onCommit?: ((event: CommitEvent<any>) => Effect.Effect<void, unknown, R>) | undefined
   /** `Entity.keepAlive` for the entity of the instance. */
   readonly keepAlive: (enabled: boolean) => Effect.Effect<void>
   /**
@@ -398,7 +399,7 @@ const accepted = new Accepted({})
 /** @internal */
 export const make = <R>(options: Options<R>): Effect.Effect<ClusterInstance<R>, never, R | Scope.Scope> =>
   Effect.gen(function*() {
-    const { address, definitionId, enqueue, machine, messageStorage, storage, version } = options
+    const { address, definitionId, enqueue, machine, messageStorage, onCommit, storage, version } = options
     // Work acts on the children that run when it acts, read from memory or,
     // while a turn changes memory, from `Storage`.
     const childRuntime: ChildMachineRuntime["Service"] = {
@@ -782,6 +783,31 @@ export const make = <R>(options: Options<R>): Effect.Effect<ClusterInstance<R>, 
         : [{ target: parent, tag: "snapshot", payload: { entityId: address.entityId, snapshot } }]
     }
 
+    const snapshotForCommit = Effect.fnUntraced(function*(
+      checkpoint: Checkpoint,
+      state: Snapshot
+    ): Effect.fn.Return<ClusterSnapshot<any>, unknown, R> {
+      if (checkpoint.status._tag === "Failed") {
+        return { status: "failed", revision: checkpoint.revision, state, failure: checkpoint.status.failure }
+      }
+      if (checkpoint.status._tag === "Stopped") {
+        return { status: "stopped", revision: checkpoint.revision, state }
+      }
+      if (!internalMachine.isFinal(machine, state)) {
+        return { status: "active", revision: checkpoint.revision, state }
+      }
+      const output = yield* Planner.getFinalOutputEffect(machine, state, Planner.InitialEvent)
+      return { status: "done", revision: checkpoint.revision, state, output }
+    })
+
+    const notifyCommit = (checkpoint: Checkpoint, state: Snapshot): Effect.Effect<void, unknown, R> =>
+      onCommit === undefined
+        ? Effect.void
+        : Effect.flatMap(
+          snapshotForCommit(checkpoint, state),
+          (snapshot) => onCommit({ entityId: address.entityId, checkpoint, snapshot })
+        )
+
     const saveOutgoing = (outgoing: ReadonlyArray<Outgoing>): Effect.Effect<void, unknown> =>
       Effect.forEach(
         outgoing,
@@ -970,6 +996,11 @@ export const make = <R>(options: Options<R>): Effect.Effect<ClusterInstance<R>, 
             Effect.mapError((error) => reject("PersistenceFailure", String(error))),
             refuse({ memory: undefined, confirm: false, stage: "Infrastructure" })
           )
+          // In the transaction of the checkpoint, so projections commit or roll back with it.
+          yield* notifyCommit(checkpoint, planned.state).pipe(
+            Effect.mapError((error) => reject("PersistenceFailure", String(error))),
+            refuse({ memory: undefined, confirm: false, stage: "Infrastructure" })
+          )
           return {
             memory: next,
             stored: {
@@ -994,14 +1025,15 @@ export const make = <R>(options: Options<R>): Effect.Effect<ClusterInstance<R>, 
         refuse({ memory: base, confirm: true, stage: "Decision" })
       )
       const revision = base.revision + 1
-      const committed = yield* storage.commit(address, {
+      const checkpoint: Checkpoint = {
         definitionId,
         version,
         revision,
         origin: { _tag: "Request", requestId },
         snapshot,
         status: { _tag: "Stopped" }
-      }).pipe(
+      }
+      const committed = yield* storage.commit(address, checkpoint).pipe(
         Effect.mapError(persistenceFailure),
         refuse({ memory: undefined, confirm: true, stage: "Infrastructure" })
       )
@@ -1009,6 +1041,10 @@ export const make = <R>(options: Options<R>): Effect.Effect<ClusterInstance<R>, 
       if (committed._tag === "RevisionConflict") return yield* new Conflicted()
       const stops = stopsOf(base.progress, ClusterProgress.empty, undefined)
       yield* saveOutgoing(stops).pipe(
+        Effect.mapError((error) => reject("PersistenceFailure", String(error))),
+        refuse({ memory: undefined, confirm: false, stage: "Infrastructure" })
+      )
+      yield* notifyCommit(checkpoint, base.state).pipe(
         Effect.mapError((error) => reject("PersistenceFailure", String(error))),
         refuse({ memory: undefined, confirm: false, stage: "Infrastructure" })
       )
@@ -1188,14 +1224,14 @@ export const make = <R>(options: Options<R>): Effect.Effect<ClusterInstance<R>, 
 
     // Makes the work and the keep-alive match the known memory. `stored` is the
     // step that led to it from the previous state.
-    const align = (restore: Restore, stored: StoredStep | undefined): Effect.Effect<void> =>
+    const align = (restore: Restore, stored: StoredStep | undefined): Effect.Effect<void, never, R> =>
       Effect.andThen(
         // The runner reads the events the step sent now, rather than at its next poll.
         stored?.sent === true && options.sends !== undefined ? options.sends.poll : Effect.void,
         alignStored(restore, stored)
       )
 
-    const alignStored = (restore: Restore, stored: StoredStep | undefined): Effect.Effect<void> =>
+    const alignStored = (restore: Restore, stored: StoredStep | undefined): Effect.Effect<void, never, R> =>
       Effect.suspend(() => {
         if (!hostsWork || work.closed || memory === undefined) return Effect.void
         if (stored !== undefined) recordWakes(stored.woken)
@@ -1255,7 +1291,7 @@ export const make = <R>(options: Options<R>): Effect.Effect<ClusterInstance<R>, 
     const scheduleLoaded = (
       restore: Restore,
       loaded: Memory
-    ): Effect.Effect<ReadonlyArray<ClusterTimer.Unscheduled>> =>
+    ): Effect.Effect<ReadonlyArray<ClusterTimer.Unscheduled>, never, R> =>
       Effect.suspend(() => {
         if (
           loaded._tag !== "Active" || work.revision === loaded.revision ||
@@ -1319,7 +1355,7 @@ export const make = <R>(options: Options<R>): Effect.Effect<ClusterInstance<R>, 
       amended: Pick<Checkpoint, "origin" | "status">,
       woken: ReadonlyArray<Timer> = [],
       outgoing: ReadonlyArray<Outgoing> = []
-    ): Effect.Effect<number, unknown> =>
+    ): Effect.Effect<number, unknown, R> =>
       Effect.suspend(() => {
         const revision = memory?.revision
         memory = undefined
@@ -1335,6 +1371,10 @@ export const make = <R>(options: Options<R>): Effect.Effect<ClusterInstance<R>, 
           }
           yield* saveWakes(woken)
           yield* saveOutgoing(outgoing)
+          if (onCommit !== undefined) {
+            const decodedState: Snapshot = yield* internalMachine.decodeSnapshot(machine, checkpoint.snapshot)
+            yield* notifyCommit(checkpoint, decodedState)
+          }
           return checkpoint.revision
         })))
       })
@@ -1345,7 +1385,7 @@ export const make = <R>(options: Options<R>): Effect.Effect<ClusterInstance<R>, 
       restore: Restore,
       cause: Checkpoint.InvocationKey | { readonly requestId: Snowflake },
       failure: string
-    ): Effect.Effect<boolean> =>
+    ): Effect.Effect<boolean, never, R> =>
       // A machine that fails stops its children, and a child tells its parent.
       amend(
         restore,
@@ -1582,16 +1622,20 @@ export const make = <R>(options: Options<R>): Effect.Effect<ClusterInstance<R>, 
           const initial = yield* Effect.option(internalMachine.planInitial(planned, ...options.input))
           if (Option.isNone(initial)) return false
           const snapshot = yield* internalMachine.encodeSnapshot(machine, initial.value.state)
-          const committed = yield* storage.commit(address, {
+          const checkpoint: Checkpoint = {
             definitionId,
             version,
             revision: 1,
             origin: { _tag: "Request", requestId },
             snapshot,
             status: { _tag: "Failed", failure }
-          })
+          }
+          const committed = yield* storage.commit(address, checkpoint)
           if (committed._tag === "RevisionConflict") return yield* new Conflicted()
           yield* saveOutgoing(endedFor(true))
+          if (committed._tag === "Committed") {
+            yield* notifyCommit(checkpoint, initial.value.state)
+          }
           return true
         }))).pipe(
           Effect.matchCauseEffect({

@@ -8,12 +8,13 @@
  *
  * @since 0.4.0
  */
-import type { ClusterError, Entity, MessageStorage, Sharding, Snowflake } from "effect/cluster"
+import type { ClusterError, Entity, EntityId, MessageStorage, Sharding, Snowflake } from "effect/cluster"
 import type * as Duration from "effect/Duration"
 import type * as Effect from "effect/Effect"
 import type * as Layer from "effect/Layer"
 import type * as Option from "effect/Option"
 import type { Rpc } from "effect/rpc"
+import type * as Schedule from "effect/Schedule"
 import type * as Schema from "effect/Schema"
 import type * as Stream from "effect/Stream"
 import * as internal from "../../internal/machine/cluster.js"
@@ -519,6 +520,77 @@ type MachineEvents<M extends Machine.Machine.Any> = Machine.Machine.InputEvents<
 type MachineEmits<M extends Machine.Machine.Any> = Machine.Machine.EmittedEvents<M>
 
 /**
+ * Committed checkpoint passed to {@link LayerOptions.onCommit} inside the same
+ * `MessageStorage` transaction as the checkpoint write.
+ *
+ * @category models
+ * @since 0.49.0
+ */
+export interface CommitEvent<M extends Machine.Machine.Any> {
+  /** Entity id of the machine whose checkpoint was committed. */
+  readonly entityId: string
+
+  /** Stored checkpoint that was just committed. */
+  readonly checkpoint: Checkpoint
+
+  /** Decoded snapshot matching the committed checkpoint. */
+  readonly snapshot: Snapshot<M>
+}
+
+/**
+ * Options for {@link ClusterMachine.toLayer}, combining transactional commit
+ * hooks with standard Effect Cluster `Entity.toLayer` tuning options.
+ *
+ * @category models
+ * @since 0.49.0
+ */
+export interface LayerOptions<M extends Machine.Machine.Any, RE = never, RC = never> {
+  /**
+   * Durably enqueues emitted events inside the checkpoint's `MessageStorage`
+   * transaction.
+   */
+  readonly enqueue?: (
+    event: Machine.Machine.EmittedEventOf<MachineEmits<M>>
+  ) => Effect.Effect<void, unknown, RE>
+
+  /**
+   * Runs inside the checkpoint's `MessageStorage` transaction right after a
+   * checkpoint is committed, for projections, read models, or audit tables that
+   * must commit or roll back atomically with the machine state.
+   */
+  readonly onCommit?: (
+    event: CommitEvent<M>
+  ) => Effect.Effect<void, unknown, RC>
+
+  /** Overrides `ShardingConfig.entityMaxIdleTime` for this entity (and its children). */
+  readonly maxIdleTime?: Duration.Input | undefined
+
+  /** Concurrency forwarded to `Entity.toLayer` for this entity (and its children). */
+  readonly concurrency?: number | "unbounded" | undefined
+
+  /** Overrides `ShardingConfig.entityMailboxCapacity` for this entity (and its children). */
+  readonly mailboxCapacity?: number | "unbounded" | undefined
+
+  /** Enables Cluster mailbox metrics for this entity (and its children). */
+  readonly mailboxMetrics?: boolean | undefined
+
+  /**
+   * When `true`, a handler defect fails only its request instead of restarting
+   * the entity and replaying its in-flight requests.
+   */
+  readonly disableFatalDefects?: boolean | undefined
+
+  /**
+   * Schedule for restarting an entity after a defect and for retrying failed
+   * handler construction.
+   */
+  readonly defectRetryPolicy?: Schedule.Schedule<any, unknown> | undefined
+
+  /** Tracing span attributes attached to entity requests. */
+  readonly spanAttributes?: Record<string, string> | undefined
+}
+
+/**
  * Cluster adapter for one machine definition and entity type.
  *
  * **Details**
@@ -645,24 +717,26 @@ export interface ClusterMachine<
    *
    * **Gotchas**
    *
-   * `enqueue` runs after the checkpoint write in the same `MessageStorage`
-   * transaction. It must durably enqueue emitted events in that transaction;
+   * `enqueue` and `onCommit` run after the checkpoint write in the same
+   * `MessageStorage` transaction. Use them only for work that joins that
+   * transaction (such as durable outbox writes or SQL read-model projections);
    * arbitrary external effects are not atomic with the checkpoint. The reply
    * is persisted after commit and recovered through request-id deduplication if
    * delivery is interrupted. Machines that never emit may omit `enqueue`.
    *
-   * An `enqueue` that fails rejects the request that emitted. An event emitted
-   * by the outcome of an invoked effect or timer has no request to reject, so
-   * that step is retried until it is stored. Without `enqueue`, it fails the
-   * machine.
+   * An `enqueue` failure rejects the request as `EmissionFailure`; an
+   * `onCommit` failure rejects it as `PersistenceFailure` and rolls back the
+   * transaction. For steps triggered by an invoked effect or timer, both are
+   * retried until stored. Entity tuning options (`maxIdleTime`, `concurrency`,
+   * `mailboxCapacity`, `mailboxMetrics`, `disableFatalDefects`,
+   * `defectRetryPolicy`, `spanAttributes`) are forwarded to `Entity.toLayer`
+   * for this entity and its child entities.
    *
    * @since 0.4.0
    */
-  readonly toLayer: <R = never>(options?: {
-    readonly enqueue?: (
-      event: Machine.Machine.EmittedEventOf<MachineEmits<M>>
-    ) => Effect.Effect<void, unknown, R>
-  }) => Layer.Layer<never, never, Storage | MessageStorage.MessageStorage | Sharding.Sharding | R | Services>
+  readonly toLayer: <RE = never, RC = never>(
+    options?: LayerOptions<M, RE, RC>
+  ) => Layer.Layer<never, never, Storage | MessageStorage.MessageStorage | Sharding.Sharding | RE | RC | Services>
 }
 
 /**
@@ -1432,6 +1506,11 @@ export const make: <
      * Defaults to one second.
      */
     readonly readInterval?: Duration.Input | undefined
+    /**
+     * Selects the Cluster shard group for each entity id (and for any child
+     * entities invoked by that parent). Defaults to Cluster's `"default"` group.
+     */
+    readonly shardGroup?: ((entityId: EntityId.EntityId) => string) | undefined
   },
   ...input: readonly [] | [...Machine.Machine.InputArgs<Input>]
 ) => ClusterMachine<
