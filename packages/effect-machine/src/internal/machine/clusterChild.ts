@@ -19,6 +19,7 @@ import { Rpc } from "effect/rpc"
 import * as Schema from "effect/Schema"
 import type { ChildMachine } from "../../Machine.js"
 import * as CapturedInvocation from "./capturedInvocation.js"
+import { SendResult } from "./clusterProtocol.js"
 
 /** @internal */
 export const entityTypeOf = (parentType: string, childId: string): string => `${parentType}/${childId}`
@@ -77,12 +78,18 @@ export const snapshotsOf = (
 }
 
 /**
- * Starts a child with its input. A child that has started already ignores it.
+ * Starts a machine entity with its input. An entity that is already active
+ * accepts it as a no-op; a failed or stopped entity rejects it.
  *
  * @internal
  */
-export const makeStartRpc = <Input extends Schema.Top>(input: Input) =>
-  Rpc.make("start", { payload: { input } }).annotate(ClusterSchema.Persisted, true)
+export const makeStartRpc = (input: Schema.Top | undefined) =>
+  Rpc.make("start", {
+    payload: input === undefined
+      ? { input: Schema.optionalKey(Schema.Undefined) }
+      : { input },
+    success: SendResult
+  }).annotate(ClusterSchema.Persisted, true)
 
 /**
  * Stops a child, which then rejects every later request.

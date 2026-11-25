@@ -71,6 +71,14 @@ describe("ClusterMachineProxy", () => {
 
     const client = null! as ClusterMachineProxy.Client<typeof counter>
 
+    expect(client.start()).type.toBe<
+      Effect.Effect<
+        void,
+        ClusterMachine.Rejected | ClusterMachine.ClientError | RpcClientError.RpcClientError
+      >
+    >()
+    expect(client.start).type.not.toBeCallableWith(1)
+
     expect(client.send(Events.Add({ by: 1 }))).type.toBe<
       Effect.Effect<
         void,
@@ -103,5 +111,28 @@ describe("ClusterMachineProxy", () => {
         | RpcClientError.RpcClientError
       >
     >()
+  })
+
+  it("types per-entity start input on proxy clients", () => {
+    const inputMachine = Machine.make({
+      id: "ProxyInput",
+      root: Machine.state({ states: { Open: { fields: { count: Schema.Number } } } }),
+      input: Schema.Number,
+      events: Events
+    }).handle({
+      initial: { target: "Open", data: ({ input }) => ({ count: input }) },
+      states: { Open: {} }
+    })
+    const InputAdapter = ClusterMachine.make("ProxyInput", inputMachine, { version: "1" })
+    const makeClient = ClusterMachineProxy.client(InputAdapter)
+    const client = null! as Effect.Success<typeof makeClient> extends (id: string) => infer C ? C : never
+    expect(client.start(42)).type.toBe<
+      Effect.Effect<
+        void,
+        ClusterMachine.Rejected | ClusterMachine.ClientError | RpcClientError.RpcClientError
+      >
+    >()
+    expect(client.start).type.not.toBeCallableWith()
+    expect(client.start).type.not.toBeCallableWith("42")
   })
 })

@@ -69,6 +69,7 @@ const UnsupportedChildMachine = Machine.make({
   }
 })
 const UnsupportedChild = Machine.child("unsupported", UnsupportedChildMachine)
+const UnsupportedChildAddress = Machine.childAddress("unsupported")
 const makeCounter = (state: {
   readonly gate: Latch.Latch
   initialEntries: number
@@ -127,7 +128,7 @@ const makeCounter = (state: {
           SpawnFromAction: {
             branches: [{ target: "Count" }],
             resolve: ({ state: current, select }, enqueue) => {
-              enqueue.stop(UnsupportedChild)
+              enqueue.stop(UnsupportedChildAddress)
               return select.target("Count", { data: current, decoded: true })
             }
           }
@@ -1129,7 +1130,7 @@ describe("ClusterMachine", () => {
               Work: {
                 branches: [{ target: "Fresh" }],
                 resolve: ({ select }, enqueue) => {
-                  enqueue.stop(UnsupportedChild)
+                  enqueue.stop(UnsupportedChildAddress)
                   return select.target("Fresh")
                 }
               }
@@ -1818,7 +1819,7 @@ describe("ClusterMachine", () => {
         throw: /^Error: cannot leave$/,
         schema: /MachineSchemaDecodeError/,
         encode: /^SnapshotEncodeFailure: /,
-        command: /^UnsupportedProcessLocal: Machine commands require a managed local process$/,
+        command: /^UnsupportedProcessLocal: Machine commands on Cluster stop only an invoked child machine$/,
         emission: /^EmissionFailure: No durable enqueue handler was configured$/
       }
       for (const [to, failure] of Object.entries(outcomes)) {
@@ -1852,7 +1853,7 @@ describe("ClusterMachine", () => {
                           case "encode":
                             return select.target("Sealed", { data: new Sealed({ value: "sealed" }), decoded: true })
                           case "command":
-                            enqueue.stop(UnsupportedChild)
+                            enqueue.stop(UnsupportedChildAddress)
                             return select.target("Idle")
                           default:
                             enqueue.emit(new Changed({ value: 1 }))

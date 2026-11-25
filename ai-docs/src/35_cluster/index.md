@@ -42,9 +42,9 @@ const InvoiceLive = Invoice.toLayer().pipe(
 definition id or version is refused, so change it together with a migration of
 the stored checkpoints.
 
-State values, completion outputs, and public input events must have JSON
-encoded forms. A schema that does not is a compile error that names the
-offending states and events.
+State values, completion outputs, startup input, and public input events must
+have JSON encoded forms. A schema that does not is a compile error that names
+the offending states, events, or input.
 
 ### What runs, and how often
 
@@ -91,8 +91,10 @@ the failure is stored as text.
 `adapter.target(id)` names another Cluster machine. `enqueue.sendTo` with a
 target or with the descriptor of an invoked child saves the event with the
 checkpoint of the step, so it is sent if and only if the step is stored, and
-applied once. Work sends with `Machine.sendTo` and stops a child with
-`Machine.stopChild`, given the child's descriptor.
+applied once. `enqueue.stop` with the descriptor of an invoked child stops the
+running child in the same transaction and settles its progress so it does not
+restart while its state stays active. Work sends with `Machine.sendTo` and stops
+a child with `Machine.stopChild`, given the child's descriptor.
 
 ### What is refused, and why
 
@@ -121,6 +123,15 @@ const program = Effect.gen(function*() {
   const receipt = yield* client.join // waits for the output, or fails with MachineFailedError
 })
 ```
+
+`start` initializes an entity with its per-entity startup input (or commits the
+initial state of a machine without input without needing an event). It is an
+idempotent no-op when the entity is already active, and rejects as
+`MachineFailed` if the entity failed or was stopped. A machine that declares
+`input` can omit a static default input in `ClusterMachine.make` so each entity
+is started with `client.start(input)` (sending an event before start rejects as
+`InvalidEvent`), or pass a default input so `send` can auto-start while
+`client.start(customInput)` still starts with per-entity input.
 
 `send` decodes the event as a local reference does and waits until the step is
 committed. An event the machine refuses fails with `Rejected` and its reason.
@@ -157,9 +168,9 @@ or `@effect/sql-pglite`.
 
 When the runner and its database live in another thread or process, callers do
 not have direct access to `Sharding` or `ClusterMachine.Storage`.
-`ClusterMachineProxy` from `@typeonce/effect-machine/cluster` exposes `send`,
-`snapshot`, `changes`, and `join` over any `effect/rpc` transport (Web Workers,
-`SharedWorker`, Node worker threads, WebSockets, or HTTP):
+`ClusterMachineProxy` from `@typeonce/effect-machine/cluster` exposes `start`,
+`send`, `snapshot`, `changes`, and `join` over any `effect/rpc` transport (Web
+Workers, `SharedWorker`, Node worker threads, WebSockets, or HTTP):
 
 ```ts
 // Inside the Web Worker: serve one machine over RpcServer.Protocol

@@ -525,4 +525,78 @@ describe("ClusterMachineProxy", () => {
         assert.strictEqual(receipt.total, 15)
       }))
     }).pipe(Effect.scoped))
+
+  it.live("starts per-entity input machines over Web Worker MessagePort RPC and validates input locally", () =>
+    Effect.gen(function*() {
+      class AccountInput extends Schema.Class<AccountInput>("AccountInput")({
+        owner: Schema.NonEmptyString,
+        opening: Schema.Number
+      }) {}
+      const AccountEvents = Machine.events({ Deposit: { amount: Schema.Number } })
+      const accountMachine = Machine.make({
+        id: "ProxyAccount",
+        root: Machine.state({
+          fields: { owner: Schema.String },
+          states: { Open: { fields: { balance: Schema.Number } } }
+        }),
+        input: AccountInput,
+        events: AccountEvents
+      }).handle({
+        root: ({ input }) => ({ owner: input.owner }),
+        initial: { target: "Open", data: ({ input }) => ({ balance: input.opening }) },
+        states: {
+          Open: {
+            on: { Deposit: { update: { Open: ({ event, state }) => ({ balance: state.balance + event.amount }) } } }
+          }
+        }
+      })
+      const Account = ClusterMachine.make("ProxyAccount", accountMachine, { version: "1", readInterval: "50 millis" })
+
+      const { clientLayer, serverLayer } = makeMessagePortPair()
+      const sqlLayer = SqliteClient.layer({ filename: ":memory:" })
+      const clusterLayer = Sharding.layer.pipe(
+        Layer.provideMerge(Runners.layerNoop),
+        Layer.provideMerge(SqlMessageStorage.layer),
+        Layer.provideMerge(SqlMachineStorage.layer),
+        Layer.provide(RunnerStorage.layerMemory),
+        Layer.provide(RunnerHealth.layerNoop),
+        Layer.provide(shardingConfig),
+        Layer.provide(Digest.layerWebCrypto),
+        Layer.provide(sqlLayer)
+      )
+      const workerLayer = ClusterMachineProxy.toLayer(Account).pipe(
+        Layer.provide(Account.toLayer()),
+        Layer.provide(clusterLayer),
+        Layer.provide(serverLayer)
+      )
+      yield* runWorkerInFiber(workerLayer)
+      const clientContext = yield* Layer.build(clientLayer)
+      const makeAccount = yield* ClusterMachineProxy.client(Account).pipe(Effect.provide(clientContext))
+
+      const a = makeAccount("acct-1")
+      const b = makeAccount("acct-2")
+
+      // Send before start is rejected.
+      const before = yield* Effect.flip(a.send(AccountEvents.Deposit({ amount: 5 })))
+      assert.strictEqual(before._tag, "Rejected")
+      if (before._tag === "Rejected") assert.strictEqual(before.reason, "InvalidEvent")
+
+      // Invalid input is rejected locally before crossing the worker boundary.
+      const bad = yield* Effect.flip(a.start({ owner: "", opening: 0 }))
+      assert.strictEqual(bad._tag, "Rejected")
+      if (bad._tag === "Rejected") assert.strictEqual(bad.reason, "InvalidEvent")
+
+      yield* a.start(new AccountInput({ owner: "ada", opening: 100 }))
+      yield* b.start(new AccountInput({ owner: "grace", opening: 250 }))
+      yield* a.send(AccountEvents.Deposit({ amount: 25 }))
+      // Duplicate start is a no-op.
+      yield* b.start(new AccountInput({ owner: "ignored", opening: 0 }))
+
+      const snapA = Option.getOrThrow(yield* a.snapshot)
+      const snapB = Option.getOrThrow(yield* b.snapshot)
+      assert.deepStrictEqual(snapA.state.value, { _tag: "", owner: "ada" })
+      assert.deepStrictEqual(snapA.state.state, { path: "Open", value: { _tag: "Open", balance: 125 } })
+      assert.deepStrictEqual(snapB.state.value, { _tag: "", owner: "grace" })
+      assert.deepStrictEqual(snapB.state.state, { path: "Open", value: { _tag: "Open", balance: 250 } })
+    }).pipe(Effect.scoped))
 })

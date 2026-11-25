@@ -6,8 +6,8 @@
  * directly. When the Cluster runner and its SQL database live in another thread
  * or process — such as a browser Web Worker running `SingleRunner` over
  * SQLite-WASM — callers on the main thread have neither `Sharding` nor
- * `Storage`. `ClusterMachineProxy` bridges `send`, `snapshot`, `changes`, and
- * `join` over any `RpcServer.Protocol` / `RpcClient.Protocol`.
+ * `Storage`. `ClusterMachineProxy` bridges `start`, `send`, `snapshot`,
+ * `changes`, and `join` over any `RpcServer.Protocol` / `RpcClient.Protocol`.
  *
  * **Example** (Serving and calling a Cluster machine over RPC)
  *
@@ -34,7 +34,7 @@
  *
  * const rpcs = ClusterMachineProxy.toRpcGroup(Counter)
  *
- * rpcs.requests.size // => 3
+ * rpcs.requests.size // => 4
  * ```
  *
  * @since 0.48.0
@@ -70,18 +70,31 @@ export type EncodedSnapshot = typeof EncodedSnapshot.Type
 
 type MachineEvents<M extends Machine.Machine.Any> = Machine.Machine.InputEvents<M>
 
+type StartPayload<M extends Machine.Machine.Any> = Machine.Machine.InputSchema<M> extends typeof Schema.Void
+  ? Schema.Struct<{ readonly entityId: typeof Schema.String }>
+  : Schema.Struct<{
+    readonly entityId: typeof Schema.String
+    readonly input: Machine.Machine.InputSchema<M>
+  }>
+
 type SendErrorSchema = typeof internal.SendErrorSchema
 
 type ReadErrorSchema = typeof internal.ReadErrorSchema
 
 /**
  * Union of prefixed RPC definitions derived for one `ClusterMachine` adapter:
- * `${Type}.send`, `${Type}.snapshot`, and `${Type}.changes`.
+ * `${Type}.start`, `${Type}.send`, `${Type}.snapshot`, and `${Type}.changes`.
  *
  * @category models
  * @since 0.48.0
  */
 export type Rpcs<Type extends string, M extends Machine.Machine.Any> =
+  | Rpc.Rpc<
+    `${Type}.start`,
+    StartPayload<M>,
+    typeof Schema.Void,
+    SendErrorSchema
+  >
   | Rpc.Rpc<
     `${Type}.send`,
     Schema.Struct<{
@@ -113,6 +126,16 @@ export type Rpcs<Type extends string, M extends Machine.Machine.Any> =
 export type RpcHandlers<Type extends string, M extends Machine.Machine.Any> = Rpc.ToHandler<Rpcs<Type, M>>
 
 /**
+ * Services required to encode startup input sent by a remote {@link Client}.
+ *
+ * @category models
+ * @since 0.49.0
+ */
+export type StartServices<M extends Machine.Machine.Any> = Machine.Machine.InputSchema<M> extends typeof Schema.Void
+  ? never
+  : Machine.Machine.InputSchema<M>["EncodingServices"]
+
+/**
  * Services required to encode events sent by a remote {@link Client}.
  *
  * @category models
@@ -136,12 +159,16 @@ export type ReadServices<M extends Machine.Machine.Any> = Machine.Machine.Snapsh
 >
 
 /**
- * Event decoding services required by an RPC server hosting a proxy for `M`.
+ * Event and startup input decoding services required by an RPC server hosting
+ * a proxy for `M`.
  *
  * @category models
  * @since 0.48.0
  */
-export type ServerServices<M extends Machine.Machine.Any> = MachineEvents<M>[number]["DecodingServices"]
+export type ServerServices<M extends Machine.Machine.Any> =
+  | MachineEvents<M>[number]["DecodingServices"]
+  | (Machine.Machine.InputSchema<M> extends typeof Schema.Void ? never
+    : Machine.Machine.InputSchema<M>["DecodingServices"])
 
 /**
  * Options passed through to `RpcServer.layer` by {@link toLayer}.
@@ -181,6 +208,18 @@ export interface ServerOptions {
 export interface Client<M extends Machine.Machine.Any> {
   /** Entity id of the machine this client addresses. */
   readonly entityId: string
+
+  /**
+   * Starts the entity with its initial input, committing its initial state when
+   * it has no checkpoint yet.
+   */
+  readonly start: (
+    ...input: [...Machine.Machine.InputArgs<Machine.Machine.InputSchema<M>>]
+  ) => Effect.Effect<
+    void,
+    ClusterMachine.Rejected | ClusterMachine.ClientError | RpcClientError.RpcClientError,
+    StartServices<M>
+  >
 
   /** Sends one input event and waits until it is committed or rejected. */
   readonly send: (
@@ -226,8 +265,8 @@ export interface Client<M extends Machine.Machine.Any> {
 }
 
 /**
- * Derives an `RpcGroup` exposing `${Type}.send`, `${Type}.snapshot`, and
- * `${Type}.changes` for one `ClusterMachine` adapter.
+ * Derives an `RpcGroup` exposing `${Type}.start`, `${Type}.send`,
+ * `${Type}.snapshot`, and `${Type}.changes` for one `ClusterMachine` adapter.
  *
  * **When to use**
  *

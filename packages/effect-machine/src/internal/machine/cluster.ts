@@ -59,6 +59,21 @@ const decodeInputEvent = (
     )
   )
 
+const decodeMachineInput = (
+  machine: Machine.Machine.Any,
+  input: unknown
+): Effect.Effect<unknown, Rejected> =>
+  machine.input === undefined
+    ? Effect.succeed(undefined)
+    : Protocol.decodeBoundary(machine, machine.input, input, { boundary: "input" }).pipe(
+      Effect.mapError(() =>
+        new Rejected({
+          reason: "InvalidEvent",
+          message: "The input does not match the schema of the machine"
+        })
+      )
+    )
+
 const addressKey = (address: EntityAddress): string => `${address.entityType}\u0000${address.entityId}`
 
 export const makeMemory: Effect.Effect<Storage["Service"]> = Effect.sync(() => {
@@ -124,6 +139,7 @@ export interface AdapterMeta {
   readonly version: string
   readonly readInterval: Duration.Input
   readonly decodeEvent: (event: unknown) => Effect.Effect<unknown, Rejected>
+  readonly decodeInput: (input: unknown) => Effect.Effect<unknown, Rejected>
 }
 
 const adapterMeta = new WeakMap<object, AdapterMeta>()
@@ -174,7 +190,7 @@ export const make = <
     readonly version: string
     readonly readInterval?: Duration.Input | undefined
   },
-  ...input: [...Machine.Machine.InputArgs<Input>]
+  ...input: readonly [] | [...Machine.Machine.InputArgs<Input>]
 ): ClusterMachine<
   Type,
   Machine.Machine<
@@ -250,7 +266,7 @@ const build = (
     rpc,
     deliver,
     ClusterWake.WakeRpc,
-    ClusterChild.makeStartRpc(machine.input ?? Schema.Undefined),
+    ClusterChild.makeStartRpc(machine.input),
     ClusterChild.StopRpc,
     ClusterChild.EndedRpc,
     ClusterChild.SnapshotRpc
@@ -265,6 +281,19 @@ const build = (
       // The cast drops the encoding services of the event schemas, as the
       // layer drops their decoding services.
       Effect.flatMap((decoded) => rpc.send(decoded as never) as Effect.Effect<typeof SendResult.Type, ClientError>),
+      Effect.flatMap((result) => result._tag === "Accepted" ? Effect.void : Effect.fail(result))
+    )
+
+  const startThroughClient = (
+    rpc: EntityClient,
+    args: ReadonlyArray<unknown>
+  ): Effect.Effect<void, Rejected | ClientError> =>
+    decodeMachineInput(machine, args[0]).pipe(
+      Effect.flatMap((decoded) =>
+        rpc.start(
+          (machine.input === undefined ? {} : { input: decoded }) as never
+        ) as Effect.Effect<typeof SendResult.Type, ClientError>
+      ),
       Effect.flatMap((result) => result._tag === "Accepted" ? Effect.void : Effect.fail(result))
     )
 
@@ -380,6 +409,7 @@ const build = (
       return {
         entityId,
         ...reader,
+        start: (...args: ReadonlyArray<unknown>) => startThroughClient(rpc, args),
         send: (event) => sendThroughClient(rpc, event)
       }
     }
@@ -392,7 +422,8 @@ const build = (
     definitionId,
     version: options.version,
     readInterval: options.readInterval ?? "1 second",
-    decodeEvent: (event) => decodeInputEvent(machine, publicTags, event)
+    decodeEvent: (event) => decodeInputEvent(machine, publicTags, event),
+    decodeInput: (value) => decodeMachineInput(machine, value)
   })
   return built
 }
