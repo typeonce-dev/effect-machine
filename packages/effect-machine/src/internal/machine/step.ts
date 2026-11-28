@@ -258,17 +258,26 @@ export class State<O extends Ownership = "Persistent"> {
     return new State(this.planning, this.execution, this.#configuration, this.#snapshot, running, this.runs, this.exit)
   }
 
-  /** Takes an owned state over for one step. */
-  handedOver(): this {
+  /**
+   * Hands an owned state over to one step. From this call on, the caller
+   * promises never to reuse this state, nor any step that returned it: the step
+   * may write it in place. Handing over a state twice throws.
+   */
+  handOverNeverReuse(): this {
     if (this.#handedOver) {
-      throw new Error("An owned MachineStep state was used after it was handed over to a step")
+      throw new Error(
+        "An owned MachineStep state was reused after it was handed over to a step: never reuse an owned state after passing it"
+      )
     }
     this.#handedOver = true
     return this
   }
 
-  /** Returns an owned state that a step handed back, unchanged, to its caller. */
-  handBack(): void {
+  /**
+   * Gives an owned state back to its caller, only when the step returned this
+   * very state unchanged, or refused the event: the caller may pass it again.
+   */
+  giveBackUnchanged(): void {
     this.#handedOver = false
   }
 }
@@ -863,21 +872,21 @@ const build = <O extends Ownership>(
   return {
     start,
     send: (state, event) => {
-      const exit = send(state.handedOver(), event)
-      if (Exit.isFailure(exit) || exit.value.state === state) state.handBack()
+      const exit = send(state.handOverNeverReuse(), event)
+      if (Exit.isFailure(exit) || exit.value.state === state) state.giveBackUnchanged()
       return exit
     },
-    settle: (state, work, exit) => handedBack(state, settle(state.handedOver(), work, exit)),
-    element: (state, work, value) => handedBack(state, element(state.handedOver(), work, value)),
-    report: (state, work, snapshot) => handedBack(state, report(state.handedOver(), work, snapshot)),
-    stop: (state) => handedBack(state, stop(state.handedOver())),
+    settle: (state, work, exit) => givenBackIfUnchanged(state, settle(state.handOverNeverReuse(), work, exit)),
+    element: (state, work, value) => givenBackIfUnchanged(state, element(state.handOverNeverReuse(), work, value)),
+    report: (state, work, snapshot) => givenBackIfUnchanged(state, report(state.handOverNeverReuse(), work, snapshot)),
+    stop: (state) => givenBackIfUnchanged(state, stop(state.handOverNeverReuse())),
     resume
   }
 }
 
-/** Hands an owned state back to the caller of a step that returned it. */
-const handedBack = <O extends Ownership>(state: State<O>, step: Step<O>): Step<O> => {
-  if (step.state === state) state.handBack()
+/** Gives an owned state back to the caller of a step that returned it unchanged. */
+const givenBackIfUnchanged = <O extends Ownership>(state: State<O>, step: Step<O>): Step<O> => {
+  if (step.state === state) state.giveBackUnchanged()
   return step
 }
 

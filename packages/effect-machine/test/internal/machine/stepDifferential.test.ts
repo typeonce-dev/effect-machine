@@ -301,16 +301,16 @@ describe("Machine.toStep planner and ownership", () => {
   describe("owned states", () => {
     const counter = () => Step.makeOwned(Counter, { self })
 
-    it("refuses a state that was handed over to a step", () => {
+    it("refuses a state reused after it was handed over to a step", () => {
       const step = counter()
       const started = success(step.start())
       const next = success(step.send(started.state, { _tag: "Increment" }))
-      assert.throws(() => step.send(started.state, { _tag: "Increment" }), /handed over/)
-      assert.throws(() => step.stop(started.state), /handed over/)
+      assert.throws(() => step.send(started.state, { _tag: "Increment" }), /never reuse an owned state/)
+      assert.throws(() => step.stop(started.state), /never reuse an owned state/)
       assert.strictEqual((next.snapshot as any).state.value.value, 1)
     })
 
-    it("hands back a state that a step returns, or whose event it refuses", () => {
+    it("gives back a state that a step returns unchanged, or whose event it refuses", () => {
       const step = counter()
       const started = success(step.start())
       assert.ok(Exit.isFailure(step.send(started.state, { _tag: "Unknown" })))
