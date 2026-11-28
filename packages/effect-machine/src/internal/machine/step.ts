@@ -504,6 +504,14 @@ export interface Kernel<O extends Ownership>
    * transition; the step still lists the paths it exited and entered.
    */
   readonly sendDecoded: (state: State<O>, event: Machine.EventOf<any>, retain?: boolean) => Step<O>
+  /**
+   * Plans a decoded event whose microsteps no one reads, as `sendDecoded`
+   * without `retain` does. A step that only moves the machine to a new state,
+   * with no command, emitted event, work or end, is returned as that state, so
+   * a host that applies it allocates no step: the state passed in when the
+   * event changed nothing, and a new state otherwise.
+   */
+  readonly move: (state: State<O>, event: Machine.EventOf<any>) => State<O> | Step<O>
   readonly settle: (state: State<O>, work: Work, exit: Exit.Exit<unknown, unknown>, retain?: boolean) => Step<O>
   readonly element: (state: State<O>, work: Work, element: unknown, retain?: boolean) => Step<O>
   readonly report: (state: State<O>, work: Work, snapshot: unknown, retain?: boolean) => Step<O>
@@ -901,12 +909,26 @@ const build = <O extends Ownership>(
    * Plans one event on a state that runs `running`: a public event that `send`
    * decoded, or the invocation event of a result.
    */
-  const advance = (
+  function advance(
     state: State<O>,
     running: ReadonlyArray<Work>,
     event: Machine.EventOf<any> | InvocationEvent.InvocationEvent,
     retain: boolean
-  ): Step<O> => {
+  ): Step<O>
+  function advance(
+    state: State<O>,
+    running: ReadonlyArray<Work>,
+    event: Machine.EventOf<any> | InvocationEvent.InvocationEvent,
+    retain: false,
+    bare: true
+  ): State<O> | Step<O>
+  function advance(
+    state: State<O>,
+    running: ReadonlyArray<Work>,
+    event: Machine.EventOf<any> | InvocationEvent.InvocationEvent,
+    retain: boolean,
+    bare = false
+  ): State<O> | Step<O> {
     let planned: ExecutionPlan.ExecutionMacrostep
     try {
       // A step publishes its microsteps, so a plan retains them unless its host reads none.
@@ -917,6 +939,7 @@ const build = <O extends Ownership>(
       return ended(endedFrom(state), latestFirst(running), exitOfThrow(error), { ...nothing, event: planning })
     }
     if (planned.microsteps.length === 0) {
+      if (bare && running === state.running) return state
       return new Step(
         running === state.running ? state : state.withRunning(running),
         planned.event,
@@ -930,6 +953,9 @@ const build = <O extends Ownership>(
     const commanded = planned.commands.length === 0 ? undefined : commandsOf(planned.commands, running)
     const commands = commanded === undefined ? empty : commanded.commands
     if (invoking.size === 0) {
+      if (bare && !planned.done && commands.length === 0 && planned.emittedEvents.length === 0) {
+        return new State<O>(state.planning, planned.next, undefined, undefined, empty, state.runs, undefined)
+      }
       return planned.done
         ? ended(
           reached(state.planning, planned.next, undefined, undefined, state.runs),
@@ -1074,6 +1100,9 @@ const build = <O extends Ownership>(
   const sendDecoded = (state: State<O>, event: Machine.EventOf<any>, retain = true): Step<O> =>
     state.exit === undefined ? advance(state, state.running, event, retain) : unchanged(state)
 
+  const move = (state: State<O>, event: Machine.EventOf<any>): State<O> | Step<O> =>
+    state.exit === undefined ? advance(state, state.running, event, false, true) : unchanged(state)
+
   const settle = (state: State<O>, work: Work, exit: Exit.Exit<unknown, unknown>, retain = true): Step<O> => {
     const settled = current(state, work)
     if (settled === undefined) return unchanged(state)
@@ -1144,6 +1173,7 @@ const build = <O extends Ownership>(
       rest: (state) => state.resting(),
       send,
       sendDecoded,
+      move,
       settle,
       element,
       report,
@@ -1165,6 +1195,11 @@ const build = <O extends Ownership>(
     },
     sendDecoded: (state, event, retain) =>
       givenBackIfUnchanged(state, sendDecoded(state.handOverNeverReuse(), event, retain)),
+    move: (state, event) => {
+      const moved = move(state.handOverNeverReuse(), event)
+      if (moved === state || (moved instanceof Step && moved.state === state)) state.giveBackUnchanged()
+      return moved
+    },
     settle: (state, work, exit, retain) =>
       givenBackIfUnchanged(state, settle(state.handOverNeverReuse(), work, exit, retain)),
     element: (state, work, value, retain) =>

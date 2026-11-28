@@ -2,6 +2,7 @@ import { assert, describe, it } from "@effect/vitest"
 import { Cause, Duration, Effect, Exit, Schema, Stream } from "effect"
 import { Machine } from "../../../src/index.js"
 import * as ExecutionPlan from "../../../src/internal/machine/executionPlan.js"
+import * as Protocol from "../../../src/internal/machine/protocol.js"
 import * as Step from "../../../src/internal/machine/step.js"
 import { children } from "../../conformance/scenarios/children.js"
 import { invocations } from "../../conformance/scenarios/invocations.js"
@@ -319,6 +320,41 @@ describe("Machine.toStep planner and ownership", () => {
       const stopped = step.stop(done.state)
       assert.strictEqual(stopped.state, done.state)
       assert.strictEqual(step.stop(stopped.state).state, done.state)
+    })
+
+    it("moves a state as its step would, and lists a step only for what a host must apply", () => {
+      const decoded = (event: unknown) => Protocol.decodeEventSync(Counter, event)
+      for (const planner of ["Compiled", "Reference"] as const) {
+        const kernel = Step.kernel(Counter, "Owned", planner)
+        const planning = () => new Step.Planning(Counter, kernel.plan, self, undefined, undefined)
+        let moved = success(kernel.start(planning(), [], false)).state
+        let stepped = success(kernel.start(planning(), [], false)).state
+        for (const event of [{ _tag: "Increment" }, { _tag: "Twice" }, { _tag: "Same" }, { _tag: "Again" }]) {
+          const result = kernel.move(moved, decoded(event))
+          const step = kernel.sendDecoded(stepped, decoded(event), false)
+          assert.notInstanceOf(result, Step.Step)
+          const state = result as Step.State<"Owned">
+          // An event that changes nothing returns the state passed in.
+          assert.strictEqual(state === moved, !step.planned)
+          assert.deepStrictEqual(state.snapshot, step.snapshot)
+          moved = state
+          stepped = step.state
+        }
+        // A state that a move replaced is not reused.
+        const before = moved
+        moved = kernel.move(moved, decoded({ _tag: "Increment" })) as Step.State<"Owned">
+        assert.throws(() => kernel.move(before, decoded({ _tag: "Increment" })), /never reuse an owned state/)
+        // A step that ends the machine or fails is listed as a step.
+        const finished = kernel.move(moved, decoded({ _tag: "Finish" }))
+        assert.instanceOf(finished, Step.Step)
+        const exit = (finished as Step.Step<"Owned">).exit!
+        assert.ok(Exit.isSuccess(exit))
+        // Increment, Twice, Again and the last Increment: (1 + 2) * 2 + 1.
+        assert.strictEqual(exit.value, 7)
+        const failed = kernel.move(success(kernel.start(planning(), [], false)).state, decoded({ _tag: "Overflow" }))
+        assert.instanceOf(failed, Step.Step)
+        assert.ok(Exit.isFailure((failed as Step.Step<"Owned">).exit!))
+      }
     })
 
     it("are not the states of the persistent step functions", () => {

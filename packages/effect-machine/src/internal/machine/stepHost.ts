@@ -462,10 +462,27 @@ const makeDrain = (machine: Machine.Any, kernel: Kernel, childless: boolean) => 
       if (event instanceof Runtime.RefusedEvent) return failPlanning(event.error)
       const before = context.state()
       const work = event instanceof Runtime.WorkMessage ? event : undefined
-      // Only an acknowledged delivery reads the microsteps of its step.
-      const step = work === undefined
-        ? kernel.sendDecoded(host.state, event as Machine.EventOf<any>, acknowledged)
-        : takeWork(host.state, work, acknowledged)
+      let step: OwnedStep
+      if (work !== undefined) {
+        step = takeWork(host.state, work, acknowledged)
+      } else if (acknowledged) {
+        // Only an acknowledged delivery reads the microsteps of its step.
+        step = kernel.sendDecoded(host.state, event as Machine.EventOf<any>, true)
+      } else {
+        // An event that only moves the machine is committed without a step.
+        const moved = kernel.move(host.state, event as Machine.EventOf<any>)
+        if (moved instanceof Step.Step) {
+          step = moved
+        } else {
+          if (moved === host.state) continue
+          host.state = moved
+          const notification = context.commit(moved.snapshot)
+          if (notification !== undefined) {
+            return context.runAfterChanges(notification.pipe(Effect.andThen(loop(context))))
+          }
+          continue
+        }
+      }
       const state = step.state
       host.state = state
       const exit = state.exit
