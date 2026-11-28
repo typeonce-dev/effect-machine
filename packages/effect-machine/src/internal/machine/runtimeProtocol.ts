@@ -173,7 +173,7 @@ export interface AcknowledgedDelivery<State> {
 export const AcknowledgedMessageTypeId: unique symbol = Symbol("effect/Machine/AcknowledgedMessage")
 
 /** @internal */
-interface AcknowledgedMessage<Event> {
+export interface AcknowledgedMessage<Event> {
   readonly [AcknowledgedMessageTypeId]: true
   readonly event: Event
   readonly deferred?: Deferred.Deferred<AcknowledgedDelivery<unknown>, unknown>

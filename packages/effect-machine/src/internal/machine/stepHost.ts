@@ -345,19 +345,16 @@ const makeDrain = (machine: Machine.Any, kernel: Kernel, childless: boolean) => 
     return host
   }
 
-  const takeMessage = (state: Step.State<"Owned">, event: unknown, retain: boolean): OwnedStep => {
-    if (event instanceof Runtime.WorkMessage) {
-      const work = event.work as Step.Work
-      switch (event._tag) {
-        case "Settle":
-          return kernel.settle(state, work, event.value as Exit.Exit<unknown, unknown>, retain)
-        case "Element":
-          return kernel.element(state, work, event.value, retain)
-        case "Report":
-          return kernel.report(state, work, event.value, retain)
-      }
+  const takeWork = (state: Step.State<"Owned">, message: Runtime.WorkMessage, retain: boolean): OwnedStep => {
+    const work = message.work as Step.Work
+    switch (message._tag) {
+      case "Settle":
+        return kernel.settle(state, work, message.value as Exit.Exit<unknown, unknown>, retain)
+      case "Element":
+        return kernel.element(state, work, message.value, retain)
+      case "Report":
+        return kernel.report(state, work, message.value, retain)
     }
-    return kernel.sendDecoded(state, event as Machine.EventOf<any>, retain)
   }
 
   const loop = (context: Context): Drain => Effect.suspend(() => drainSync(context) ?? noQueuedMessages)
@@ -461,37 +458,38 @@ const makeDrain = (machine: Machine.Any, kernel: Kernel, childless: boolean) => 
         message = pending.value
       }
       const acknowledged = Runtime.isAcknowledgedMessage(message)
-      const event = Runtime.messageEvent(message)
+      const event: unknown = acknowledged ? (message as Runtime.AcknowledgedMessage<unknown>).event : message
       if (event instanceof Runtime.RefusedEvent) return failPlanning(event.error)
       const before = context.state()
+      const work = event instanceof Runtime.WorkMessage ? event : undefined
       // Only an acknowledged delivery reads the microsteps of its step.
-      const step = takeMessage(host.state, event, acknowledged)
-      host.state = step.state
-      const exit = step.exit
-      if (exit !== undefined && Exit.isFailure(exit)) return Effect.failCause(exit.cause)
-      const settled = event instanceof Runtime.WorkMessage && event._tag === "Settle" && step.planned &&
-          step.exited.includes((event.work as Step.Work).path)
-        ? event.work as Step.Work
-        : undefined
-      if (
-        exit === undefined && settled === undefined && step.commands.length === 0 && step.stop.length === 0 &&
-        step.start.length === 0 && step.emitted.length === 0
-      ) {
+      const step = work === undefined
+        ? kernel.sendDecoded(host.state, event as Machine.EventOf<any>, acknowledged)
+        : takeWork(host.state, work, acknowledged)
+      const state = step.state
+      host.state = state
+      const exit = state.exit
+      if (exit === undefined && step.commands.length === 0 && step.emitted.length === 0) {
         if (!step.planned) {
-          if (acknowledged) context.completeMessage({ before, plan: planOf(step), after: before })
+          if (step.stop.length === 0 && step.start.length === 0) {
+            if (acknowledged) context.completeMessage({ before, plan: planOf(step), after: before })
+            continue
+          }
+        } else if (step.stop.length === 0 && step.start.length === 0 && !exitsWork(step, work)) {
+          const next = state.snapshot
+          const notification = context.commit(next)
+          if (notification !== undefined) {
+            return context.runAfterChanges(notification.pipe(Effect.andThen(Effect.suspend(() => {
+              if (acknowledged) context.completeMessage({ before, plan: planOf(step), after: next })
+              return loop(context)
+            }))))
+          }
+          if (acknowledged) context.completeMessage({ before, plan: planOf(step), after: next })
           continue
         }
-        const next = step.snapshot
-        const notification = context.commit(next)
-        if (notification !== undefined) {
-          return context.runAfterChanges(notification.pipe(Effect.andThen(Effect.suspend(() => {
-            if (acknowledged) context.completeMessage({ before, plan: planOf(step), after: next })
-            return loop(context)
-          }))))
-        }
-        if (acknowledged) context.completeMessage({ before, plan: planOf(step), after: next })
-        continue
       }
+      if (exit !== undefined && Exit.isFailure(exit)) return Effect.failCause(exit.cause)
+      const settled = exitsWork(step, work) ? work!.work as Step.Work : undefined
       return continueEffectful(context, host, step, acknowledged, before, settled)
     }
   }
@@ -505,6 +503,11 @@ const makeDrain = (machine: Machine.Any, kernel: Kernel, childless: boolean) => 
     }
   }
 }
+
+/** Whether a step settled work whose state it exited, so the work stops before the state is entered again. */
+const exitsWork = (step: OwnedStep, message: Runtime.WorkMessage | undefined): boolean =>
+  message !== undefined && message._tag === "Settle" && step.planned &&
+  step.exited.includes((message.work as Step.Work).path)
 
 /** The result of the first step of a process, as the compiled process takes it. */
 const initialOf = (
