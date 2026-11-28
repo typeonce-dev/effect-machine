@@ -4,9 +4,11 @@
  *
  * Every function is synchronous and returns a value. The host state is an
  * immutable value: it holds the configuration, the work that runs, and how many
- * entries of invoking states have begun, so the current run of each piece of
- * work is read from the state that a caller passes back, and never from a
- * handle shared with the caller.
+ * entries of invoking states have begun. Whether work is current is read from
+ * the state that a caller passes back, and never from a handle shared with the
+ * caller: work is current when that state lists the very object the caller
+ * reports, so work of an earlier entry, of a step that was not kept, or of a
+ * machine before it resumed, is never taken for the work that runs.
  *
  * The order is the one of the generic runtime in `process.ts`: commands, the
  * work of exited states, the new state, emitted events, and the work of entered
@@ -146,9 +148,6 @@ const unchanged = (state: State): Step => ({
 /** A planning throw: typed for the planner's own errors, a defect otherwise. */
 const exitOfThrow = (error: unknown): Exit.Exit<never, unknown> =>
   isPlanningError(error) ? Exit.fail(error) : Exit.die(error)
-
-const sameWork = (left: Work, right: Work): boolean =>
-  left.run === right.run && left.path === right.path && left.id === right.id && left._tag === right._tag
 
 /** The work that runs in a state, latest first, as a host stops it when its machine ends. */
 const latestFirst = (running: ReadonlyArray<Work>): ReadonlyArray<Work> =>
@@ -381,9 +380,13 @@ export const make = (
       published
     )
 
-  /** The work in `state` that `work` names, when its result still applies. */
+  /**
+   * `work`, when `state` runs it and its result still applies. Work is compared
+   * by identity: `path`, `id` and `run` repeat after a resume and across steps
+   * taken from one kept state, and the object a step listed does not.
+   */
   const current = (state: State, work: Work): Work | undefined =>
-    state.exit === undefined ? state.running.find((running) => sameWork(running, work)) : undefined
+    state.exit === undefined && state.running.includes(work) ? work : undefined
 
   // The planner reads currency from a generation handle. The state value has
   // decided it already, so each delivered event gets a fresh one.

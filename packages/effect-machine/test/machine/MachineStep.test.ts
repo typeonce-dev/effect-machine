@@ -193,6 +193,31 @@ describe("Machine.toStep", () => {
       const loaded = step.settle(late.state, current, Exit.succeed("document second"))
       assert.deepStrictEqual(loaded.snapshot.state.value, { _tag: "Loaded", result: "document second" })
     })
+
+    it("ignores the end of work that ran before a resume, though it names the same entry", () => {
+      const loading = success(step.send(success(step.start()).state, Events.Load({ id: "a" })))
+      const before = only(loading.start)
+      const resumed = success(step.resume(loading.snapshot))
+      const after = only(resumed.start)
+      assert.deepStrictEqual(keyOf(before), keyOf(after))
+
+      const late = step.settle(resumed.state, before, Exit.succeed("document a"))
+      assert.strictEqual(late.state, resumed.state)
+      assert.strictEqual(leafOf(late), "Loading")
+
+      assert.strictEqual(leafOf(step.settle(resumed.state, after, Exit.succeed("document a"))), "Loaded")
+    })
+
+    it("ignores the end of work that another step from the same state started", () => {
+      const started = success(step.start())
+      const taken = success(step.send(started.state, Events.Load({ id: "a" })))
+      const abandoned = success(step.send(started.state, Events.Load({ id: "a" })))
+      assert.deepStrictEqual(keyOf(only(taken.start)), keyOf(only(abandoned.start)))
+
+      const late = step.settle(taken.state, only(abandoned.start), Exit.succeed("document a"))
+      assert.strictEqual(late.state, taken.state)
+      assert.strictEqual(leafOf(late), "Loading")
+    })
   })
 
   describe("rejection", () => {

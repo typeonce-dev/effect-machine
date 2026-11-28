@@ -11,8 +11,6 @@ type Step = Machine.MachineStep.Step<any>
 
 type Work = Machine.MachineStep.Work<any>
 
-const keyOf = (work: Work): string => `${work.path}\u0000${work.id}\u0000${work.run}`
-
 const isStopped = (cause: Cause.Cause<unknown>): boolean =>
   cause.reasons.length > 0 &&
   cause.reasons.every((reason) => Cause.isFailReason(reason) && reason.error instanceof Machine.StoppedError)
@@ -44,7 +42,7 @@ export const stepHost: Host = {
     /** One life of the host. A restart ends it, with every fiber it forked. */
     interface Life {
       readonly scope: Scope.Closeable
-      readonly running: Map<string, Fiber.Fiber<unknown, unknown>>
+      readonly running: Map<Work, Fiber.Fiber<unknown, unknown>>
       state: Machine.MachineStep.State<any> | undefined
       startFailure: string | undefined
       exit: Step["exit"]
@@ -75,8 +73,8 @@ export const stepHost: Host = {
           yield* Effect.ignore(target.send(event))
         }
         const stopped = done.stop.flatMap((work) => {
-          const fiber = current.running.get(keyOf(work))
-          current.running.delete(keyOf(work))
+          const fiber = current.running.get(work)
+          current.running.delete(work)
           return fiber === undefined ? [] : [fiber]
         })
         yield* Fiber.interruptAll(stopped)
@@ -105,12 +103,12 @@ export const stepHost: Host = {
         const fiber = yield* Effect.forkIn(running as Effect.Effect<unknown, unknown>, current.scope, {
           startImmediately: true
         })
-        current.running.set(keyOf(work), fiber)
+        current.running.set(work, fiber)
         yield* Fiber.await(fiber).pipe(
           Effect.flatMap((exit) =>
             turn(Effect.suspend(() => {
-              if (current.running.get(keyOf(work)) !== fiber) return Effect.void
-              current.running.delete(keyOf(work))
+              // The step ignores work that it stopped, so the host only forgets the fiber.
+              current.running.delete(work)
               return carryOut(current, step.settle(current.state!, work, exit))
             }))
           ),

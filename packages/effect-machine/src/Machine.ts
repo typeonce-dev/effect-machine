@@ -7586,6 +7586,11 @@ export const plan: <
  * So is the result for work that already ended, and for any work of a machine
  * that has ended.
  *
+ * `settle` and `element` take the work object that a step listed in `start`,
+ * and compare it by identity. A copy of it changes nothing. Neither does work
+ * that was listed before a `resume`, or by another step taken from the same
+ * state, even though its `path`, `id`, and `run` are equal.
+ *
  * @category models
  * @since 0.48.0
  */

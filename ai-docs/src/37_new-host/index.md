@@ -32,7 +32,9 @@ then run `start`. Pass `step.state` to the next call.
   next element after that step, and settle with the end of the stream).
 - The state value records which entry of a state each piece of work belongs
   to. `settle` and `element` ignore the result of work whose state was exited,
-  so the host never compares anything.
+  so the host never compares anything. Pass back the work object that a step
+  listed: work is matched by identity, so a result from before a `resume` is
+  ignored too.
 - `self` is the host's own target. Transitions and input mappers receive it,
   so its `send` must plan the event in a later step.
 
