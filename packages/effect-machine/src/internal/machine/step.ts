@@ -280,22 +280,20 @@ export const make = (
     published: { readonly emitted: ReadonlyArray<unknown>; readonly sends: ReadonlyArray<Send> }
   ): Step => {
     let start: Array<Work> | undefined
-    for (const [paths, event] of entered) {
-      for (const group of InvocationResolution.resolve(machine, configuration, paths, event, capabilities)) {
-        const run = runs++
-        for (const invocation of group.invocations) {
-          const work = describe(invocation, run)
-          if (!isWork(work)) {
-            // Nothing of this step starts, and everything that ran stops.
-            return ended(
-              { configuration, snapshot, runs },
-              [...stop, ...latestFirst(kept)],
-              Exit.failCause(work.cause),
-              published
-            )
-          }
-          ;(start ??= []).push(work)
+    for (const group of InvocationResolution.resolveEntries(machine, configuration, entered, capabilities)) {
+      const run = runs++
+      for (const invocation of group.invocations) {
+        const work = describe(invocation, run)
+        if (!isWork(work)) {
+          // Nothing of this step starts, and everything that ran stops.
+          return ended(
+            { configuration, snapshot, runs },
+            [...stop, ...latestFirst(kept)],
+            Exit.failCause(work.cause),
+            published
+          )
         }
+        ;(start ??= []).push(work)
       }
     }
     const running = start === undefined ? kept : [...kept, ...start]
@@ -333,18 +331,7 @@ export const make = (
     const snapshot = Configuration.snapshotFromConfiguration(machine, configuration)
     const published = { emitted: planned.emittedEvents, sends }
     const changes = InvocationChanges.fromMicrosteps(planned.microsteps)
-    let stop: ReadonlyArray<Work> = empty
-    let kept = running
-    if (changes !== undefined && running.length > 0) {
-      const exited: Array<Work> = []
-      for (const path of new Set(changes.exited)) {
-        for (const work of running) if (work.path === path) exited.push(work)
-      }
-      if (exited.length > 0) {
-        stop = exited
-        kept = running.filter((work) => !exited.includes(work))
-      }
-    }
+    const { kept, stop } = InvocationChanges.partition(running, changes)
     if (planned.done) {
       return ended(
         { configuration, snapshot, runs: state.runs },
@@ -356,7 +343,7 @@ export const make = (
     return enter(
       configuration,
       snapshot,
-      changes === undefined ? empty : Array.from(changes.entered, ([path, event]) => [[path], event] as const),
+      InvocationChanges.entries(changes),
       kept,
       stop,
       state.runs,
@@ -373,7 +360,7 @@ export const make = (
     enter(
       configuration,
       snapshot,
-      [[Configuration.getInitialEntryPaths(machine, configuration), Planner.InitialEvent]],
+      InvocationResolution.initialEntries(machine, configuration),
       empty,
       empty,
       0,

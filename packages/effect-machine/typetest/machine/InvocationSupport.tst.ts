@@ -5,6 +5,7 @@ import { describe, expect, it } from "tstyche"
 import { LocalMachine, Machine } from "../../src/index.js"
 import { ClusterMachine } from "../../src/unstable/cluster/index.js"
 import { AtomMachine } from "../../src/unstable/reactivity/index.js"
+import type { Rebuilt } from "../support/rebuilt.js"
 
 declare const service: unique symbol
 interface Database {
@@ -403,8 +404,8 @@ describe("Machine.toStep", () => {
     expect<Machine.MachineStep.Requirements<typeof hosted>>().type.toBe<Database>()
     const streamingStep = Machine.toStep(streaming, { self })
     expect<Machine.MachineStep.Requirements<typeof streaming>>().type.toBe<Feed>()
-    expect(hostedStep).type.toBe<Machine.MachineStep<typeof hosted>>()
-    expect(streamingStep).type.toBe<Machine.MachineStep<typeof streaming>>()
+    expect(hostedStep).type.toBe<Machine.MachineStep<Rebuilt<typeof hosted>>>()
+    expect(streamingStep).type.toBe<Machine.MachineStep<Rebuilt<typeof streaming>>>()
   })
 
   it("refuses a machine that invokes a Logic or a child machine, which need a host that owns children", () => {

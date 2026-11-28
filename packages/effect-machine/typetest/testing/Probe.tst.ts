@@ -40,7 +40,7 @@ describe("MachineTest probe", () => {
     expect<Effect.Success<typeof sent>["before"]["state"]["value"]>().type.toBe<State>()
     expect<Effect.Success<typeof sent>["event"]>().type.toBe<PublicEvent>()
     expect<Effect.Success<typeof sent>["plan"]["microsteps"][number]["event"]>().type.toBe<
-      PublicEvent | InternalEvent | Machine.InitialEvent
+      PublicEvent | InternalEvent | Machine.InitialEvent | Machine.InvocationEvent
     >()
     expect<InternalEvent>().type.not.toBeAssignableTo<Parameters<Effect.Success<typeof attached>["sendAndAwait"]>[0]>()
     expect<Machine.StoppedError>().type.toBeAssignableTo<Effect.Error<typeof sent>>()

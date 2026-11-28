@@ -4,6 +4,7 @@ import { LocalMachine, Machine } from "../../src/index.js"
 import { MachineTest } from "../../src/testing/index.js"
 import { ClusterMachine } from "../../src/unstable/cluster/index.js"
 import { AtomMachine } from "../../src/unstable/reactivity/index.js"
+import type { Rebuilt } from "../support/rebuilt.js"
 class Ready extends Schema.TaggedClass<Ready>("Ready")("Ready", {}) {}
 class Flow extends Schema.TaggedClass<Flow>("Flow")("Flow", {}) {}
 class Idle extends Schema.TaggedClass<Idle>("Idle")("Idle", {}) {}
@@ -314,6 +315,6 @@ describe("executable machine readiness", () => {
         string
       ]
     >()
-    expect(cluster.machine).type.toBe<typeof complete>()
+    expect(cluster.machine).type.toBe<Rebuilt<typeof complete>>()
   })
 })

@@ -20,6 +20,7 @@ import * as ReferenceModel from "../internal/testing/machine/referenceModel.js"
 import type * as RuntimeTest from "../internal/testing/machine/runtime.js"
 import * as RuntimeInvariantTest from "../internal/testing/machine/runtimeInvariant.js"
 import * as TraceImpl from "../internal/testing/machine/trace.js"
+import { WorkOutcomeTypeId } from "../internal/testing/machine/trace.js"
 import * as internal from "../internal/testing/machine/verification.js"
 import type { VerificationError } from "../internal/testing/machine/verification.js"
 import type * as Machine from "../Machine.js"
@@ -144,20 +145,112 @@ type RootReadyMachine<M extends AnyMachine> =
   & Machine.Machine.RootCompatible<Machine.Machine.ParentEvents<M>>
 
 /**
+ * Type identifier of a {@link WorkOutcome}.
+ *
+ * @category type IDs
+ * @since 0.48.0
+ */
+export { WorkOutcomeTypeId }
+
+/**
+ * A result reported by work that a state invoked: the output or typed failure
+ * of an Effect, or a timer whose duration elapsed.
+ *
+ * **Details**
+ *
+ * A scenario lists what a machine receives in order, so an outcome is an entry
+ * of `events` beside the public events. `path` and `id` name the state that
+ * invoked the work and the invocation, as `Machine.InvocationEvent` does.
+ * Planning applies an outcome only while its work runs: work starts when its
+ * state is entered and ends once per entry, so an outcome for work that is not
+ * running is ignored and plans an unchanged step, as every host ignores a late
+ * result.
+ *
+ * `_tag` is {@link WorkOutcomeTypeId}, which no event tag can equal. Use
+ * {@link isWorkOutcome} to tell an outcome from an event.
+ *
+ * **Gotchas**
+ *
+ * A failure reported to work with no `onFailure` fails the machine, and so
+ * does an output reported to work with no `onDone`. {@link run} returns that
+ * failure as a `RunFailure`.
+ *
+ * @category models
+ * @since 0.48.0
+ */
+export type WorkOutcome =
+  | {
+    readonly _tag: typeof WorkOutcomeTypeId
+    readonly kind: "Done"
+    readonly path: string
+    readonly id: string
+    readonly output: unknown
+  }
+  | {
+    readonly _tag: typeof WorkOutcomeTypeId
+    readonly kind: "Failure"
+    readonly path: string
+    readonly id: string
+    readonly error: unknown
+  }
+  | {
+    readonly _tag: typeof WorkOutcomeTypeId
+    readonly kind: "Elapsed"
+    readonly path: string
+    readonly id: string
+  }
+
+/**
+ * Returns `true` if a scenario entry or trace step event is a {@link WorkOutcome}.
+ *
+ * @category guards
+ * @since 0.48.0
+ */
+export const isWorkOutcome: (value: unknown) => value is WorkOutcome = TraceImpl.isWorkOutcome
+
+/**
+ * Work that runs in a planner trace: invoked by an active state that was
+ * entered, and not yet ended.
+ *
+ * @category models
+ * @since 0.48.0
+ */
+export interface RunningWork {
+  /** Path of the state that invoked the work. */
+  readonly path: string
+  /** Id of the invocation within that state. */
+  readonly id: string
+  /** Registered source name, or `undefined` for a child machine. */
+  readonly source: string | undefined
+  readonly kind: "Effect" | "Timer" | "Stream" | "Logic" | "Child"
+}
+
+/**
+ * One entry of a scenario: a public event, or a result of invoked work.
+ *
+ * @category models
+ * @since 0.48.0
+ */
+export type ScenarioEvent<M extends AnyMachine> =
+  | Machine.Machine.EventInput<Machine.Machine.InputEvent<M>>
+  | WorkOutcome
+
+/**
  * A generated public-input scenario for a machine.
  *
  * Machines without an input schema omit `input`; machines with one retain its
- * exact decoded type. Events use only the public input protocol.
+ * exact decoded type. Events use only the public input protocol, and may be
+ * interleaved with the {@link WorkOutcome} results of invoked work.
  *
  * @category models
  * @since 0.4.0
  */
 export type Scenario<M extends AnyMachine> = Machine.Machine.InputSchema<M> extends typeof Schema.Void ? {
-    readonly events: ReadonlyArray<Machine.Machine.EventInput<Machine.Machine.InputEvent<M>>>
+    readonly events: ReadonlyArray<ScenarioEvent<M>>
   }
   : {
     readonly input: InputValue<M>
-    readonly events: ReadonlyArray<Machine.Machine.EventInput<Machine.Machine.InputEvent<M>>>
+    readonly events: ReadonlyArray<ScenarioEvent<M>>
   }
 
 /**
@@ -280,7 +373,7 @@ export type PlanCompletion<M extends AnyMachine> =
  */
 export interface Microstep<M extends AnyMachine> {
   readonly next: Machine.Machine.Snapshot<Machine.Machine.States<M>>
-  readonly event: Machine.Machine.Event<M> | Machine.InitialEvent
+  readonly event: Machine.Machine.Event<M> | Machine.InitialEvent | Machine.InvocationEvent
   readonly transitions: ReadonlyArray<
     Machine.Machine.RetainedTransition<
       StatePath<M>,
@@ -314,14 +407,15 @@ export type InitialPlan<M extends AnyMachine> =
   & PlanCompletion<M>
 
 /**
- * The complete data returned while planning one public event.
+ * The complete data returned while planning one public event, or one result of
+ * invoked work, whose `event` is its `Machine.InvocationEvent`.
  *
  * @category models
  * @since 0.4.0
  */
 export type EventPlan<M extends AnyMachine> =
   & {
-    readonly event: Machine.Machine.InputEvent<M>
+    readonly event: Machine.Machine.InputEvent<M> | Machine.InvocationEvent
     readonly next: Machine.Machine.Snapshot<Machine.Machine.States<M>>
     readonly commands: ReadonlyArray<Machine.Command>
     readonly emittedEvents: ReadonlyArray<Machine.Machine.EmittedEvent<M>>
@@ -346,6 +440,9 @@ export interface InitialTrace<M extends AnyMachine> {
 /**
  * One event portion of an executable planner trace.
  *
+ * `event` is the decoded public event, or the {@link WorkOutcome} of a step
+ * caused by invoked work.
+ *
  * @category models
  * @since 0.4.0
  */
@@ -353,7 +450,7 @@ export interface TraceStep<M extends AnyMachine> {
   readonly index: number
   readonly before: Machine.Machine.Snapshot<Machine.Machine.States<M>>
   readonly beforeConfiguration: ReadonlyArray<StatePath<M>>
-  readonly event: Machine.Machine.InputEvent<M>
+  readonly event: Machine.Machine.InputEvent<M> | WorkOutcome
   readonly plan: EventPlan<M>
   readonly after: Machine.Machine.Snapshot<Machine.Machine.States<M>>
   readonly afterConfiguration: ReadonlyArray<StatePath<M>>
@@ -371,6 +468,8 @@ export interface Trace<M extends AnyMachine> {
   readonly steps: ReadonlyArray<TraceStep<M>>
   readonly final: Machine.Machine.Snapshot<Machine.Machine.States<M>>
   readonly finalConfiguration: ReadonlyArray<StatePath<M>>
+  /** The work that runs in `final`, in start order. A completed machine runs none. */
+  readonly work: ReadonlyArray<RunningWork>
 }
 
 /**
@@ -928,11 +1027,17 @@ export interface StateInvariantContext<M extends AnyMachine> {
   readonly phase: StateObservation
   readonly eventIndex: number | undefined
   readonly microstepIndex: number | undefined
-  readonly event: Machine.Machine.Event<M> | Machine.InitialEvent | undefined
+  readonly event:
+    | Machine.Machine.Event<M>
+    | Machine.InitialEvent
+    | Machine.InvocationEvent
+    | WorkOutcome
+    | undefined
 }
 
 /**
- * Evidence passed to an invariant for one public event step.
+ * Evidence passed to an invariant for one step: a public event, or a result of
+ * invoked work.
  *
  * @category invariants
  * @since 0.4.0
@@ -944,7 +1049,7 @@ export interface StepInvariantContext<M extends AnyMachine> {
   readonly index: number
   readonly before: Machine.Machine.Snapshot<Machine.Machine.States<M>>
   readonly beforeConfiguration: ReadonlyArray<StatePath<M>>
-  readonly event: Machine.Machine.InputEvent<M>
+  readonly event: Machine.Machine.InputEvent<M> | WorkOutcome
   readonly plan: EventPlan<M>
   readonly after: Machine.Machine.Snapshot<Machine.Machine.States<M>>
   readonly afterConfiguration: ReadonlyArray<StatePath<M>>
@@ -1290,7 +1395,7 @@ export interface ExplorationNode<M extends AnyMachine, Key extends ExplorationKe
  * @since 0.4.0
  */
 export interface ExplorationEdge<M extends AnyMachine> {
-  readonly event: Machine.Machine.InputEvent<M>
+  readonly event: ScenarioEvent<M>
   readonly step: TraceStep<M>
   readonly discovered: boolean
 }
@@ -1306,13 +1411,13 @@ export type ExplorationFrontier<M extends AnyMachine, Key extends ExplorationKey
     readonly _tag: "DepthLimit"
     readonly source: Key
     readonly trace: Trace<M>
-    readonly event: Machine.Machine.InputEvent<M>
+    readonly event: ScenarioEvent<M>
   }
   | {
     readonly _tag: "StateLimit"
     readonly source: Key
     readonly trace: Trace<M>
-    readonly event: Machine.Machine.InputEvent<M>
+    readonly event: ScenarioEvent<M>
     readonly target: Key
     readonly targetTrace: Trace<M>
   }
@@ -1320,7 +1425,7 @@ export type ExplorationFrontier<M extends AnyMachine, Key extends ExplorationKey
     readonly _tag: "TransitionLimit"
     readonly source: Key
     readonly trace: Trace<M>
-    readonly event: Machine.Machine.InputEvent<M>
+    readonly event: ScenarioEvent<M>
   }
 
 /**
@@ -1381,7 +1486,7 @@ export interface Exploration<M extends AnyMachine, Key extends ExplorationKey = 
 }
 
 type ExploreOptionsBase<M extends AnyMachine, Key extends ExplorationKey> = {
-  readonly events: (context: ExplorationStateContext<M>) => ReadonlyArray<Machine.Machine.InputEvent<M>>
+  readonly events: (context: ExplorationStateContext<M>) => ReadonlyArray<ScenarioEvent<M>>
   readonly stateKey: (context: ExplorationStateContext<M>) => Key
   readonly limits?: ExplorationLimits
   readonly invariants?: ReadonlyArray<Invariant<M>>
@@ -1411,7 +1516,10 @@ export type ExploreOptions<M extends AnyMachine, Key extends ExplorationKey = Ex
  *
  * Invariants are checked against startup and every concretely planned edge,
  * so a failure retains a shortest discovered counterexample. Planned commands
- * and invocations are not executed. `transitionCoverage` includes
+ * and invocations are not executed. `events` may return {@link WorkOutcome}
+ * results for the work in `trace.work`; nodes are identified by `stateKey`
+ * alone, so include `trace.work` in the key when the same state can run
+ * different work. `transitionCoverage` includes
  * startup and every event plan that was actually computed, including a plan
  * retained at a state-limit frontier. Depth- and transition-limit frontiers
  * have no plan and therefore contribute no transition hits.
@@ -1567,7 +1675,7 @@ export type RunFailure<Cause, M extends AnyMachine = AnyMachine> =
     readonly scenario: Scenario<M>
     readonly phase: "event"
     readonly eventIndex: number
-    readonly event: Machine.Machine.EventInput<Machine.Machine.InputEvent<M>>
+    readonly event: ScenarioEvent<M>
     readonly initial: InitialTrace<M>
     readonly steps: ReadonlyArray<TraceStep<M>>
     readonly cause: Cause
@@ -1605,6 +1713,12 @@ export type RunServices<M extends AnyMachine> = IsAny<Machine.Machine.Services<M
  * is planned, including events that occur after a terminal configuration.
  * Typed planning errors retain the scenario and successfully completed prefix
  * in a `RunFailure`.
+ *
+ * Work is never run, but the trace follows which work runs, in `work`. A
+ * {@link WorkOutcome} in the scenario is planned for the work it names while
+ * that work runs, and ignored once it no longer does. An outcome that fails
+ * the machine is a `RunFailure` whose cause is the typed failure, so the replay
+ * of a {@link check} finding reproduces it.
  *
  * **Example** (Running a pure trace)
  *
@@ -1810,6 +1924,8 @@ export interface MicrostepCoverageEvidence {
   readonly alwaysTriggered: number
   readonly doneTriggered: number
   readonly choiceTriggered: number
+  /** Transitions taken for a result of invoked work. */
+  readonly invokeTriggered: number
 }
 
 /**
@@ -1959,7 +2075,7 @@ export type ObservedGraphEdge<M extends AnyMachine> =
     readonly _tag: "Event"
     readonly traceIndex: number
     readonly eventIndex: number
-    readonly event: Machine.Machine.InputEvent<M>
+    readonly event: Machine.Machine.InputEvent<M> | WorkOutcome
     readonly microsteps: ReadonlyArray<ObservedGraphMicrostep<M>>
     readonly completion: PlanCompletion<M>
   }
@@ -2186,7 +2302,13 @@ export type AnalysisFinding =
 export const analyze: <M extends AnyMachine>(machine: M) => ReadonlyArray<AnalysisFinding> = CheckImpl.analyze
 
 /**
- * The events and optional input that reproduce a finding from startup.
+ * The input and the steps that reproduce a finding from startup, in order.
+ *
+ * **Details**
+ *
+ * `events` is a scenario: its entries are public events and the
+ * {@link WorkOutcome} results of invoked work, such as an elapsed timer or a
+ * supplied Effect output. Pass the replay to {@link run} to plan it again.
  *
  * @category models
  * @since 0.47.0
@@ -2214,10 +2336,18 @@ export type CheckExplorationLimit =
   | "sampledInput"
   /** Exploration used caller-supplied events. */
   | "customEvents"
+  /** Exploration used caller-supplied results of invoked Effects. */
+  | "customOutcomes"
   /** A caller-supplied state key may merge distinct snapshots. */
   | "customStateKey"
-  /** Invocations do not run during planning, so their outcomes were not explored. */
-  | "invocations"
+  /** An Effect ran whose results were not supplied, so none of them was explored. */
+  | "effectsWithoutOutcomes"
+  /** A Stream ran. Its elements and its end were not explored. */
+  | "streams"
+  /** Logic ran. Its snapshots and its end were not explored. */
+  | "logic"
+  /** A child machine ran. Its snapshots and its end were not explored. */
+  | "children"
 
 /**
  * A problem found by {@link check}. An `"error"` finding fails the report and a
@@ -2262,6 +2392,26 @@ export type CheckFinding =
     readonly message: string
   }
   | {
+    readonly law: "outcomes.invalid"
+    readonly severity: "error"
+    /** The name the outcomes were supplied under. */
+    readonly source: string
+    readonly message: string
+  }
+  | {
+    /**
+     * A supplied result fails the machine. The compiler requires `onFailure`
+     * for a typed failure and `onDone` for a result, so this happens only when
+     * the machine's types were erased.
+     */
+    readonly law: "outcome.failsMachine"
+    readonly severity: "error"
+    /** The registered name of the source whose result fails the machine. */
+    readonly source: string | undefined
+    readonly replay: CheckReplay
+    readonly message: string
+  }
+  | {
     readonly law: "transition.notCovered"
     readonly severity: "warning"
     readonly source: string
@@ -2297,6 +2447,35 @@ export interface CheckReport {
 }
 
 /**
+ * The results to try for one Effect source: each value is one branch of
+ * exploration, taken wherever the source runs.
+ *
+ * `failure` is accepted only when the Effect has a typed failure.
+ *
+ * @category models
+ * @since 0.48.0
+ */
+export type CheckOutcome<Result extends Machine.Machine.EffectResult<any, any>> =
+  & { readonly done?: ReadonlyArray<Result["done"]> }
+  & ([Result["failure"]] extends [never] ? { readonly failure?: never }
+    : { readonly failure?: ReadonlyArray<Result["failure"]> })
+
+/**
+ * The results to try for the Effect sources of a machine, keyed by registered
+ * source name and typed from each source's Effect.
+ *
+ * A machine whose type no longer carries the result types of its sources,
+ * because it was widened by an annotation, accepts no outcomes.
+ *
+ * @category models
+ * @since 0.48.0
+ */
+export type CheckOutcomes<M extends AnyMachine> = [Machine.Machine.EffectResults<M>] extends [never] ? never
+  : {
+    readonly [K in keyof Machine.Machine.EffectResults<M>]?: CheckOutcome<Machine.Machine.EffectResults<M>[K]>
+  }
+
+/**
  * Options for {@link check}. Every option has a default derived from the machine.
  *
  * @category models
@@ -2307,6 +2486,11 @@ export interface CheckOptions<M extends AnyMachine> {
   readonly input?: InputValue<M>
   /** Events to try in every state. Defaults to samples derived from the event schemas. */
   readonly events?: ReadonlyArray<Machine.Machine.EventInput<Machine.Machine.InputEvent<M>>>
+  /**
+   * Results to try for invoked Effects, keyed by source name. Without an entry,
+   * an Effect's results are not explored.
+   */
+  readonly outcomes?: CheckOutcomes<M>
   /** Distinct values to sample for each event tag. Defaults to 3. */
   readonly eventSamples?: number
   /** Seed for sampled input and events. Defaults to 0, so reports are reproducible. */
@@ -2335,15 +2519,26 @@ export interface CheckOptions<M extends AnyMachine> {
  * transition a second time, so nondeterminism is found even when hidden behind a
  * helper. Declared branches that were never taken are reported as warnings.
  *
+ * Work never runs, but exploration takes its results as further branches while
+ * the work runs: a running timer elapses, and a running Effect reports each
+ * value supplied for its source in `outcomes`. A result is offered once per
+ * entry of the state that invoked the work, so a node is a state together with
+ * the work still running in it. Each result is planned and checked like an
+ * event. A supplied result that fails the machine, because its work has no
+ * `onFailure` or no `onDone`, is an `"outcome.failsMachine"` error. The compiler
+ * requires both handlers, so this happens only when the machine's types were
+ * erased.
+ *
  * Findings are returned rather than failed, so the Effect only fails on
  * interruption. Each finding that came from running the machine includes the
- * events that reproduce it.
+ * events and results that reproduce it, which {@link run} plans again.
  *
  * **Gotchas**
  *
  * A passing `"bounded"` report means nothing was found in what was explored. It
- * is not a proof. Invocations do not run during planning, so test them with
- * {@link probe} on a started machine.
+ * is not a proof. The results of an Effect without `outcomes`, and of Streams,
+ * logic, and child machines, are not explored, and `limits` names each one that
+ * ran. Test those with {@link probe} on a started machine.
  *
  * **Example** (Finding nondeterministic planning)
  *
@@ -2369,6 +2564,41 @@ export interface CheckOptions<M extends AnyMachine> {
  *
  * report.ok // => false
  * report.findings.map((finding) => finding.law) // => ["planning.deterministic"]
+ * ```
+ *
+ * **Example** (Visiting the states behind invoked work)
+ *
+ * ```ts import.meta.vitest
+ * import { Machine } from "@typeonce/effect-machine"
+ * import { MachineTest } from "@typeonce/effect-machine/testing"
+ * import { Data, Effect } from "effect"
+ *
+ * class LoadError extends Data.TaggedError("LoadError")<{}> {}
+ * const loadDocument: Effect.Effect<string, LoadError> = Effect.succeed("# Title")
+ *
+ * const machine = Machine.make({
+ *   root: Machine.state({ states: { Loading: {}, Ready: {}, Failed: {}, TimedOut: {} } }),
+ *   events: Machine.events({}),
+ *   effects: { loadDocument },
+ *   timers: { timeout: "5 seconds" }
+ * }).handle({
+ *   initial: { target: "Loading" },
+ *   states: {
+ *     Loading: {
+ *       invoke: [
+ *         { src: "loadDocument", onDone: { target: "Ready" }, onFailure: { target: "Failed" } },
+ *         { src: "timeout", onDone: { target: "TimedOut" } }
+ *       ]
+ *     }
+ *   }
+ * })
+ *
+ * const report = await Effect.runPromise(MachineTest.check(machine, {
+ *   outcomes: { loadDocument: { done: ["# Title"], failure: [new LoadError()] } }
+ * }))
+ *
+ * report.stats.states // => 4
+ * report.limits // => ["customOutcomes"]
  * ```
  *
  * @category verification

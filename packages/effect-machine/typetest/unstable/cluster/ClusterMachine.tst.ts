@@ -4,6 +4,7 @@ import type { Rpc, RpcGroup } from "effect/rpc"
 import { describe, expect, it } from "tstyche"
 import { Machine } from "../../../src/index.js"
 import { ClusterMachine } from "../../../src/unstable/cluster/index.js"
+import type { Rebuilt } from "../../support/rebuilt.js"
 describe("ClusterMachine", () => {
   it("preserves the public checkpoint and wire-schema contracts", () => {
     expect(ClusterMachine.CommitResult.Committed()).type.toBe<ClusterMachine.CommitResult.Committed>()
@@ -411,7 +412,7 @@ describe("ClusterMachine", () => {
     const adapter = ClusterMachine.make("Document", machine, { version: "1" })
     expect<Effect.Services<typeof adapter.client>>().type.toBe<Sharding.Sharding>()
     const client = null! as Effect.Success<typeof adapter.client> extends (id: string) => infer C ? C : never
-    expect(client).type.toBe<ClusterMachine.Client<typeof machine>>()
+    expect(client).type.toBe<ClusterMachine.Client<Rebuilt<typeof machine>>>()
     expect(client.send).type.toBeCallableWith(Events.Rename({ name: "report" }))
     expect(client.send).type.toBeCallableWith({ _tag: "Rename" as const, name: "report" })
     expect(client.send).type.toBeCallableWith(Events.Archive())
@@ -494,7 +495,7 @@ describe("ClusterMachine", () => {
     const layer = sharded.toLayer({
       enqueue: () => Effect.asVoid(PlanningService),
       onCommit: (event) => {
-        expect(event).type.toBe<ClusterMachine.CommitEvent<typeof machine>>()
+        expect(event).type.toBe<ClusterMachine.CommitEvent<Rebuilt<typeof machine>>>()
         expect(event.entityId).type.toBe<string>()
         expect(event.checkpoint).type.toBe<ClusterMachine.Checkpoint>()
         expect(event.snapshot).type.toBe<ClusterMachine.Snapshot<typeof machine>>()

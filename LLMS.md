@@ -550,9 +550,26 @@ const verifyCounter = Effect.gen(function*() {
 From a shell, `effect-machine check src/counter.ts --json` from
 `@typeonce/effect-machine-devtools` does the same for every machine a file exports.
 
-To fix a finding, keep the failing evidence first. Replay its events to reproduce
-it, make the smallest behavior change, then run the check again. Do not silence a
-finding by weakening a type or a test.
+To fix a finding, keep the failing evidence first. Pass its `replay` to
+`MachineTest.run` to reproduce it, make the smallest behavior change, then run
+the check again. Do not silence a finding by weakening a type or a test.
+
+The check takes the results of invoked work as further branches while that work
+runs. A timer elapses without any option. An Effect's results are only a type,
+so supply the values to try for each registered source in `outcomes`; each value
+is one branch, and the compiler rejects an unknown source or a value of the
+wrong type:
+
+```ts
+const report = yield* MachineTest.check(LoadMachine, {
+  outcomes: {
+    loadDocument: { done: ["# Title"], failure: [new LoadError()] }
+  }
+})
+```
+
+A replay lists the steps in order: events, and the results of work such as
+`done Loading#loadDocument "# Title"` or `elapsed Waiting#timeout`.
 
 | Law                          | Meaning                                                         | Fix                                                                 |
 | ---------------------------- | --------------------------------------------------------------- | ------------------------------------------------------------------- |
@@ -562,13 +579,18 @@ finding by weakening a type or a test.
 | `planning.failed`            | A planning callback threw or a value failed its schema.         | Replay the events, then fix the callback or the value.              |
 | `planning.verification`      | A planner law failed. This usually means an Effect Machine bug. | Report it with the replay.                                          |
 | `invariant.violated`         | An invariant you supplied failed.                               | Replay the events, then fix the behavior or the invariant.          |
-| `transition.notCovered`      | Exploration never took a declared branch. This is a warning.    | Cover it with a scenario, or remove it if it cannot happen.         |
+| `outcome.failsMachine`       | A supplied result fails the machine, whose types were erased.   | Add the missing `onFailure` or `onDone`.                            |
+| `outcomes.invalid`           | `outcomes` names no Effect source that a state invokes.         | Fix the source name, or remove the entry.                           |
+| `transition.notCovered`      | Exploration never took a declared branch. This is a warning.    | Cover it with a scenario or another outcome, or remove it.          |
 | `schema.underivable`         | Input or events could not be sampled from their schemas.        | Pass `input` or `events` explicitly.                                |
 
 A report is `"exhaustive"` only when `limits` is empty. Otherwise a pass means
 nothing was found in what was explored. Keep sampled checks, bounded exploration,
-and proof distinct when reporting a result. Invocations do not run during planning,
-so test them on a started machine with `MachineTest.probe`.
+and proof distinct when reporting a result. Supplied outcomes add the
+`customOutcomes` limit. An Effect without outcomes adds `effectsWithoutOutcomes`,
+and Streams, logic, and child machines add `streams`, `logic`, and `children`:
+their results are not explored, so test them on a started machine with
+`MachineTest.probe`.
 
 ### Test paths and invariants
 
@@ -608,9 +630,10 @@ const testProgram = Effect.gen(function*() {
 })
 ```
 
-Use pure planner traces for state and transition rules. Start a live machine
-and use `MachineTest.probe` when a test depends on timers, invoked work, raised
-events, or runtime scheduling.
+Use pure planner traces for state and transition rules, including the results
+of invoked work, which a scenario lists beside its events. Start a live machine
+and use `MachineTest.probe` when a test depends on how the work actually runs,
+on raised events, or on runtime scheduling.
 
 ### Choose observation deliberately
 

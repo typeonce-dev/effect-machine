@@ -1,6 +1,7 @@
 import { type Duration, Effect, type Exit, Schema, Stream } from "effect"
 import { describe, expect, it } from "tstyche"
 import { Machine } from "../../src/index.js"
+import type { Rebuilt } from "../support/rebuilt.js"
 
 declare const service: unique symbol
 interface Database {
@@ -44,7 +45,8 @@ const machine = Machine.make({
   }
 })
 
-type M = typeof machine
+// `toStep` rebuilds the machine type from its parameters.
+type M = Rebuilt<typeof machine>
 const self = null! as Machine.MachineTarget<Machine.Machine.EventInputOf<Machine.Machine.InputEvents<M>>>
 const step = Machine.toStep(machine, { self })
 

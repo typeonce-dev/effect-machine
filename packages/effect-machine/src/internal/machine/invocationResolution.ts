@@ -280,3 +280,37 @@ export const resolve = (
   }
   return groups ?? noGroups
 }
+
+/**
+ * Resolves the groups started by several entries of one step, in start order:
+ * each entry's groups follow `resolve`, and entries keep their order.
+ *
+ * @internal
+ */
+export const resolveEntries = (
+  machine: Machine.Any,
+  configuration: Configuration.ActiveConfiguration,
+  entries: Iterable<readonly [ReadonlyArray<string>, Machine.LifecycleEvent<any>]>,
+  capabilities: InvocationCapabilities
+): ReadonlyArray<InvocationGroup> => {
+  let groups: Array<InvocationGroup> | undefined
+  for (const [paths, event] of entries) {
+    const resolved = resolve(machine, configuration, paths, event, capabilities)
+    if (resolved.length > 0) (groups ??= []).push(...resolved)
+  }
+  return groups ?? noGroups
+}
+
+/**
+ * The entries a machine starts in: every active path of the configuration,
+ * entered with `InitialEvent`, as when a machine starts or resumes.
+ *
+ * @internal
+ */
+export const initialEntries = (
+  machine: Machine.Any,
+  configuration: Configuration.ActiveConfiguration
+): ReadonlyArray<readonly [ReadonlyArray<string>, Machine.LifecycleEvent<any>]> => [[
+  Configuration.getInitialEntryPaths(machine, configuration),
+  Planner.InitialEvent
+]]

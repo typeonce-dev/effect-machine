@@ -40,7 +40,7 @@ describe("MachineTest", () => {
     expect(generated.arbitrary).type.toBe<Arbitrary.Arbitrary<MachineTest.Scenario<typeof machine>>>()
     type Scenario = MachineTest.Scenario<typeof machine>
     expect<Scenario["input"]>().type.toBe<Input>()
-    expect<Scenario["events"][number]>().type.toBe<Machine.Machine.EventInput<PublicEvent>>()
+    expect<Scenario["events"][number]>().type.toBe<Machine.Machine.EventInput<PublicEvent> | MachineTest.WorkOutcome>()
     expect<InternalEvent>().type.not.toBeAssignableTo<Scenario["events"][number]>()
   })
   it("types whole-value arbitrary overrides", () => {

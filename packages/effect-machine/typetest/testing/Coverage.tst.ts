@@ -64,6 +64,6 @@ describe("MachineTest coverage and observed graph", () => {
       Extract<Edge, {
         readonly _tag: "Event"
       }>["event"]
-    >().type.toBe<Start>()
+    >().type.toBe<Start | MachineTest.WorkOutcome>()
   })
 })

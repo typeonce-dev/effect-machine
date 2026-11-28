@@ -159,7 +159,7 @@ describe("MachineTest.check", () => {
       })
     }))
 
-  it.effect("reports sampled payloads and invocations as limits rather than as proof", () =>
+  it.effect("reports sampled payloads and unexplored Effects as limits rather than as proof", () =>
     Effect.gen(function*() {
       const machine = Machine.make({
         root: Machine.state({ states: { Idle: {}, Busy: {} } }),
@@ -177,11 +177,11 @@ describe("MachineTest.check", () => {
 
       assert.isTrue(report.ok)
       assert.strictEqual(report.exploration, "bounded")
-      assert.deepStrictEqual(report.limits, ["sampledEvents", "invocations"])
+      assert.deepStrictEqual(report.limits, ["sampledEvents", "effectsWithoutOutcomes"])
       assert.deepStrictEqual(laws(report), [])
     }))
 
-  it.effect("does not warn about transitions only an unrun invocation can lead to", () =>
+  it.effect("does not warn about transitions only an unexplored Effect can lead to", () =>
     Effect.gen(function*() {
       const machine = Machine.make({
         root: Machine.state({ states: { Idle: {}, Busy: {}, Failed: {} } }),
@@ -198,7 +198,7 @@ describe("MachineTest.check", () => {
 
       const report = yield* MachineTest.check(machine)
 
-      assert.deepStrictEqual(report.limits, ["invocations"])
+      assert.deepStrictEqual(report.limits, ["effectsWithoutOutcomes"])
       assert.deepStrictEqual(laws(report), [])
     }))
 

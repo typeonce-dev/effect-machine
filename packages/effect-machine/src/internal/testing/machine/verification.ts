@@ -38,6 +38,7 @@ import * as ReferenceModel from "./referenceModel.js"
 import { rawConfigurationPaths } from "./trace.js"
 import { makeTransitionCoverageCollector, sameTransitionTrigger } from "./transitionCoverage.js"
 import { sameValue } from "./value.js"
+import { isWorkOutcome } from "./work.js"
 
 type AnyMachine = Machine.Machine.Any
 
@@ -427,6 +428,7 @@ export const coverage = <M extends AnyMachine>(
   let alwaysTriggered = 0
   let doneTriggered = 0
   let choiceTriggered = 0
+  let invokeTriggered = 0
   let donePlans = 0
   let completionRecordObservations = 0
   const completionPaths = new Set<string>()
@@ -479,6 +481,7 @@ export const coverage = <M extends AnyMachine>(
       if (retained.trigger.type === "event") eventTriggered += 1
       else if (retained.trigger.type === "always") alwaysTriggered += 1
       else if (retained.trigger.type === "done") doneTriggered += 1
+      else if (retained.trigger.type === "invoke") invokeTriggered += 1
       else choiceTriggered += 1
       if (retained.target !== undefined && nodeByPath.get(retained.target)?.type === "history") {
         historyTargets += 1
@@ -491,6 +494,8 @@ export const coverage = <M extends AnyMachine>(
     scenarioEvents += trace.scenario.events.length
     if (trace.scenario.events.length === 0) emptyScenarios += 1
     for (const step of trace.steps) {
+      // Event coverage counts public events. A result of work is not one.
+      if (isWorkOutcome(step.event)) continue
       const tag = step.event._tag
       eventCounts.set(tag, (eventCounts.get(tag) ?? 0) + 1)
     }
@@ -569,7 +574,8 @@ export const coverage = <M extends AnyMachine>(
       eventTriggered,
       alwaysTriggered,
       doneTriggered,
-      choiceTriggered
+      choiceTriggered,
+      invokeTriggered
     },
     completion: {
       donePlans,

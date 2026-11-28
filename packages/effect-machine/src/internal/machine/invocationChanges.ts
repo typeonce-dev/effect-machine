@@ -50,3 +50,36 @@ export const fromMicrosteps = (microsteps: ReadonlyArray<Microstep>): Invocation
   }
   return exited === undefined || entered === undefined ? undefined : { exited, entered }
 }
+
+/**
+ * Splits running work into the work a step stops, in exit order, and the work
+ * it keeps, in start order. Work is stopped when its owning path was exited.
+ *
+ * @internal
+ */
+export const partition = <Work extends { readonly path: string }>(
+  running: ReadonlyArray<Work>,
+  changes: InvocationChanges | undefined
+): { readonly stop: ReadonlyArray<Work>; readonly kept: ReadonlyArray<Work> } => {
+  if (changes === undefined || running.length === 0) return { stop: noWork, kept: running }
+  const stop: Array<Work> = []
+  for (const path of new Set(changes.exited)) {
+    for (const work of running) if (work.path === path) stop.push(work)
+  }
+  return stop.length === 0
+    ? { stop: noWork, kept: running }
+    : { stop, kept: running.filter((work) => !stop.includes(work)) }
+}
+
+const noWork: ReadonlyArray<never> = []
+
+/**
+ * The entries of a step, one per entered path, as `InvocationResolution.resolveEntries`
+ * reads them.
+ *
+ * @internal
+ */
+export const entries = (
+  changes: InvocationChanges | undefined
+): ReadonlyArray<readonly [ReadonlyArray<string>, Machine.LifecycleEvent<any>]> =>
+  changes === undefined ? noWork : Array.from(changes.entered, ([path, event]) => [[path], event] as const)
