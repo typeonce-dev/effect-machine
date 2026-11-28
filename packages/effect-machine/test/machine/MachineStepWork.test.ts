@@ -78,7 +78,7 @@ describe("Machine.toStep work", () => {
       load.effect()
       load.effect()
       assert.deepStrictEqual(calls, ["map load", "load a"])
-      assert.deepStrictEqual(wait.duration(), Exit.succeed(Exit.succeed(Duration.seconds(5))))
+      assert.deepStrictEqual(wait.duration(), Exit.succeed(Duration.seconds(5)))
       wait.effect()
       wait.duration()
       feed.stream()
@@ -114,21 +114,18 @@ describe("Machine.toStep work", () => {
         assert.strictEqual((failureOf(failed.exit) as Error).message, "no duration")
       })
 
-      it.effect("ends a timer whose input names no duration with that failure, as its own end", () =>
-        Effect.gen(function*() {
-          const step = Machine.toStep(machine(() => "soon" as Duration.Input), { self })
-          const started = success(step.start())
-          const timer = only(started.start)
-          if (timer._tag !== "Timer") throw new Error(timer._tag)
-          // The timer starts: its wait is what fails.
-          const wait = success(timer.duration())
-          assert.isTrue(Exit.isFailure(wait))
-          const exit = yield* Effect.exit(success(timer.effect()))
-          assert.isTrue(Exit.isFailure(exit) && Exit.hasDies(exit))
-          const failed = step.settle(started.state, timer, wait)
-          assert.isTrue(failed.exit !== undefined && Exit.hasDies(failed.exit))
-          assert.strictEqual(leafOf(failed), "Waiting")
-        }))
+      it("cannot start a timer whose input names no duration, as one whose duration throws", () => {
+        const step = Machine.toStep(machine(() => "soon" as Duration.Input), { self })
+        const started = success(step.start())
+        const timer = only(started.start)
+        if (timer._tag !== "Timer") throw new Error(timer._tag)
+        const duration = timer.duration()
+        assert.isTrue(Exit.isFailure(duration) && Exit.hasDies(duration))
+        assert.isTrue(Exit.isFailure(timer.effect()))
+        const failed = step.settle(started.state, timer, duration)
+        assert.isTrue(failed.exit !== undefined && Exit.hasDies(failed.exit))
+        assert.strictEqual(leafOf(failed), "Waiting")
+      })
     })
   })
 

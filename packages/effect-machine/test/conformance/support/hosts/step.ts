@@ -505,10 +505,7 @@ export const stepHost: Host = {
         case "Timer": {
           const duration = work.duration()
           if (Exit.isFailure(duration)) return cannotStart(runner, work, duration)
-          const wait = duration.value
-          // A duration that its input does not name ends the timer at once, as one of zero duration does.
-          if (Exit.isFailure(wait)) return fork(runner, work, wait)
-          const millis = Duration.toMillis(wait.value)
+          const millis = Duration.toMillis(duration.value)
           if (millis <= 0) return fork(runner, work, Effect.void)
           return Effect.sync(() => {
             runner.running.set(work, { stopped: false })

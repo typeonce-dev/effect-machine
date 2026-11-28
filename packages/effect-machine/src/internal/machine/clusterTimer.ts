@@ -34,8 +34,8 @@ export const schedule = (
   for (const work of running) {
     if (work._tag !== "Timer" || ClusterProgress.get(scheduled, work) !== undefined) continue
     const duration = work.duration()
-    if (Exit.isSuccess(duration) && Exit.isSuccess(duration.value)) {
-      scheduled = ClusterProgress.wait(scheduled, work, dueAt(now, duration.value.value))
+    if (Exit.isSuccess(duration)) {
+      scheduled = ClusterProgress.wait(scheduled, work, dueAt(now, duration.value))
     }
   }
   return scheduled

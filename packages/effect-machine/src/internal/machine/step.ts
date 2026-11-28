@@ -114,7 +114,7 @@ export type Work =
   }
   | WorkBase & {
     readonly _tag: "Timer"
-    readonly duration: () => Exit.Exit<Exit.Exit<Duration.Duration>>
+    readonly duration: () => Exit.Exit<Duration.Duration>
     readonly effect: () => Exit.Exit<Effect.Effect<void>>
   }
   | WorkBase & {
@@ -541,7 +541,7 @@ const build = <O extends Ownership>(
           _tag: "Timer",
           source: invocation.sourceName,
           duration,
-          effect: () => Exit.map(duration(), (wait) => Effect.flatMap(wait, Effect.sleep))
+          effect: () => Exit.map(duration(), Effect.sleep)
         }
       }
       case "Stream":

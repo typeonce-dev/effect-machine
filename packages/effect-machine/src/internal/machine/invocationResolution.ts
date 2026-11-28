@@ -30,7 +30,6 @@
 
 import * as Duration from "effect/Duration"
 import type * as Effect from "effect/Effect"
-import * as Exit from "effect/Exit"
 import type * as Stream from "effect/Stream"
 import type { ChildMachine, ChildOwner, Logic, Machine, MachineTarget } from "../../Machine.js"
 import * as CapturedInvocation from "./capturedInvocation.js"
@@ -73,15 +72,15 @@ export interface EffectInvocation extends NamedBase {
  * A timer completes with `undefined` once its duration has elapsed.
  *
  * `duration` is lazy because a parameterized timer runs its input mapper and
- * source function. A throw belongs to the host's startup boundary. An input that
- * does not name a duration is the failed `Exit`, which the host reports as the
- * timer's own outcome.
+ * source function. It throws when the timer cannot start: when either throws,
+ * and when the input names no duration. A throw belongs to the host's startup
+ * boundary, so a timer that cannot start fails in one way.
  *
  * @internal
  */
 export interface TimerInvocation extends NamedBase {
   readonly _tag: "Timer"
-  readonly duration: () => Exit.Exit<Duration.Duration>
+  readonly duration: () => Duration.Duration
 }
 
 /** @internal */
@@ -164,14 +163,6 @@ const outcomeChannels = (definition: CapturedInvocation.CapturedInvocation): Out
     (definition.onSnapshot === undefined ? 0 : 8)
   ]!
 
-const toDuration = (input: Duration.Input): Exit.Exit<Duration.Duration> => {
-  try {
-    return Exit.succeed(Duration.fromInputUnsafe(input))
-  } catch (error) {
-    return Exit.die(error)
-  }
-}
-
 type CapturedChild = Extract<CapturedInvocation.CapturedInvocation, { readonly child: ChildMachine.Any }>
 
 // A child without input does not depend on its entry context, so neither
@@ -207,7 +198,8 @@ const resolveDefinition = (
       id,
       sourceName,
       channels,
-      duration: () => toDuration(typeof definition.after === "function" ? definition.after(context) : definition.after)
+      duration: () =>
+        Duration.fromInputUnsafe(typeof definition.after === "function" ? definition.after(context) : definition.after)
     }
   }
   if ("stream" in definition) {

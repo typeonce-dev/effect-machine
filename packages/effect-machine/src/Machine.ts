@@ -7992,17 +7992,16 @@ export declare namespace MachineStep {
      *
      * **Details**
      *
-     * `duration` evaluates how long the timer waits, at most once. Its outer
-     * `Exit` follows the rule of every kind of work: a failure means that the
-     * timer could not start. The inner `Exit` is how the timer ends: wait for
-     * the duration it holds, or, when the input of the timer names no duration,
-     * end at once with its failure, as a timer of zero duration does. A host
-     * that keeps timers of its own, or stores a due time before it commits a
-     * step, reads `duration` in the step that enters the state, and settles the
-     * timer with the inner failure when it would have fallen due.
+     * `duration` evaluates how long the timer waits, at most once. It follows
+     * the rule of every kind of work: a failure means that the timer could not
+     * start, whether its input mapper or source threw, or its input names no
+     * duration. A host that keeps timers of its own, or stores a due time
+     * before it commits a step, reads `duration` in the step that enters the
+     * state, and settles the timer with that failure where it would have
+     * started.
      *
-     * `effect` is the timer as an Effect that sleeps for the duration, or fails
-     * as the timer fails, for a host whose timers wait on fibers.
+     * `effect` is the timer as an Effect that sleeps for the duration, for a
+     * host whose timers wait on fibers. It fails as `duration` fails.
      *
      * @category models
      * @since 0.48.0
@@ -8011,7 +8010,7 @@ export declare namespace MachineStep {
       readonly _tag: "Timer"
 
       /** Evaluates how long the timer waits, at most once. */
-      readonly duration: () => Exit.Exit<Exit.Exit<Duration.Duration>>
+      readonly duration: () => Exit.Exit<Duration.Duration>
 
       /** Evaluates the timer as an Effect that waits for its duration. */
       readonly effect: () => Exit.Exit<StepEffect<void, never>>

@@ -68,7 +68,7 @@ fires a timer that stays once, until its state is entered again                 
 fires again and again in a state that its completion enters again                           | runs                   | runs                    | runs        | runs                         | runs
 fails when the completion of a timer cannot be applied                                      | runs                   | runs                    | runs        | runs                         | runs
 fails when the duration of a timer throws, in the state that owns it                        | runs                   | runs                    | runs        | runs                         | runs
-fails when the input of a timer names no duration, as the end of the timer                  | runs                   | runs                    | runs        | runs                         | runs
+fails when the input of a timer names no duration, in the state that owns it                | runs                   | runs                    | runs        | runs                         | runs
 evaluates a duration in order with the other invocations of its state                       | runs                   | runs                    | runs        | differs                      | runs
 never fires a timer of infinite duration                                                    | runs                   | runs                    | runs        | runs                         | runs
 counts the timer of its initial state from its start                                        | runs                   | runs                    | runs        | differs                      | runs

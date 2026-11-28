@@ -58,16 +58,16 @@ describe("local timer invocations", () => {
           assert.strictEqual((Cause.squash(snapshot.cause) as Error).message, "timer source")
         }).pipe(Effect.scoped))
 
-      it.effect("reports an input that names no duration as the timer's outcome in a later turn", () =>
+      it.effect("cannot start a timer whose input names no duration, in the turn that enters its state", () =>
         Effect.gen(function*() {
           const steps: Array<string> = []
           const ref = yield* openWithRuntimeStrategy(makeMachine(steps, (seconds) => `${seconds} seconds`), strategy)
           Effect.runSync(ref.send({ _tag: "Go" }))
           assert.deepStrictEqual(steps, ["first started", "timer mapped"])
-          assert.strictEqual(status(ref), "active")
-          const cause = yield* Effect.flip(Effect.sandbox(ref.join))
-          assert.isTrue(Cause.hasDies(cause))
-          assert.strictEqual(status(ref), "failed")
+          const snapshot = Effect.runSync(ref.snapshot)
+          if (snapshot.status !== "failed") throw new Error(`Unexpected ${snapshot.status}`)
+          assert.strictEqual(snapshot.state.state.path, "Working")
+          assert.isTrue(Cause.hasDies(snapshot.cause))
         }).pipe(Effect.scoped))
     })
   }

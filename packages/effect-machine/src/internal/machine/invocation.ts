@@ -45,7 +45,7 @@ const delay = (
   duration: ReturnType<InvocationResolution.TimerInvocation["duration"]>
 ): Runtime.ProcessLogic<void, unknown, unknown, unknown, unknown> => ({
   initial: () => Effect.void,
-  run: () => Effect.flatMap(duration, Effect.sleep)
+  run: () => Effect.sleep(duration)
 })
 
 const streamLogic = (

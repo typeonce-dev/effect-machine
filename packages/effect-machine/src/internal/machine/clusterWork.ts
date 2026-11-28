@@ -218,9 +218,8 @@ const construct = (
       // The duration was read before the state was stored. A failure of that
       // is reported here, where the local runtime would have read it.
       const duration = work.duration()
-      if (Exit.isFailure(duration)) return duration
-      return Exit.isFailure(duration.value)
-        ? Exit.succeed(Effect.failCause(duration.value.cause))
+      return Exit.isFailure(duration)
+        ? Exit.failCause(duration.cause)
         : Exit.die(new Error(`Timer "${work.id}" of state "${work.path}" has no due time`))
     }
     case "Child":

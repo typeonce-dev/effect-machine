@@ -247,18 +247,16 @@ describe("ClusterWork", () => {
     it.effect("without a due time fail where they would have started", () =>
       Effect.gen(function*() {
         const { ended, work } = yield* makeTimed
-        // A duration that its input does not name ends the timer, next to the others.
+        // A duration that its input does not name ends the start.
         const named = timers(["first", "invalid", "last"], (id) => id === "invalid" ? "soon" as never : 0)
-        assert.strictEqual(yield* work.start(named, waiting({ first: 0, last: 0 })), undefined)
+        const unnamed = yield* work.start(named, waiting({ first: 0, last: 0 }))
+        assert.strictEqual(unnamed?.work, named[1])
+        assert.isTrue(unnamed !== undefined && Exit.isFailure(unnamed.exit) && Exit.hasDies(unnamed.exit))
         yield* settle
-        assert.deepStrictEqual(ended.map(([id, exit]) => [id, Exit.hasDies(exit)]), [
-          ["first", false],
-          ["invalid", true],
-          ["last", false]
-        ])
+        assert.deepStrictEqual(ended.map(([id]) => id), ["first"])
         yield* work.stopAll
         ended.length = 0
-        // A duration that cannot be computed ends the start.
+        // So does a duration that cannot be computed.
         const error = new Error("no duration")
         const thrown = timers(["first", "throws", "last"], (id) =>
           id === "throws" ?

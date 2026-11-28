@@ -4039,7 +4039,7 @@ describe("ClusterMachine", () => {
           },
           "names no duration": {
             duration: () => "soon" as Duration.Input,
-            order: ["duration", "first", "third"]
+            order: ["duration", "first"]
           }
         }
         for (const [name, { duration, order }] of Object.entries(durations)) {
