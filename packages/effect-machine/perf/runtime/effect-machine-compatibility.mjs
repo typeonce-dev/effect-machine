@@ -262,3 +262,13 @@ export const effectMachineBenchmarkProcessRuntime = (runtime) =>
     : runtime.make(() => {
       throw new Error("Raw process benchmarks start no child machines")
     })
+
+/**
+ * Selects the step functions of a machine: `Machine.toStep`, whose states are
+ * persistent values, and the internal step functions that take each state over,
+ * in revisions that have them. Either is `undefined` where it does not exist.
+ */
+export const effectMachineBenchmarkStep = ({ Machine }, stepModule) => ({
+  persistent: typeof Machine.toStep === "function" ? Machine.toStep : undefined,
+  owned: typeof stepModule?.makeOwned === "function" ? stepModule.makeOwned : undefined
+})

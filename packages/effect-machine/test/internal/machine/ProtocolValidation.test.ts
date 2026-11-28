@@ -39,9 +39,9 @@ describe("event validation across execution strategies", () => {
         const state = selected.plan.fromConfiguration(
           Configuration.normalizeConfigurationSync(machine, initial.state)
         )
-        selected.plan.plan(state, events.Set({ value: 1 }), true)
+        selected.plan.plan(state, events.Set({ value: 1 }), "Persistent", true)
         Object.assign(retained as object, { value: "invalid" })
-        assert.throws(() => selected.plan.plan(state, retained, true), Machine.MachineSchemaDecodeError)
+        assert.throws(() => selected.plan.plan(state, retained, "Persistent", true), Machine.MachineSchemaDecodeError)
       }))
   }
 })

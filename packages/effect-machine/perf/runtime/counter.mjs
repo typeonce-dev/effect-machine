@@ -5,6 +5,7 @@ import { fileURLToPath, pathToFileURL } from "node:url"
 import {
   effectMachineBenchmarkHost,
   effectMachineBenchmarkProcessRuntime,
+  effectMachineBenchmarkStep,
   makeEffectMachineBenchmarkApi
 } from "./effect-machine-compatibility.mjs"
 
@@ -31,6 +32,11 @@ if (machineRuntimePath === undefined) {
 }
 const machineRuntimeModule = await import(pathToFileURL(machineRuntimePath).href)
 const machineRuntime = effectMachineBenchmarkProcessRuntime(machineRuntimeModule)
+const stepModulePath = join(implementationRoot, "dist/internal/machine/step.js")
+const machineStep = effectMachineBenchmarkStep(
+  effectMachine,
+  existsSync(stepModulePath) ? await import(pathToFileURL(stepModulePath).href) : undefined
+)
 const { Context, Effect, Fiber, Option, Schema, Scope, Stream } = effect
 
 // Benchmarks own started machines explicitly and stop them through `ref.stop`.
@@ -339,6 +345,82 @@ const planParallelCounterBatch = (size) =>
       return active.states.Left.value.value + active.states.Right.value.value
     })
   )
+
+// The step functions run no work, so their scenarios run no Effect. Each one
+// starts a machine outside the measured batch, then takes a step for every
+// event and reads its snapshot, as a host that publishes every state does.
+const stepSelf = {
+  id: "RuntimeBenchmarkStep",
+  sessionId: "RuntimeBenchmarkStep",
+  send: () => Effect.void
+}
+
+const stepValue = (result) => {
+  if (result._tag !== "Success") {
+    throw new Error("Effect Machine step benchmark could not take a step")
+  }
+  return result.value
+}
+
+const makeStepBenchmarks = (mode, makeStep) => {
+  if (makeStep === undefined) return []
+  const prefix = mode === "owned" ? "owned-step" : "step"
+  const suffix = mode === "owned" ? " with owned states" : ""
+  const scenario = (id, label, machine, event, read) => {
+    const step = makeStep(machine, { self: stepSelf })
+    return {
+      id: `${prefix}-${id}`,
+      label: `${label}${suffix}`,
+      unit: "transitions/s",
+      operations: ({ planningBatchSize }) => planningBatchSize,
+      expected: (operations) => operations,
+      start: () => ({ step, state: stepValue(step.start()).state }),
+      run: (ref, operations) => {
+        let snapshot
+        let state = ref.state
+        for (let index = 0; index < operations; index += 1) {
+          const next = stepValue(step.send(state, event(index)))
+          snapshot = next.snapshot
+          state = next.state
+        }
+        ref.state = state
+        return read(snapshot)
+      },
+      stop: () => undefined
+    }
+  }
+  return [
+    scenario(
+      "counter",
+      "Step counter transitions",
+      counterMachine,
+      () => incrementEvent,
+      counterValue
+    ),
+    scenario(
+      "hierarchical-counter",
+      "Step transitions through a compound state",
+      hierarchicalCounterMachine,
+      () => hierarchicalIncrementEvent,
+      (snapshot) => benchmarkApi.snapshot(snapshot).state.value.value
+    ),
+    scenario(
+      "parallel-counter",
+      "Step transitions through parallel regions",
+      parallelCounterMachine,
+      (index) => index % 2 === 0 ? parallelIncrementLeftEvent : parallelIncrementRightEvent,
+      (snapshot) => {
+        const active = benchmarkApi.snapshot(snapshot)
+        return active.states.Left.value.value + active.states.Right.value.value
+      }
+    )
+  ]
+}
+
+const stepBenchmarks = [
+  ...makeStepBenchmarks("persistent", machineStep.persistent),
+  ...makeStepBenchmarks("owned", machineStep.owned)
+]
 
 export const startCounter = () => runPromise(LocalMachine.start(counterMachine))
 
@@ -695,7 +777,10 @@ export const effectMachineAdapter = {
       start: startObservedHierarchicalCounter,
       run: runObservedHierarchicalCounterBurst,
       stop: stopObservedCounter
-    }
+    },
+    // Last, so that the planner shapes of the step functions are not yet
+    // known to the engine while the scenarios above are measured.
+    ...stepBenchmarks
   ],
   runtimeBenchmarks: [
     {

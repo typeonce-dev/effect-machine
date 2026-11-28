@@ -1,6 +1,7 @@
 import { assert, it } from "@effect/vitest"
 import { Effect, Schema } from "effect"
 import { Machine } from "../../../src/index.js"
+import { verifyStepStrategies } from "./support/stepDifferential.js"
 import { verifyPlannerStrategies } from "./support/strategyDifferential.js"
 
 it.effect("matches generic startup with constructed and defaulted parallel region data", () => {
@@ -84,9 +85,20 @@ it.effect("retains independent callback contexts across root, inline, and named 
       machine,
       expected: "indexed-hierarchical",
       label: "retained callback contexts",
-      events: [{ _tag: "Increment" }, { _tag: "Observe" }, { _tag: "IncrementRoot" }]
+      events: [{ _tag: "Increment" }, { _tag: "Observe" }, { _tag: "IncrementRoot" }],
+      steps: false
     })
     assert.deepStrictEqual(retained.map((context) => context.root.count), [0, 0, 1, 1, 1, 1])
+    assert.strictEqual(new Set(retained).size, retained.length)
+    // The step functions retain independent contexts too.
+    verifyStepStrategies({
+      label: "retained callback contexts step",
+      make: () => ({ machine }),
+      inputs: [{ _tag: "Increment" }, { _tag: "Observe" }, { _tag: "IncrementRoot" }].map((event) => ({
+        _tag: "Send",
+        event
+      }))
+    })
     assert.strictEqual(new Set(retained).size, retained.length)
     for (const context of retained) {
       assert.deepStrictEqual(context.snapshot, {

@@ -495,7 +495,7 @@ describe("machine planner and runtime strategies", () => {
         machine,
         initial.state
       )
-      const planned = selected.plan(selected.fromConfiguration(active), new Noop({}))
+      const planned = selected.plan(selected.fromConfiguration(active), new Noop({}), "Owned", false)
       const step: ExecutionPlan.ExecutionMicrostep = planned.microsteps[0]!
       assert.ok(!("transitions" in step))
       assert.ok(Object.isFrozen(planned.commands))
@@ -1388,7 +1388,7 @@ describe("machine planner and runtime strategies", () => {
           const event = InvocationEvent.done(path, "work", { current }, 1)
           const results = []
           for (const strategy of [generic, selected]) {
-            const planned = strategy.plan.plan(strategy.plan.fromConfiguration(active), event, true)
+            const planned = strategy.plan.plan(strategy.plan.fromConfiguration(active), event, "Owned", true)
             results.push({
               next: yield* Machine.encodeSnapshot(machine, strategy.plan.snapshot(planned.next)),
               microsteps: planned.microsteps.map((step) => ({
@@ -1505,4 +1505,82 @@ describe("machine planner and runtime strategies", () => {
         [{ path: "Working", type: "done" }, true]
       ])
     }) as Effect.Effect<void, unknown, any>))
+
+  describe("execution state ownership", () => {
+    const machine = Machine.make({
+      root: Machine.state({ states: { Count: { fields: { value: Schema.Number } } } }),
+      events: Machine.events({ Increment: {}, Twice: {}, Overflow: {}, Burst: {} })
+    }).handle({
+      initial: { target: "Count", data: { value: 0 } },
+      states: {
+        Count: {
+          on: {
+            Increment: { target: "Count", data: ({ state }) => ({ value: state.value + 1 }) },
+            // Writes the value twice in one plan, the second time for a raised event.
+            Twice: {
+              target: "Count",
+              data: ({ state }) => ({ value: state.value + 1 }),
+              commands: (_, enqueue) => enqueue.raise({ _tag: "Increment" })
+            },
+            // Writes the value, then raises an event whose transition throws.
+            Overflow: {
+              target: "Count",
+              data: ({ state }) => ({ value: state.value + 10 }),
+              commands: (_, enqueue) => enqueue.raise({ _tag: "Burst" })
+            },
+            Burst: {
+              target: "Count",
+              data: ({ state }) => {
+                if (state.value >= 10) throw new Error("overflow")
+                return { value: state.value }
+              }
+            }
+          }
+        }
+      }
+    })
+    const valueOf = (plan: ExecutionPlan.CompiledExecutionPlan, state: unknown) =>
+      (plan.snapshot(state) as unknown as { readonly state: { readonly value: { readonly value: number } } }).state
+        .value.value
+
+    const initial = (plan: ExecutionPlan.CompiledExecutionPlan) =>
+      plan.fromConfiguration(
+        Configuration.normalizeConfigurationSync(machine, Effect.runSync(Machine.planInitial(machine)).state)
+      )
+
+    it("plans a persistent state without writing it, and plans it again alike", () => {
+      const plan = ExecutionPlan.selectExecutionPlanForTesting(machine, "indexed-flat").plan
+      const state = initial(plan)
+      const first = plan.plan(state, { _tag: "Increment" }, "Persistent", true)
+      const again = plan.plan(state, { _tag: "Increment" }, "Persistent", true)
+      assert.strictEqual(valueOf(plan, state), 0)
+      assert.strictEqual(valueOf(plan, first.next), 1)
+      assert.strictEqual(valueOf(plan, again.next), 1)
+      assert.notStrictEqual(first.next, again.next)
+      // A retained microstep keeps its state while a later persistent plan goes on from it.
+      const next = plan.plan(first.next, { _tag: "Increment" }, "Persistent", true)
+      assert.strictEqual(valueOf(plan, first.microsteps[0]!.next), 1)
+      assert.strictEqual(valueOf(plan, next.next), 2)
+    })
+
+    it("updates an owned state in place, and leaves it as it was when the plan throws", () => {
+      const plan = ExecutionPlan.selectExecutionPlanForTesting(machine, "indexed-flat").plan
+      const state = initial(plan)
+      const incremented = plan.plan(state, { _tag: "Increment" }, "Owned", false)
+      assert.strictEqual(incremented.next, state)
+      assert.strictEqual(valueOf(plan, state), 1)
+      assert.throws(() => plan.plan(state, { _tag: "Overflow" }, "Owned", true), /overflow/)
+      assert.strictEqual(valueOf(plan, state), 1)
+    })
+
+    it("keeps each retained microstep of an owned plan while later microsteps write in place", () => {
+      const plan = ExecutionPlan.selectExecutionPlanForTesting(machine, "indexed-flat").plan
+      const planned = plan.plan(initial(plan), { _tag: "Twice" }, "Owned", true)
+      assert.deepStrictEqual(planned.microsteps.map((step) => valueOf(plan, step.next)), [1, 2])
+      assert.strictEqual(valueOf(plan, planned.next), 2)
+      // Without retained microsteps, the plan writes one state throughout.
+      const unretained = plan.plan(initial(plan), { _tag: "Twice" }, "Owned", false)
+      assert.strictEqual(unretained.microsteps[0]!.next, unretained.next)
+    })
+  })
 })
