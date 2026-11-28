@@ -16,7 +16,7 @@ plans raised events in the step that raises them, in order                      
 emits the events of every kind of transition, in order                                      | runs                   | runs                    | runs        | runs                         | runs
 ends in a final state with its output, and takes no event after it                          | runs                   | runs                    | runs        | differs                      | runs
 ends at once when its initial state is final                                                | runs                   | runs                    | runs        | differs                      | runs
-refuses the payload of an event that its schema refuses                                     | runs                   | runs                    | runs        | differs                      | differs
+refuses the payload of an event that its schema refuses                                     | runs                   | runs                    | runs        | runs                         | runs
 a transition throws                                                                         | runs                   | runs                    | runs        | differs                      | runs
 a step never settles                                                                        | runs                   | runs                    | runs        | differs                      | runs
 a transition leads to a state that its schema refuses                                       | runs                   | runs                    | runs        | differs                      | runs

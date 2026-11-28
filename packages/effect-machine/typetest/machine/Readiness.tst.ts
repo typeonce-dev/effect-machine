@@ -281,10 +281,14 @@ describe("executable machine readiness", () => {
     expect(makeBoundAtom).type.toBeCallableWith()
     expect<Effect.Success<typeof planned>["next"]>().type.toBe<Machine.Snapshot<typeof completeStates>>()
     expect<Effect.Success<typeof started>["send"]>().type.toBe<
-      (event: Machine.Machine.EventInput<Tick>) => Effect.Effect<void, Machine.StoppedError>
+      (
+        event: Machine.Machine.EventInput<Tick>
+      ) => Effect.Effect<void, Machine.StoppedError | Machine.MachineSchemaDecodeError>
     >()
     expect<Effect.Success<typeof resumed>["send"]>().type.toBe<
-      (event: Machine.Machine.EventInput<Tick>) => Effect.Effect<void, Machine.StoppedError>
+      (
+        event: Machine.Machine.EventInput<Tick>
+      ) => Effect.Effect<void, Machine.StoppedError | Machine.MachineSchemaDecodeError>
     >()
     expect<Effect.Success<typeof trace>>().type.toBe<MachineTest.Trace<typeof complete>>()
     expect<AtomChannels<typeof atom>>().type.toBe<

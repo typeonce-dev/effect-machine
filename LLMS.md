@@ -478,6 +478,14 @@ Do not read the clock, generate randomness, call a service, or await work while
 choosing a transition. Receive such values in an event or produce them through
 state-owned work first.
 
+A transition that throws follows one rule on every host: the error goes to the
+sender when one waits for the event to be processed, and otherwise the machine
+fails with it. `send` of `LocalMachine` returns before the event is processed,
+so the machine fails; a `ClusterMachine` client waits, so it is rejected and the
+machine goes on. An event that its schema refuses is different: every host
+rejects it at `send`, `LocalMachine` with `MachineSchemaDecodeError` and
+`ClusterMachine` as `InvalidEvent`, and the machine keeps running.
+
 `resolve` is checked against `branches` in both directions, and each `select`
 call takes the values of the path it is given. An agent can edit this one
 transition without reading anything else: a missing entry, an entry that is never
@@ -1918,9 +1926,9 @@ most once and returns an `Exit`:
 
 - `Effect`: `work.effect()`, then run it and settle its `Exit`.
 - `Timer`: `work.duration()` holds how long to wait, then settle with
-  `Exit.void`. When the input names no duration, the inner `Exit` fails: settle
-  with it at once, as a timer of zero duration ends. `work.effect()` is the same
-  timer as an Effect, for a host whose timers wait on fibers.
+  `Exit.void`. It fails, like every accessor, when the timer cannot start,
+  also when its input names no duration. `work.effect()` is the same timer as
+  an Effect, for a host whose timers wait on fibers.
 - `Stream`: `work.stream()`. Report each element with `element`, pull the next
   element after that step, and settle with the end of the stream.
 - `Logic`: `work.logic()`. Run `initial` and `run` with contexts of the host,

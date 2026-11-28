@@ -1016,7 +1016,7 @@ describe("Machine", () => {
           value: { _tag: "DeferredEventState", value: "alpha" }
         })
       }))
-    it.effect("reports deferred constructor failures through the running machine", () =>
+    it.effect("rejects deferred constructor failures at send and keeps the machine", () =>
       Effect.gen(function*() {
         const Event = Schema.TaggedUnion({
           Submit: { value: Schema.NonEmptyString }
@@ -1058,10 +1058,12 @@ describe("Machine", () => {
         assert.strictEqual(accessorError.event, "Submit")
         assert.isTrue(Cause.isCause(accessorError.cause))
         const actor = yield* LocalMachine.start(machine)
-        const snapshot = yield* sendAndWaitForSnapshot(actor, construction!, (snapshot) => snapshot.status === "failed")
-        const error = yield* Effect.flip(actor.join)
+        const error = yield* Effect.flip(actor.send(construction!))
         assertMachineSchemaDecodeError(error, "event", { event: "Submit" })
-        assert.strictEqual(snapshot.status, "failed")
+        const sentAccessorError = yield* Effect.flip(actor.send(accessorFailure))
+        assert.instanceOf(sentAccessorError, Machine.MachineSchemaDecodeError)
+        assert.strictEqual(sentAccessorError.boundary, "event")
+        assert.strictEqual((yield* actor.snapshot).status, "active")
       }))
     it.effect("plans inline Effect and timer outcomes", () =>
       Effect.gen(function*() {
@@ -1777,7 +1779,7 @@ describe("Machine", () => {
         }, unsafeTagged({ _tag: "NonEmptySubmit", value: "" })))
         assertMachineSchemaDecodeError(canError, "event", { event: "NonEmptySubmit" })
       }))
-    it.effect("surfaces sent event decode failures through the machine lifecycle", () =>
+    it.effect("rejects a sent event that its schema refuses, and keeps the machine", () =>
       Effect.gen(function*() {
         const states = Machine.state({ states: { NonEmptyIdle } })
         const machine = Machine.make({
@@ -1798,22 +1800,11 @@ describe("Machine", () => {
           }
         })
         const actor = yield* LocalMachine.start(machine)
-        const snapshot = yield* sendAndWaitForSnapshot(
-          actor,
-          unsafeTagged({ _tag: "NonEmptySubmit", value: "" }),
-          (snapshot) => snapshot.status === "failed"
-        )
-        const error = yield* Effect.flip(actor.join)
+        const error = yield* Effect.flip(actor.send(unsafeTagged({ _tag: "NonEmptySubmit", value: "" })))
         assertMachineSchemaDecodeError(error, "event", { event: "NonEmptySubmit" })
-        assert.strictEqual(snapshot.status, "failed")
-        if (snapshot.status === "failed") {
-          const reason = snapshot.cause.reasons[0]
-          assert.ok(reason !== undefined)
-          assert.strictEqual(Cause.isFailReason(reason), true)
-          if (Cause.isFailReason(reason)) {
-            assertMachineSchemaDecodeError(reason.error, "event", { event: "NonEmptySubmit" })
-          }
-        }
+        assert.strictEqual((yield* actor.snapshot).status, "active")
+        yield* actor.send(new NonEmptySubmit({ value: "ok" }))
+        assert.strictEqual((yield* actor.snapshot).status, "active")
       }))
     it.effect("decodes transition target values before accepting them", () =>
       Effect.gen(function*() {

@@ -74,7 +74,7 @@ export const atomHost: Host = {
           registry.set(bridge.send, event)
           return Effect.map(
             Effect.exit(AtomRegistry.getResult(registry, bridge.send, { suspendOnWaiting: true })),
-            (exit): Answer => answerOf(exit as Exit.Exit<void, Machine.StoppedError>)
+            (exit): Answer => answerOf(exit as Exit.Exit<void, Machine.StoppedError | Machine.MachineSchemaDecodeError>)
           )
         }),
       outcome: Effect.sync(outcome),

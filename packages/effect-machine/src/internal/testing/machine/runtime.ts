@@ -96,7 +96,7 @@ export const checkpointCommand = <Event = never>(label?: string): RuntimeCommand
  */
 export type RuntimeCommandResult =
   | { readonly _tag: "SendAccepted" }
-  | { readonly _tag: "SendRejected"; readonly error: Machine.StoppedError }
+  | { readonly _tag: "SendRejected"; readonly error: Machine.StoppedError | Machine.MachineSchemaDecodeError }
   | { readonly _tag: "ClockAdvanced" }
   | { readonly _tag: "Stopped" }
   | { readonly _tag: "Checkpoint" }
@@ -188,7 +188,7 @@ export interface CausalRuntimeModelStep<Model, Expected, State, Error, Output> {
  */
 export type CausalRuntimeCommandResult<M extends AnyMachine> =
   | { readonly _tag: "SendProcessed"; readonly step: ProbeStep<M> }
-  | { readonly _tag: "SendRejected"; readonly error: Machine.StoppedError }
+  | { readonly _tag: "SendRejected"; readonly error: Machine.StoppedError | Machine.MachineSchemaDecodeError }
   | { readonly _tag: "ClockAdvanced" }
   | { readonly _tag: "Stopped" }
   | { readonly _tag: "Checkpoint" }
@@ -712,8 +712,18 @@ const executeCausalCommand = <M extends AnyMachine, Error, Output>(
   switch (command._tag) {
     case "Send":
       return Effect.matchEffect(probe.sendAndAwait(command.event), {
-        onFailure: (error) =>
-          error instanceof Machine.StoppedError
+        onFailure: (error): Effect.Effect<CausalRuntimeCommandResult<M>, Error> =>
+          // A refused event is rejected before it is sent, so the machine
+          // still runs; a processing failure has ended it.
+          error instanceof Machine.MachineSchemaDecodeError
+            ? probe.ref.snapshot.pipe(
+              Effect.flatMap((snapshot) =>
+                snapshot.status === "active"
+                  ? Effect.succeed({ _tag: "SendRejected", error } as const)
+                  : Effect.fail(error as Error)
+              )
+            )
+            : error instanceof Machine.StoppedError
             ? probe.ref.snapshot.pipe(
               Effect.flatMap((snapshot) =>
                 snapshot.status === "stopped"
@@ -721,7 +731,7 @@ const executeCausalCommand = <M extends AnyMachine, Error, Output>(
                   : Effect.fail(error as Error)
               )
             )
-            : Effect.fail(error as Error),
+            : Effect.fail(error),
         onSuccess: (step) => Effect.succeed({ _tag: "SendProcessed", step } as const)
       })
     case "Advance":

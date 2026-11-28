@@ -36,8 +36,6 @@ const makeMachine = (steps: Array<string>, duration: (seconds: number) => Durati
     }
   })
 
-const status = (ref: Machine.MachineRef<any, any, any, any>) => Effect.runSync(ref.snapshot).status
-
 describe("local timer invocations", () => {
   for (const strategy of ["generic", "compiled"] as const) {
     describe(`${strategy} runtime`, () => {

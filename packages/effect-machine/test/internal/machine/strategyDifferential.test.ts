@@ -813,11 +813,14 @@ describe("machine planner and runtime strategies", () => {
         assert.strictEqual(snapshot.state.state.value.value, 2, `${strategy} decoded the construction`)
         yield* ref.stop
         const invalidRef = yield* openWithRuntimeStrategy(machine, strategy)
-        yield* invalidRef.send(events.Set({ value: "" }))
-        const error = yield* Effect.flip(invalidRef.join)
+        const error = yield* Effect.flip(invalidRef.send(events.Set({ value: "" })))
         assert.instanceOf(error, Machine.MachineSchemaDecodeError)
         assert.strictEqual(error.boundary, "event")
         assert.strictEqual(error.event, "Set")
+        const kept = yield* invalidRef.snapshot
+        assert.strictEqual(kept.status, "active", `${strategy} kept the machine`)
+        assert.strictEqual(kept.state.state.value.value, 0)
+        yield* invalidRef.stop
       }
     }) as Effect.Effect<void, unknown, any>)
   it.effect("publishes and validates emitted events in generic and compiled managed runtimes", () =>

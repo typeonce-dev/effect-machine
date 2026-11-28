@@ -88,7 +88,7 @@ describe("Machine.toStep", () => {
       () => Exit.Exit<Stream.Stream<unknown, unknown, Database>>
     >()
     expect<Extract<Work, { readonly _tag: "Timer" }>["duration"]>().type.toBe<
-      () => Exit.Exit<Exit.Exit<Duration.Duration>>
+      () => Exit.Exit<Duration.Duration>
     >()
     expect<Extract<Work, { readonly _tag: "Timer" }>["effect"]>().type.toBe<
       () => Exit.Exit<Effect.Effect<void, unknown>>

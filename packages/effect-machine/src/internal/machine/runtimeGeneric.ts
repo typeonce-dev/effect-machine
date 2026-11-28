@@ -12,7 +12,7 @@ import * as SynchronizedRef from "effect/SynchronizedRef"
 import type * as Take from "effect/Take"
 import type { Inspection } from "../../LocalMachine.js"
 import { type ChildSelector } from "./childRegistry.js"
-import { StoppedError } from "./errors.js"
+import { type MachineSchemaDecodeError, StoppedError } from "./errors.js"
 import * as InspectionRuntime from "./inspectionRuntime.js"
 import { classifyOutcome } from "./observation.js"
 import {
@@ -21,6 +21,10 @@ import {
   acknowledgedSend,
   childlessRuntime,
   closeProcessMailbox,
+  decodeDelivered,
+  decodeSent,
+  type Deliverable,
+  deliverEvent,
   executionIsChildless,
   failAcknowledgedMessage,
   type InspectedOffer,
@@ -48,6 +52,7 @@ import {
   publishInspectedSent,
   receiveProcessMailbox,
   type RuntimeSnapshot,
+  sendEndpoint,
   sendMachineTarget,
   type StartInternalOptions,
   type StartProcess,
@@ -107,20 +112,57 @@ export const startGenericInternal: StartProcess = Effect.fnUntraced(
       Effect.suspend(() =>
         offerProcessMailbox(mailbox, message, onAccepted) ? Effect.void : Effect.fail(new StoppedError())
       )
-    const offerInspected: InspectedOffer<Event> | undefined = inspector === undefined ? undefined : (
-      event,
-      source,
-      causedBy,
-      deferred?: Deferred.Deferred<AcknowledgedDelivery<unknown>, unknown>
-    ) =>
+    // A machine decodes an event as it enters the mailbox; other logic takes
+    // its events as they are.
+    const decodeEvent = logic.execution?._tag === "Compiled" ? logic.execution.decodeEvent : undefined
+    const offerEvent = (
+      event: Event,
+      source: Inspection.Subject | undefined,
+      causedBy: Inspection.Causation | undefined,
+      deferred: Deferred.Deferred<AcknowledgedDelivery<unknown>, unknown> | undefined,
+      sent: unknown
+    ): Effect.Effect<void, StoppedError> =>
       Effect.suspend(() => {
+        if (inspector === undefined) {
+          return offerDirect(
+            deferred === undefined ? event : { [AcknowledgedMessageTypeId]: true as const, event, deferred }
+          )
+        }
         const message: ProcessMessage<Event> = inspector.isActive()
-          ? makeInspectedMessage(inspector, subject!, event, source, causedBy, deferred)
+          ? makeInspectedMessage(inspector, subject!, event, source, causedBy, deferred, sent)
           : deferred === undefined
           ? event
           : { [AcknowledgedMessageTypeId]: true as const, event, deferred }
         return offerDirect(message, () => publishInspectedSent(inspector, subject!, message))
       })
+    // A delivery from work, a child, a parent or a command of another machine:
+    // a refused event fails this machine when it is planned.
+    const deliver = (
+      event: Event,
+      source: Inspection.Subject | undefined,
+      causedBy: Inspection.Causation | undefined
+    ): Effect.Effect<void, StoppedError> =>
+      Effect.suspend(() =>
+        offerEvent(
+          decodeEvent === undefined ? event : decodeDelivered(decodeEvent, event) as Event,
+          source,
+          causedBy,
+          undefined,
+          event
+        )
+      )
+    // A public `send` rejects an event that the schema refuses, and the machine
+    // keeps running. A machine that has ended rejects first.
+    const sendPublic = (event: Event): Effect.Effect<void, StoppedError | MachineSchemaDecodeError> =>
+      Effect.suspend((): Effect.Effect<void, StoppedError | MachineSchemaDecodeError> => {
+        if (decodeEvent === undefined) return deliver(event, undefined, undefined)
+        if (mailbox.closed) return Effect.fail(new StoppedError())
+        const decoded = decodeSent(decodeEvent, event)
+        return decoded._tag === "Rejected"
+          ? Effect.fail(decoded.error)
+          : offerEvent(decoded.event as Event, undefined, undefined, undefined, event)
+      })
+    const offerInspected: InspectedOffer<Event> | undefined = inspector === undefined ? undefined : deliver
     const sendAcknowledged:
       | ((event: Event) => Effect.Effect<AcknowledgedDelivery<State>, Error | StoppedError>)
       | undefined = logic.execution?._tag !== "Compiled"
@@ -129,9 +171,13 @@ export const startGenericInternal: StartProcess = Effect.fnUntraced(
           Effect.uninterruptibleMask((restore) =>
             Deferred.make<AcknowledgedDelivery<unknown>, unknown>().pipe(
               Effect.flatMap((deferred) => {
-                const offered = inspector === undefined
-                  ? offerDirect({ [AcknowledgedMessageTypeId]: true as const, event, deferred })
-                  : offerInspected!(event, undefined, undefined, deferred)
+                const offered = offerEvent(
+                  decodeEvent === undefined ? event : decodeDelivered(decodeEvent, event) as Event,
+                  undefined,
+                  undefined,
+                  deferred,
+                  event
+                )
                 return offered.pipe(Effect.andThen(restore(Deferred.await(deferred))))
               }),
               Effect.map((delivery) => delivery as AcknowledgedDelivery<State>)
@@ -151,9 +197,7 @@ export const startGenericInternal: StartProcess = Effect.fnUntraced(
           ? requestStop
           : requestStop.pipe(Effect.andThen(Effect.never))
       ),
-      send: inspector === undefined
-        ? (event) => offerDirect(event)
-        : (event) => offerInspected!(event, undefined, undefined),
+      send: (event) => deliver(event, undefined, undefined),
       ...(inspector === undefined
         ? undefined
         : { inspectionSubject: subject!, sendInspected: offerInspected! })
@@ -211,7 +255,7 @@ export const startGenericInternal: StartProcess = Effect.fnUntraced(
       ? noParentSend
       : inspector === undefined
       ? parent.send
-      : (event) => sendMachineTarget(parent, event, subject, currentCausation()))
+      : (event) => sendEndpoint(parent, event, subject, currentCausation()))
     const emit = inspector === undefined
       ? emissions.emit
       : (event: unknown) =>
@@ -229,11 +273,15 @@ export const startGenericInternal: StartProcess = Effect.fnUntraced(
         )
     const sendToTarget: ProcessInitialContext<Event>["sendTo"] = inspector === undefined
       ? ((target: unknown, event: unknown) =>
-        isMachineTarget(target) ? target.send(event) : sendTo(target as ChildSelector, event))
+        isMachineTarget(target)
+          ? sendMachineTarget(target, event, undefined, undefined)
+          : sendTo(target as ChildSelector, event)) as ProcessInitialContext<Event>["sendTo"]
       : ((target: unknown, event: unknown) =>
         isMachineTarget(target)
           ? sendMachineTarget(target, event, subject, currentCausation())
-          : sendTo(target as ChildSelector, event, subject, currentCausation()))
+          : sendTo(target as ChildSelector, event, subject, currentCausation())) as ProcessInitialContext<
+          Event
+        >["sendTo"]
 
     const scope: ProcessInitialContext<Event> = {
       self,
@@ -710,8 +758,19 @@ export const startGenericInternal: StartProcess = Effect.fnUntraced(
       emissions: emissions.stream as Stream.Stream<never>,
       join: Deferred.await(done),
       stop,
-      send: self.send,
-      ...(sendAcknowledged === undefined ? undefined : { [acknowledgedSend]: sendAcknowledged }),
+      send: sendPublic,
+      [deliverEvent]: deliver as Deliverable[typeof deliverEvent],
+      ...(sendAcknowledged === undefined ? undefined : {
+        [acknowledgedSend]: (event: Event) =>
+          Effect.suspend(
+            (): Effect.Effect<AcknowledgedDelivery<State>, Error | StoppedError | MachineSchemaDecodeError> => {
+              if (decodeEvent === undefined) return sendAcknowledged(event)
+              if (mailbox.closed) return Effect.fail(new StoppedError())
+              const decoded = decodeSent(decodeEvent, event)
+              return decoded._tag === "Rejected" ? Effect.fail(decoded.error) : sendAcknowledged(event)
+            }
+          )
+      }),
       child: getChild,
       childChanges
     }

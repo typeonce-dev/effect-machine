@@ -13,7 +13,7 @@ import * as Stream from "effect/Stream"
 import type * as Take from "effect/Take"
 import type { Inspection } from "../../LocalMachine.js"
 import { type ChildSelector } from "./childRegistry.js"
-import { StoppedError } from "./errors.js"
+import { type MachineSchemaDecodeError, StoppedError } from "./errors.js"
 import * as InspectionRuntime from "./inspectionRuntime.js"
 import { classifyOutcome } from "./observation.js"
 import {
@@ -27,6 +27,9 @@ import {
   type CompiledProcessContext,
   type CompiledProcessExecution,
   type CompiledProcessInitial,
+  decodeDelivered,
+  decodeSent,
+  deliverEvent,
   type EmissionRuntime,
   EmissionsClosed,
   failAcknowledgedMessage,
@@ -54,6 +57,7 @@ import {
   type ProcessRuntime,
   publishInspectedSent,
   type RuntimeSnapshot,
+  sendEndpoint,
   sendMachineTarget,
   snapshotObserver,
   type StartInternalOptions,
@@ -84,18 +88,31 @@ class CompiledProcess implements MachineRef<any, any, any, any> {
   readonly id: string
   readonly sessionId: string
   readonly inspectionSubject?: Inspection.Subject
-  readonly send: (event: unknown) => Effect.Effect<void, StoppedError>
+  readonly send: (event: unknown) => Effect.Effect<void, StoppedError | MachineSchemaDecodeError>
   sendInspected(
     event: unknown,
     source: Inspection.Subject | undefined,
     causedBy: Inspection.Causation | undefined
   ): Effect.Effect<void, StoppedError> {
-    return this.offerEvent(event, source, causedBy)
+    return this.deliver(event, source, causedBy)
+  }
+  [deliverEvent](
+    event: unknown,
+    source: Inspection.Subject | undefined,
+    causedBy: Inspection.Causation | undefined
+  ): Effect.Effect<void, StoppedError> {
+    return this.deliver(event, source, causedBy)
   }
   [acknowledgedSend](
     event: unknown
   ): Effect.Effect<AcknowledgedDelivery<unknown>, unknown | StoppedError> {
-    return this.sendAcknowledgedEffect(event)
+    return Effect.suspend(() => {
+      if (this.mailbox.closed || this.lifecycle !== "Active") return Effect.fail(new StoppedError())
+      const decoded = decodeSent(this.execution.decodeEvent, event)
+      return decoded._tag === "Rejected"
+        ? Effect.fail(decoded.error)
+        : this.sendAcknowledgedEffect(decoded.event, event)
+    })
   }
   [snapshotObserver](observer: () => void): () => void {
     const observers = this.snapshotObservers ??= new Set()
@@ -155,14 +172,14 @@ class CompiledProcess implements MachineRef<any, any, any, any> {
       if (options.programInvocation !== undefined) this.programInvocation = { ...options.programInvocation, sessionId }
     }
     this.externalEmissions = options.emissions
-    this.send = inspector === undefined
-      ? (event) => this.offerMessage(event)
-      : (event) => this.offerEvent(event, undefined, undefined)
+    this.send = (event) => this.sendPublic(event)
+    // The endpoint is what the work, the children and the parent of this
+    // machine send to: it delivers, so a refused event fails this machine.
     this.address = {
       id: this.id,
       sessionId,
       stop: Effect.suspend(() => this.stopFromProcess()),
-      send: this.send,
+      send: (event) => this.deliver(event, undefined, undefined),
       ...(inspector === undefined
         ? undefined
         : {
@@ -171,7 +188,7 @@ class CompiledProcess implements MachineRef<any, any, any, any> {
             event: unknown,
             source: Inspection.Subject | undefined,
             causedBy: Inspection.Causation | undefined
-          ) => this.offerEvent(event, source, causedBy)
+          ) => this.deliver(event, source, causedBy)
         })
     }
   }
@@ -248,7 +265,7 @@ class CompiledProcess implements MachineRef<any, any, any, any> {
         this.address,
         this.options.runtime,
         this.services,
-        (event) => this.sendAcknowledgedEffect(event)
+        (event) => this.sendAcknowledgedEffect(decodeDelivered(this.execution.decodeEvent, event), event)
       )
     }
     const parent = this.options.parent
@@ -256,7 +273,7 @@ class CompiledProcess implements MachineRef<any, any, any, any> {
       ? noParentSend
       : this.inspector === undefined
       ? parent.send
-      : (event: unknown) => sendMachineTarget(parent, event, this.inspectionSubject, this.causation()))
+      : (event: unknown) => sendEndpoint(parent, event, this.inspectionSubject, this.causation()))
     this.processScope = {
       self: this.address,
       parent,
@@ -266,14 +283,14 @@ class CompiledProcess implements MachineRef<any, any, any, any> {
       sendTo: ((target: unknown, event: unknown) =>
         isMachineTarget(target)
           ? this.inspector === undefined
-            ? target.send(event)
+            ? sendMachineTarget(target, event, undefined, undefined)
             : sendMachineTarget(target, event, this.inspectionSubject, this.causation())
           : this.childRuntime.sendTo(
             target as ChildSelector,
             event,
             this.inspectionSubject,
             this.causation()
-          )),
+          )) as ProcessInitialContext<unknown>["sendTo"],
       stopChild: this.childRuntime.stop,
       failCause: (cause: Cause.Cause<unknown>) => this.failCause(cause),
       inspectInitial: this.inspector === undefined
@@ -330,7 +347,7 @@ class CompiledProcess implements MachineRef<any, any, any, any> {
           self.address,
           self.options.runtime,
           self.services,
-          (event) => self.sendAcknowledgedEffect(event)
+          (event) => self.sendAcknowledgedEffect(decodeDelivered(self.execution.decodeEvent, event), event)
         )
       }
       const parent = self.options.parent
@@ -338,7 +355,7 @@ class CompiledProcess implements MachineRef<any, any, any, any> {
         ? noParentSend
         : self.inspector === undefined
         ? parent.send
-        : (event: unknown) => sendMachineTarget(parent, event, self.inspectionSubject, self.causation()))
+        : (event: unknown) => sendEndpoint(parent, event, self.inspectionSubject, self.causation()))
       self.processScope = {
         self: self.address,
         parent,
@@ -348,14 +365,14 @@ class CompiledProcess implements MachineRef<any, any, any, any> {
         sendTo: ((target: unknown, event: unknown) =>
           isMachineTarget(target)
             ? self.inspector === undefined
-              ? target.send(event)
+              ? sendMachineTarget(target, event, undefined, undefined)
               : sendMachineTarget(target, event, self.inspectionSubject, self.causation())
             : self.childRuntime.sendTo(
               target as ChildSelector,
               event,
               self.inspectionSubject,
               self.causation()
-            )),
+            )) as ProcessInitialContext<unknown>["sendTo"],
         stopChild: self.childRuntime.stop,
         failCause: (cause: Cause.Cause<unknown>) => self.failCause(cause),
         inspectInitial: self.inspector === undefined
@@ -536,13 +553,43 @@ class CompiledProcess implements MachineRef<any, any, any, any> {
     )
   }
 
+  /**
+   * A public `send`: an event that the schema refuses is rejected, and the
+   * machine keeps running. A machine that has ended rejects first.
+   */
+  private sendPublic(event: unknown): Effect.Effect<void, StoppedError | MachineSchemaDecodeError> {
+    if (this.inspector === undefined) return this.offerMessage(event, "Sent")
+    return Effect.suspend((): Effect.Effect<void, StoppedError | MachineSchemaDecodeError> => {
+      if (this.mailbox.closed || this.lifecycle !== "Active") return Effect.fail(new StoppedError())
+      const decoded = decodeSent(this.execution.decodeEvent, event)
+      return decoded._tag === "Rejected"
+        ? Effect.fail(decoded.error)
+        : this.offerEvent(decoded.event, undefined, undefined, undefined, event)
+    })
+  }
+
+  /** A delivery from work, a child, a parent or a command of another machine. */
+  private deliver(
+    event: unknown,
+    source: Inspection.Subject | undefined,
+    causedBy: Inspection.Causation | undefined
+  ): Effect.Effect<void, StoppedError> {
+    if (this.inspector === undefined) {
+      return this.offerMessage(event, "Delivered") as Effect.Effect<void, StoppedError>
+    }
+    return Effect.suspend(() =>
+      this.offerEvent(decodeDelivered(this.execution.decodeEvent, event), source, causedBy, undefined, event)
+    )
+  }
+
   private sendAcknowledgedEffect(
-    event: unknown
+    event: unknown,
+    sent: unknown = event
   ): Effect.Effect<AcknowledgedDelivery<unknown>, unknown | StoppedError> {
     return Effect.uninterruptibleMask((restore) =>
       Deferred.make<AcknowledgedDelivery<unknown>, unknown>().pipe(
         Effect.flatMap((deferred) =>
-          this.offerEvent(event, undefined, undefined, deferred).pipe(
+          this.offerEvent(event, undefined, undefined, deferred, sent).pipe(
             Effect.andThen(restore(Deferred.await(deferred)))
           )
         )
@@ -554,7 +601,8 @@ class CompiledProcess implements MachineRef<any, any, any, any> {
     event: unknown,
     source: Inspection.Subject | undefined,
     causedBy: Inspection.Causation | undefined,
-    deferred?: Deferred.Deferred<AcknowledgedDelivery<unknown>, unknown>
+    deferred: Deferred.Deferred<AcknowledgedDelivery<unknown>, unknown> | undefined,
+    sent: unknown
   ): Effect.Effect<void, StoppedError> {
     return Effect.suspend(() => {
       const inspector = this.inspector
@@ -566,20 +614,38 @@ class CompiledProcess implements MachineRef<any, any, any, any> {
           event,
           source,
           causedBy,
-          deferred
+          deferred,
+          sent
         )
         : deferred === undefined
         ? event
         : { [AcknowledgedMessageTypeId]: true as const, event, deferred }
-      return this.offerMessage(message)
+      return this.offerMessage(message) as Effect.Effect<void, StoppedError>
     })
   }
 
-  private offerMessage(message: ProcessMessage<unknown>): Effect.Effect<void, StoppedError> {
+  /**
+   * Offers a message. Without an inspector, `send` and a delivery offer the
+   * event as it was sent, and it is decoded here, once the machine is known to
+   * run: `"Sent"` rejects a refused event, and `"Delivered"` lets the drain
+   * fail the machine with it.
+   */
+  private offerMessage(
+    offered: ProcessMessage<unknown>,
+    decoding: "Decoded" | "Sent" | "Delivered" = "Decoded"
+  ): Effect.Effect<void, StoppedError | MachineSchemaDecodeError> {
     return Effect.uninterruptible(
-      Effect.withFiber((fiber) => {
+      Effect.withFiber((fiber): Effect.Effect<void, StoppedError | MachineSchemaDecodeError> => {
         if (this.mailbox.closed || this.lifecycle !== "Active") {
           return Effect.fail(new StoppedError())
+        }
+        let message = offered
+        if (decoding === "Sent") {
+          const decoded = decodeSent(this.execution.decodeEvent, offered)
+          if (decoded._tag === "Rejected") return Effect.fail(decoded.error)
+          message = decoded.event
+        } else if (decoding === "Delivered") {
+          message = decodeDelivered(this.execution.decodeEvent, offered)
         }
         const inspector = this.inspector
         const subject = this.inspectionSubject

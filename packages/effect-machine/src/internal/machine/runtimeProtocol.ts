@@ -34,7 +34,7 @@ import {
   takeChildObservations,
   unregisterChild
 } from "./childRegistry.js"
-import { ChildAlreadyExistsError, StoppedError } from "./errors.js"
+import { ChildAlreadyExistsError, MachineSchemaDecodeError, StoppedError } from "./errors.js"
 import * as InspectionRuntime from "./inspectionRuntime.js"
 import type * as InvocationEvent from "./invocationEvent.js"
 import { InvocationGenerations } from "./invocationGeneration.js"
@@ -64,6 +64,82 @@ export interface SnapshotObservable {
 /** @internal */
 export const isSnapshotObservable = (value: unknown): value is SnapshotObservable =>
   typeof value === "object" && value !== null && snapshotObserver in value
+
+/**
+ * Delivery between the machines of one runtime. A public `send` rejects an
+ * event that the schema of the machine refuses; a delivery takes it, and the
+ * machine fails with that error when the event is planned, as a public event
+ * that a command, a parent or a child sends always has.
+ *
+ * @internal
+ */
+export const deliverEvent: unique symbol = Symbol.for("effect/Machine/deliverEvent")
+
+/** @internal */
+export interface Deliverable {
+  readonly [deliverEvent]: (
+    event: unknown,
+    source: Inspection.Subject | undefined,
+    causedBy: Inspection.Causation | undefined
+  ) => Effect.Effect<void, StoppedError>
+}
+
+/**
+ * The event of a delivery that the schema of the machine refused, or whose
+ * decoding threw. Planning it fails the machine with `error`.
+ *
+ * @internal
+ */
+export class RefusedEvent {
+  constructor(readonly error: unknown) {}
+}
+
+/**
+ * Decodes an event that enters a mailbox. An invocation event is the host's
+ * own and is not decoded.
+ *
+ * @internal
+ */
+export type EventDecoder = (event: unknown) => unknown
+
+/**
+ * Decodes an event that a public `send` offers: a refused event is rejected
+ * with its `MachineSchemaDecodeError`, and any other throw is a defect of the
+ * machine, which fails when it plans the returned `RefusedEvent`.
+ *
+ * @internal
+ */
+export const decodeSent = (
+  decode: EventDecoder | undefined,
+  event: unknown
+): { readonly _tag: "Decoded"; readonly event: unknown } | {
+  readonly _tag: "Rejected"
+  readonly error: MachineSchemaDecodeError
+} => {
+  if (decode === undefined) return { _tag: "Decoded", event }
+  try {
+    return { _tag: "Decoded", event: decode(event) }
+  } catch (error) {
+    return error instanceof MachineSchemaDecodeError
+      ? { _tag: "Rejected", error }
+      : { _tag: "Decoded", event: new RefusedEvent(error) }
+  }
+}
+
+/**
+ * Decodes an event that a delivery offers. A refused event becomes a
+ * `RefusedEvent`, so the machine fails when it plans it.
+ *
+ * @internal
+ */
+export const decodeDelivered = (decode: EventDecoder | undefined, event: unknown): unknown => {
+  if (decode === undefined) return event
+  try {
+    return decode(event)
+  } catch (error) {
+    return new RefusedEvent(error)
+  }
+}
 
 /** @internal */
 export const acknowledgedSend: unique symbol = Symbol.for("effect/Machine/acknowledgedSend")
@@ -166,9 +242,11 @@ export interface MachineRef<out State, in Event, out Error = never, out Output =
   readonly inspectionSubject?: Inspection.Subject
   /** @internal */
   readonly sendInspected?: ProcessEndpoint<Event>["sendInspected"]
+  /** @internal */
+  readonly [deliverEvent]?: Deliverable[typeof deliverEvent]
   readonly [acknowledgedSend]?: (
     event: Event
-  ) => Effect.Effect<AcknowledgedDelivery<State>, Error | StoppedError>
+  ) => Effect.Effect<AcknowledgedDelivery<State>, Error | StoppedError | MachineSchemaDecodeError>
   readonly child: (child: any) => Effect.Effect<Option.Option<any>>
   readonly childChanges: (child: any) => Stream.Stream<Option.Option<any>>
 }
@@ -209,10 +287,33 @@ export const sendMachineTarget = (
   event: unknown,
   source: Inspection.Subject | undefined,
   causedBy: Inspection.Causation | undefined
-): Effect.Effect<void, StoppedError> =>
-  "inspectionSubject" in target && "sendInspected" in target && typeof target.sendInspected === "function"
+): Effect.Effect<void, StoppedError | MachineSchemaDecodeError> =>
+  deliverEvent in target
+    ? (target as unknown as Deliverable)[deliverEvent](event, source, causedBy)
+    : "inspectionSubject" in target && "sendInspected" in target && typeof target.sendInspected === "function"
     ? target.sendInspected(event, source, causedBy)
     : target.send(event)
+
+/** Sends to an endpoint of this runtime, which delivers. */
+export const sendEndpoint = (
+  endpoint: ProcessEndpoint<unknown>,
+  event: unknown,
+  source: Inspection.Subject | undefined,
+  causedBy: Inspection.Causation | undefined
+): Effect.Effect<void, StoppedError> =>
+  endpoint.sendInspected === undefined ? endpoint.send(event) : endpoint.sendInspected(event, source, causedBy)
+
+/** Delivers to a child, which this runtime started and which always delivers. */
+const deliverToChild = (
+  ref: MachineRef<any, any, any, any>,
+  event: unknown,
+  source: Inspection.Subject | undefined,
+  causedBy: Inspection.Causation | undefined
+): Effect.Effect<void, StoppedError> => {
+  return ref[deliverEvent] === undefined
+    ? Effect.die(new Error("A child of a local machine cannot take deliveries"))
+    : ref[deliverEvent](event, source, causedBy)
+}
 
 export interface ProcessInitialContext<Event> {
   readonly self: ProcessEndpoint<Event>
@@ -221,7 +322,11 @@ export interface ProcessInitialContext<Event> {
   readonly sendParent: (event: unknown) => Effect.Effect<void, StoppedError>
   readonly emit: (event: unknown) => Effect.Effect<void>
   readonly sendTo: {
-    <TargetEvent>(target: MachineTarget<TargetEvent>, event: TargetEvent): Effect.Effect<void, StoppedError>
+    <TargetEvent>(target: ProcessEndpoint<TargetEvent>, event: TargetEvent): Effect.Effect<void, StoppedError>
+    <TargetEvent>(
+      target: MachineTarget<TargetEvent>,
+      event: TargetEvent
+    ): Effect.Effect<void, StoppedError | MachineSchemaDecodeError>
     (child: ChildSelector, event: unknown): Effect.Effect<void, StoppedError>
   }
   readonly stopChild: (child: ChildSelector) => Effect.Effect<void>
@@ -338,6 +443,12 @@ export interface CompiledProcessExecution<
 > {
   readonly _tag: "Compiled"
   readonly childless: boolean
+  /**
+   * Decodes a public event as it enters the mailbox, so the drain plans it
+   * without decoding it again. An invocation event passes unchanged. Without
+   * it, the process takes events as they are.
+   */
+  readonly decodeEvent?: EventDecoder
   readonly initial?: (
     scope: ProcessInitialContext<Event>
   ) => Effect.Effect<CompiledProcessInitial<State, Output>, InitialError, Requirements>
@@ -616,15 +727,17 @@ export const makeInspectedMessage = <Event>(
   event: Event,
   source: Inspection.Subject | undefined,
   causedBy: Inspection.Causation | undefined,
-  deferred?: Deferred.Deferred<AcknowledgedDelivery<unknown>, unknown>
+  deferred?: Deferred.Deferred<AcknowledgedDelivery<unknown>, unknown>,
+  sent: unknown = event
 ): AcknowledgedMessage<Event> => {
   const deliveryId = inspection.nextDeliveryId()
   const macrostepId = inspection.nextMacrostepId()
+  // Inspection reports the event as it was sent, before decoding.
   const inspected: InspectedDelivery = {
     deliveryId,
     macrostepId,
     source,
-    event,
+    event: sent,
     causedBy,
     complete: (delivery) => {
       const microsteps = InspectionRuntime.microsteps(delivery.plan)
@@ -634,7 +747,7 @@ export const makeInspectedMessage = <Event>(
         macrostepId,
         deliveryId,
         source,
-        event,
+        event: sent,
         before: { status: "active", state: delivery.before },
         after: { status: "active", state: delivery.after },
         handled: microsteps.some((microstep) => microstep.transitions.length > 0),
@@ -829,7 +942,7 @@ class OwnedChildRuntimeImpl extends InvocationGenerations implements OwnedChildR
         ...this.self,
         send: (event) => options.sendParent(isCurrent, event),
         sendInspected: (event, source, causedBy) =>
-          isCurrent() ? sendMachineTarget(this.self, event, source, causedBy) : Effect.void,
+          isCurrent() ? sendEndpoint(this.self, event, source, causedBy) : Effect.void,
         ...(this.sendAcknowledged === undefined
           ? undefined
           : {
@@ -1136,7 +1249,7 @@ export const makeChildRuntimeSync = (
       }
       const entry = registry.children.get(id)
       return entry !== undefined && matchesChild(entry, child)
-        ? sendMachineTarget(entry.ref, event, source, causedBy)
+        ? deliverToChild(entry.ref, event, source, causedBy)
         : Effect.void
     })
   }

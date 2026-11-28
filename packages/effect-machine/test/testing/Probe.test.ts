@@ -179,7 +179,7 @@ describe("MachineTest probe", () => {
       assert.strictEqual(starts, 1)
       yield* ref.stop
     }))
-  it.effect("reports a processing failure to the exact acknowledged send", () =>
+  it.effect("rejects an event that its schema refuses at the acknowledged send", () =>
     Effect.gen(function*() {
       const ref = yield* LocalMachine.start(machine)
       const probe = yield* MachineTest.probe(machine, ref)
@@ -187,6 +187,24 @@ describe("MachineTest probe", () => {
         probe.sendAndAwait({ _tag: "Increment", amount: "invalid" } as unknown as Increment)
       )
       assert.instanceOf(error, Machine.MachineSchemaDecodeError)
+      assert.strictEqual(error.boundary, "event")
+      const snapshot = yield* ref.snapshot
+      assert.strictEqual(snapshot.status, "active")
+    }))
+  it.effect("reports a processing failure to the exact acknowledged send", () =>
+    Effect.gen(function*() {
+      const corrupting = Machine.make({
+        root: states,
+        events: Machine.eventsFromSchemas(Increment)
+      }).handle({
+        initial: { target: "Counter", decoded: true, data: new Counter({ count: 0 }) },
+        states: { Counter: { on: { Increment: { target: "Counter", data: () => ({ count: "invalid" as never }) } } } }
+      })
+      const ref = yield* LocalMachine.start(corrupting)
+      const probe = yield* MachineTest.probe(corrupting, ref)
+      const error = yield* Effect.flip(probe.sendAndAwait(new Increment({ amount: 1 })))
+      assert.instanceOf(error, Machine.MachineSchemaDecodeError)
+      assert.strictEqual(error.boundary, "state")
       const snapshot = yield* ref.snapshot
       assert.strictEqual(snapshot.status, "failed")
     }))

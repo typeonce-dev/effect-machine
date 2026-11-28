@@ -198,7 +198,7 @@ export const stepHost: Host = {
     const refOf = (
       id: string,
       sessionId: string,
-      send: (event: unknown) => Effect.Effect<void, Machine.StoppedError>,
+      send: (event: unknown) => Effect.Effect<void, Machine.StoppedError | Machine.MachineSchemaDecodeError>,
       stop: Effect.Effect<void>,
       snapshot: () => unknown,
       done: Deferred.Deferred<unknown, unknown>
@@ -339,14 +339,16 @@ export const stepHost: Host = {
           id: owner.self.id,
           sessionId: owner.self.sessionId,
           stop: notOffered("stop of an owner by its process logic"),
-          send: (event) => !stopped && owned.current() ? owner.self.send(event) : Effect.void
+          send: (event) => !stopped && owned.current() ? Effect.orDie(owner.self.send(event)) : Effect.void
         }
         const initialContext: Machine.Logic.InitialContext<unknown> = {
           self: endpoint,
           parent,
           spawn: () => notOffered("children of process logic"),
-          sendTo: (target: Machine.MachineTarget<unknown> | string, event: unknown) =>
-            typeof target === "string" ? notOffered("children of process logic") : target.send(event),
+          sendTo: ((target: Machine.MachineTarget<unknown> | string, event: unknown) =>
+            typeof target === "string"
+              ? notOffered("children of process logic")
+              : target.send(event)) as Machine.Logic.InitialContext<unknown>["sendTo"],
           stopChild: () => notOffered("children of process logic")
         }
         const setState = (next: unknown) =>

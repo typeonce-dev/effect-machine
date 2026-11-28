@@ -1,5 +1,5 @@
 import { assert, describe, it } from "@effect/vitest"
-import { Duration, Effect, Exit, Schema, Stream } from "effect"
+import { Duration, Effect, Schema, Stream } from "effect"
 import { Machine } from "../../../src/index.js"
 import * as Configuration from "../../../src/internal/machine/configuration.js"
 import * as InvocationChanges from "../../../src/internal/machine/invocationChanges.js"

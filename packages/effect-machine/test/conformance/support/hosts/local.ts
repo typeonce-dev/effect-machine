@@ -1,4 +1,4 @@
-import { Effect, Exit, Fiber, Scope, Stream } from "effect"
+import { Effect, Exit, Fiber, Option, Scope, Stream } from "effect"
 import { Machine } from "../../../../src/index.js"
 import type { Answer, Capabilities, Host, Outcome } from "../host.js"
 import { decode, encode, fiberScheduling, renderFailure } from "../host.js"
@@ -14,7 +14,7 @@ export const capabilities: Capabilities = {
   restart: true,
   stop: true,
   emissions: true,
-  rejection: false,
+  rejection: true,
   initialState: "AtStart"
 }
 
@@ -31,9 +31,21 @@ export const outcomeOf = (snapshot: Machine.RuntimeSnapshot<unknown, unknown, un
   }
 }
 
-/** `send` of a local machine fails only for a machine that has ended. */
-export const answerOf = (exit: Exit.Exit<unknown, Machine.StoppedError>): Answer =>
-  Exit.isSuccess(exit) ? "Accepted" : "Ended"
+/**
+ * `send` of a local machine rejects an event that its schema refuses, and
+ * fails for a machine that has ended. A machine atom whose start failed
+ * fails its writes with that failure, which can refuse a state instead.
+ */
+export const answerOf = (
+  exit: Exit.Exit<unknown, Machine.StoppedError | Machine.MachineSchemaDecodeError>
+): Answer =>
+  Exit.isSuccess(exit)
+    ? "Accepted"
+    : Exit.findErrorOption(exit).pipe(
+        Option.exists((error) => error._tag === "MachineSchemaDecodeError" && error.boundary === "event")
+      )
+    ? "Rejected"
+    : "Ended"
 
 /**
  * A host over the references of `LocalMachine`. It restarts from the encoded

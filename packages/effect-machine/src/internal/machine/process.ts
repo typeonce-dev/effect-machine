@@ -14,7 +14,9 @@ import * as ExecutionPlan from "./executionPlan.js"
 import { type CapturedStateConfig, toImpl } from "./implementation.js"
 import * as Invocation from "./invocation.js"
 import * as InvocationChanges from "./invocationChanges.js"
+import * as InvocationEvent from "./invocationEvent.js"
 import * as internalPlanner from "./planner.js"
+import { decodeEventSync } from "./protocol.js"
 import * as ProcessRuntime from "./runtime.js"
 import * as internalRuntimeProtocol from "./runtimeProtocol.js"
 import * as Serialization from "./serialization.js"
@@ -179,8 +181,9 @@ const makeChildlessCompiledDrain = (
       const before = context.state()
 
       let planned
+      if (event instanceof internalRuntimeProtocol.RefusedEvent) return failPlanning(event.error)
       try {
-        planned = executionPlan.plan(
+        planned = executionPlan.planDecoded(
           context.executionState ??
             executionPlan.fromConfiguration(Configuration.normalizeConfigurationSync(machine, before)),
           event,
@@ -297,8 +300,9 @@ const makeInvokingCompiledDrain = (
       const before = current
 
       let planned
+      if (event instanceof internalRuntimeProtocol.RefusedEvent) return failPlanning(event.error)
       try {
-        planned = executionPlan.plan(
+        planned = executionPlan.planDecoded(
           configuration ??
             executionPlan.fromConfiguration(Configuration.normalizeConfigurationSync(machine, current)),
           event,
@@ -481,6 +485,7 @@ const makeProcessLogic = (
     execution: {
       _tag: "Compiled",
       childless: !hasInvokes,
+      decodeEvent: (event) => InvocationEvent.isInvocationEvent(event) ? event : decodeEventSync(machine, event),
       ...(entry._tag === "Initial" ? { initial: makeInitial } : {}),
       ...(makeCompiledInitial === undefined ? {} : { initialSync: makeCompiledInitial }),
       drain: hasInvokes
@@ -529,9 +534,10 @@ const makeProcessLogic = (
               const acknowledged = internalRuntimeProtocol.isAcknowledgedMessage(message)
               const event = acknowledged ? message.event : message
               const before = current
+              if (event instanceof internalRuntimeProtocol.RefusedEvent) return yield* failPlanning(event.error)
               let planned
               try {
-                planned = internalPlanner.planConfiguration(
+                planned = internalPlanner.planDecodedConfiguration(
                   machine,
                   Configuration.withMachineReferences(
                     configuration ?? Configuration.normalizeConfigurationSync(machine, current),
@@ -637,9 +643,10 @@ const makeProcessLogic = (
               const acknowledged = internalRuntimeProtocol.isAcknowledgedMessage(message)
               const event = acknowledged ? message.event : message
               const before = current
+              if (event instanceof internalRuntimeProtocol.RefusedEvent) return yield* failPlanning(event.error)
               let planned
               try {
-                planned = internalPlanner.planConfiguration(
+                planned = internalPlanner.planDecodedConfiguration(
                   machine,
                   Configuration.withMachineReferences(
                     configuration ?? Configuration.normalizeConfigurationSync(machine, current),
