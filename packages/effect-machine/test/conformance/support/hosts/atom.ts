@@ -1,10 +1,9 @@
 import { Clock, Effect, Exit, Fiber, Layer, Stream } from "effect"
 import { AsyncResult, Atom, AtomRegistry } from "effect/reactivity"
-import { TestClock } from "effect/testing"
 import type { Machine } from "../../../../src/index.js"
 import { AtomMachine } from "../../../../src/unstable/reactivity/index.js"
 import type { Answer, Host, Outcome } from "../host.js"
-import { decode, encode, renderFailure } from "../host.js"
+import { decode, encode, fiberScheduling, renderFailure } from "../host.js"
 import { answerOf, capabilities, outcomeOf } from "./local.js"
 
 /** A bridge whose types do not matter to the suite. */
@@ -17,7 +16,7 @@ type AnyBridge = AtomMachine.MachineAtom<any, any, any, any, any, any>
 export const atomHost: Host = {
   name: "AtomMachine",
   capabilities,
-  start: Effect.fnUntraced(function*({ input, machine }) {
+  start: Effect.fnUntraced(function*({ activity, input, machine }) {
     const scope = yield* Effect.scope
     const bound = AtomMachine.bind(Atom.runtime(Layer.succeed(Clock.Clock, yield* Clock.Clock)))
     const states: Array<Machine.Machine.EncodedSnapshot> = []
@@ -63,7 +62,9 @@ export const atomHost: Host = {
         ? { _tag: "Failed", failure: renderFailure(result.cause) }
         : { _tag: "Running" }
     }
+    const scheduling = fiberScheduling(activity)
     return {
+      ...scheduling,
       states,
       emitted,
       current: () => states.at(-1),
@@ -81,7 +82,7 @@ export const atomHost: Host = {
       restart: Effect.fnUntraced(function*(downtimeMillis) {
         const stored = states.at(-1)!
         yield* opened.close
-        yield* TestClock.adjust(downtimeMillis)
+        yield* scheduling.advance(downtimeMillis)
         opened = yield* open((bound.resume as any)(machine, decode(machine, stored)))
       })
     }
