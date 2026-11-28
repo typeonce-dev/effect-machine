@@ -472,10 +472,9 @@ export {
    *
    * `ClusterMachine` raises it when work reads `self.sessionId`, calls
    * `self.send`, or calls an operation of `children`. The step functions of
-   * {@link toStep} raise it when work calls an operation of `children`, and when
-   * a transition addresses a child with `enqueue.sendTo` or `enqueue.stop`. It is
-   * a defect rather than a typed failure, because the same work runs correctly
-   * on a local machine.
+   * {@link toStep} raise it when work calls an operation on children and the
+   * host passed no `children`. It is a defect rather than a typed failure,
+   * because the same work runs correctly on a local machine.
    * `operation` names the refused operation.
    *
    * @category errors
@@ -7632,26 +7631,30 @@ export const plan: <
  *   happen and the state passed in still holds: the event does not match its
  *   schema (`MachineSchemaDecodeError`), or the machine has ended
  *   (`StoppedError`).
- * - `settle` reports the end of work that a step started, with its `Exit`.
+ * - `settle` reports the end of work that a step started, with its `Exit`, and
+ *   that work could not start, with the failure of its evaluation.
  * - `element` reports one element of a running Stream.
+ * - `report` reports the state of a running `Logic` or child machine.
  * - `stop` stops the machine as its owner, as `MachineRef.stop` does.
  * - `resume` starts the machine from a decoded snapshot, as `LocalMachine.resume`
- *   does.
+ *   does. A durable host passes the {@link MachineStep.Progress} of the work of
+ *   the active states, so that work which ended does not run again and work
+ *   which still runs is not started twice.
  *
  * A machine that fails or ends still takes a step. The step carries the last
  * state, the work to stop, and its {@link MachineStep.Step} `exit`.
  *
  * **Gotchas**
  *
- * The result of `settle` or `element` for work whose state was exited is a
- * step that changes nothing, also when the same state was entered again since.
- * So is the result for work that already ended, and for any work of a machine
- * that has ended.
+ * The result of `settle`, `element`, or `report` for work whose state was
+ * exited is a step that changes nothing, also when the same state was entered
+ * again since. So is the result for work that already ended, and for any work
+ * of a machine that has ended.
  *
- * `settle` and `element` take the work object that a step listed in `start`,
- * and compare it by identity. A copy of it changes nothing. Neither does work
- * that was listed before a `resume`, or by another step taken from the same
- * state, even though its `path`, `id`, and `run` are equal.
+ * These functions take the work object that a step listed, and compare it by
+ * identity. A copy of it changes nothing. Neither does work that was listed
+ * before a `resume`, or by another step taken from the same state, even though
+ * its `path`, `id`, and `run` are equal.
  *
  * @category models
  * @since 0.48.0
@@ -7671,7 +7674,10 @@ export interface MachineStep<in out M extends Machine.Any> {
     event: Machine.EventInputOf<Machine.InputEvents<M>>
   ) => Exit.Exit<MachineStep.Step<M>, MachineStep.Rejection>
 
-  /** Reports the end of work that a step started. */
+  /**
+   * Reports the end of work that a step started, or the failure of its
+   * evaluation when it could not start.
+   */
   readonly settle: (
     state: MachineStep.State<M>,
     work: MachineStep.Work<M>,
@@ -7688,12 +7694,28 @@ export interface MachineStep<in out M extends Machine.Any> {
     element: unknown
   ) => MachineStep.Step<M>
 
+  /**
+   * Reports the state of a running `Logic` or child machine while it is
+   * active: the state that the `Logic` sets, or the snapshot that a step of the
+   * child publishes. Its owner reads it as the `state` of the snapshot that
+   * `onSnapshot` receives.
+   */
+  readonly report: (
+    state: MachineStep.State<M>,
+    work: MachineStep.Work.Logic<M> | MachineStep.Work.Child<M>,
+    snapshot: unknown
+  ) => MachineStep.Step<M>
+
   /** Stops the machine as its owner. Its `exit` fails with `StoppedError`. */
   readonly stop: (state: MachineStep.State<M>) => MachineStep.Step<M>
 
-  /** Starts the machine from a decoded snapshot. */
+  /**
+   * Starts the machine from a decoded snapshot. `progress` names the work of
+   * the active states that ended or still runs; any other work starts.
+   */
   readonly resume: (
-    snapshot: Machine.Snapshot<Machine.States<M>>
+    snapshot: Machine.Snapshot<Machine.States<M>>,
+    progress?: ReadonlyArray<MachineStep.Progress<M>>
   ) => Exit.Exit<MachineStep.Step<M>, MachineSchemaDecodeError>
 }
 
@@ -7732,8 +7754,11 @@ export declare namespace MachineStep {
    * **Details**
    *
    * A host carries a step out in this order, which is the order of
-   * `LocalMachine`: it delivers `sends`, interrupts `stop`, publishes
-   * `snapshot`, delivers `emitted`, and then runs `start`.
+   * `LocalMachine`: it carries out `commands`, interrupts `stop`, publishes
+   * `snapshot`, delivers `emitted`, and then starts `start`.
+   *
+   * `snapshot` and `microsteps` are built when they are first read, so a host
+   * that publishes neither pays for neither.
    *
    * @category models
    * @since 0.48.0
@@ -7745,21 +7770,35 @@ export declare namespace MachineStep {
     /** The logical state, as a view reads it and `Machine.encodeSnapshot` stores it. */
     readonly snapshot: Machine.Snapshot<Machine.States<M>>
 
-    /** Events emitted to the observers of the machine, in order. */
-    readonly emitted: ReadonlyArray<Machine.EmittedEvent<M>>
-
     /**
-     * Events that transitions send with `enqueue.sendTo`, in order. An event
-     * sent to `self` is delivered through the `self` target of the host, which
-     * plans it in a later step.
+     * The event this step planned, as transitions received it: a decoded
+     * public event, the lifecycle event of work, or the initial event of `start`
+     * and `resume`. `undefined` when the step planned no event, as for `stop` or
+     * a result that is ignored.
      */
-    readonly sends: ReadonlyArray<Send>
+    readonly event: Machine.LifecycleEvent<Machine.Events<M>> | undefined
+
+    /** The microsteps of the plan, in order, as `Machine.plan` returns them. Empty when nothing changed. */
+    readonly microsteps: ReadonlyArray<Microstep<M>>
+
+    /** What transitions asked of the host with `enqueue.sendTo` and `enqueue.stop`, in order. */
+    readonly commands: ReadonlyArray<Command<M>>
 
     /** Running work to interrupt, in order. Its `Exit` is not reported. */
     readonly stop: ReadonlyArray<Work<M>>
 
-    /** Work to run, in order. Report its end with `settle`. */
+    /** Events emitted to the observers of the machine, in order. */
+    readonly emitted: ReadonlyArray<Machine.EmittedEvent<M>>
+
+    /** Work to start, in order. Report its end with `settle`. */
     readonly start: ReadonlyArray<Work<M>>
+
+    /**
+     * Every piece of work that runs once this step is carried out, in start
+     * order: the work that runs on, and then `start`. After `resume`, it also
+     * holds the work that {@link Progress} names as running.
+     */
+    readonly running: ReadonlyArray<Work<M>>
 
     /**
      * How the machine ended, once it has: its output, or why it failed or
@@ -7769,27 +7808,126 @@ export declare namespace MachineStep {
   }
 
   /**
-   * An event that a transition sends to a target with `enqueue.sendTo`.
-   *
-   * **Details**
-   *
-   * A host delivers it with `target.send(event)`.
+   * One microstep of a {@link Step}.
    *
    * @category models
    * @since 0.48.0
    */
-  export interface Send {
-    readonly target: MachineTarget<unknown>
-    readonly event: unknown
+  export interface Microstep<M extends Machine.Any> {
+    readonly next: Machine.Snapshot<Machine.States<M>>
+    readonly event: Machine.LifecycleEvent<Machine.Events<M>>
+    readonly transitions: ReadonlyArray<
+      Machine.RetainedTransition<
+        Machine.StateNodeIdentifier<Machine.States<M>>,
+        Machine.TagOf<Machine.Events<M>[number]>,
+        Machine.StateNodeIdentifier<Machine.States<M>>
+      >
+    >
+    readonly commands: ReadonlyArray<Command>
+    readonly raisedEvents: ReadonlyArray<Machine.EventOf<Machine.Events<M>>>
+    readonly emittedEvents: ReadonlyArray<Machine.EmittedEvent<M>>
+    readonly exitPaths: ReadonlyArray<string>
+    readonly entryPaths: ReadonlyArray<string>
+    readonly changed: boolean
+  }
+
+  /**
+   * What a transition asked of its host with `enqueue.sendTo` or
+   * `enqueue.stop`.
+   *
+   * **Details**
+   *
+   * - `Send` sends `event` to a target with `target.send(event)`. An event sent
+   *   to `self` reaches the `self` target of the host, which plans it in a
+   *   later step.
+   * - `SendToChild` sends `event` to a child of the machine. `work` is the
+   *   running `Logic` or child machine that `child` selects, when one runs.
+   *   Otherwise the host sends it to a child that work spawned with that
+   *   address, and ignores it when there is none.
+   * - `StopChild` stops a child of the machine. `work` is the running `Logic`
+   *   or child machine that `child` selects, which no longer runs after this
+   *   step: the host stops it, and reports nothing of it. Otherwise the host
+   *   stops a child that work spawned with that address, if there is one.
+   *
+   * @category models
+   * @since 0.48.0
+   */
+  export type Command<M extends Machine.Any = Machine.Any> =
+    | Command.Send
+    | Command.SendToChild<M>
+    | Command.StopChild<M>
+
+  /**
+   * The kinds of {@link Command}.
+   *
+   * @category models
+   * @since 0.48.0
+   */
+  export namespace Command {
+    /**
+     * Sends an event to a target outside the machine.
+     *
+     * @category models
+     * @since 0.48.0
+     */
+    export interface Send {
+      readonly _tag: "Send"
+      readonly target: MachineTarget<unknown>
+      readonly event: unknown
+    }
+
+    /**
+     * Sends an event to a child of the machine.
+     *
+     * @category models
+     * @since 0.48.0
+     */
+    export interface SendToChild<M extends Machine.Any> {
+      readonly _tag: "SendToChild"
+      readonly child: ChildMachine.Any | ChildAddress<never>
+      readonly work: Work.Logic<M> | Work.Child<M> | undefined
+      readonly event: unknown
+    }
+
+    /**
+     * Stops a child of the machine.
+     *
+     * @category models
+     * @since 0.48.0
+     */
+    export interface StopChild<M extends Machine.Any> {
+      readonly _tag: "StopChild"
+      readonly child: ChildMachine.Any | ChildAddress<never>
+      readonly work: Work.Logic<M> | Work.Child<M> | undefined
+    }
   }
 
   /**
    * One piece of work that an entry of a state starts.
    *
+   * **Details**
+   *
+   * Work is described, not evaluated. A host evaluates it when it starts it,
+   * with the accessor of its kind: `effect`, `duration`, `stream`, `logic`, or
+   * `input`. Each accessor calls the source and the input mapper of the work at
+   * most once, however often it is called, and returns an `Exit` instead of
+   * throwing.
+   *
+   * A host starts the work of a step in order. A failed `Exit` of an accessor
+   * means that the work could not start: the host settles the work with that
+   * `Exit` at once. That fails the machine, which then runs no work, so the
+   * rest of the step does not start. This is what `LocalMachine` does when a
+   * source throws.
+   *
    * @category models
    * @since 0.48.0
    */
-  export type Work<M extends Machine.Any> = Work.Effect<M> | Work.Timer<M> | Work.Stream<M>
+  export type Work<M extends Machine.Any> =
+    | Work.Effect<M>
+    | Work.Timer<M>
+    | Work.Stream<M>
+    | Work.Logic<M>
+    | Work.Child<M>
 
   /**
    * The kinds of {@link Work}.
@@ -7826,19 +7964,40 @@ export declare namespace MachineStep {
      */
     export interface Effect<M extends Machine.Any> extends Proto<M> {
       readonly _tag: "Effect"
-      readonly effect: StepEffect<Requirements<M>>
+
+      /** Evaluates the Effect to run, at most once. */
+      readonly effect: () => Exit.Exit<StepEffect<unknown, Requirements<M>>>
     }
 
     /**
-     * A timer. The host waits for `duration`, and then settles it with a
+     * A timer. It waits for its duration, and its host then settles it with a
      * successful `Exit`.
+     *
+     * **Details**
+     *
+     * `duration` evaluates how long the timer waits, at most once. Its outer
+     * `Exit` follows the rule of every kind of work: a failure means that the
+     * timer could not start. The inner `Exit` is how the timer ends: wait for
+     * the duration it holds, or, when the input of the timer names no duration,
+     * end at once with its failure, as a timer of zero duration does. A host
+     * that keeps timers of its own, or stores a due time before it commits a
+     * step, reads `duration` in the step that enters the state, and settles the
+     * timer with the inner failure when it would have fallen due.
+     *
+     * `effect` is the timer as an Effect that sleeps for the duration, or fails
+     * as the timer fails, for a host whose timers wait on fibers.
      *
      * @category models
      * @since 0.48.0
      */
     export interface Timer<M extends Machine.Any> extends Proto<M> {
       readonly _tag: "Timer"
-      readonly duration: Duration.Duration
+
+      /** Evaluates how long the timer waits, at most once. */
+      readonly duration: () => Exit.Exit<Exit.Exit<Duration.Duration>>
+
+      /** Evaluates the timer as an Effect that waits for its duration. */
+      readonly effect: () => Exit.Exit<StepEffect<void, never>>
     }
 
     /**
@@ -7851,19 +8010,197 @@ export declare namespace MachineStep {
      */
     export interface Stream<M extends Machine.Any> extends Proto<M> {
       readonly _tag: "Stream"
-      readonly stream: StepStream<Requirements<M>>
+
+      /** Evaluates the Stream to run, at most once. */
+      readonly stream: () => Exit.Exit<StepStream<Requirements<M>>>
+    }
+
+    /**
+     * Process logic to run as a child of the machine, at its `address`.
+     *
+     * **Details**
+     *
+     * The host runs `initial` and then `run`, with contexts of its own: the
+     * `parent` endpoint is the machine. It reports each state that the logic
+     * sets with `report`, and settles the logic with the `Exit` of `run`, or
+     * with the failure of `initial`. Both run in one `Scope`, forked from the
+     * `Scope` that `initial` runs in and closed when `run` ends.
+     *
+     * @category models
+     * @since 0.48.0
+     */
+    export interface Logic<M extends Machine.Any> extends Proto<M> {
+      readonly _tag: "Logic"
+
+      /** Address of the logic among the children of the machine. */
+      readonly address: ChildAddress<never>
+
+      /** Evaluates the logic to run, at most once. */
+      readonly logic: () => Exit.Exit<
+        StepLogic<Requirements<M> | Scope.Scope>
+      >
+    }
+
+    /**
+     * A child machine to run, with the machine as its parent.
+     *
+     * **Details**
+     *
+     * A host runs it as a machine of its own, such as one more `Machine.toStep`
+     * of `child.machine` with `parent` set to a target of this machine. It
+     * reports each snapshot of the child with `report`, and settles it with the
+     * output of the child or with why it failed.
+     *
+     * @category models
+     * @since 0.48.0
+     */
+    export interface Child<M extends Machine.Any> extends Proto<M> {
+      readonly _tag: "Child"
+
+      /** The descriptor of the child, which commands select it by. */
+      readonly child: ChildMachine.Any
+
+      /**
+       * Evaluates the arguments of the child's `start`, at most once: empty when
+       * the invocation declares no input, and the input it maps otherwise.
+       */
+      readonly input: () => Exit.Exit<ReadonlyArray<unknown>>
     }
   }
 
   /**
-   * Services that the work of a machine requires of its host.
+   * How far a piece of work of an active state got, as a durable host stored
+   * it, for `resume`.
+   *
+   * **Details**
+   *
+   * `Ended` work is not listed again: its end was applied, and running it again
+   * would apply it twice. `Running` work is not listed in {@link Step} `start`,
+   * because the host still runs it. It is in {@link Step} `running`, as the work
+   * object that the host settles once it ends. Any work of an active state that
+   * no progress names starts.
+   *
+   * @category models
+   * @since 0.48.0
+   */
+  export interface Progress<M extends Machine.Any> {
+    /** Path of the state that invokes the work. */
+    readonly path: Machine.StateIdentifier<Machine.States<M>>
+
+    /** Id of the invocation within its state. */
+    readonly id: string
+
+    readonly status: "Ended" | "Running"
+  }
+
+  /**
+   * The children of a running machine, which its host owns.
+   *
+   * **Details**
+   *
+   * Work acts on the children of its machine through these operations: the
+   * `children` of an input mapper, and `Machine.spawn`, `Machine.sendTo`, and
+   * `Machine.stopChild`. A child is selected by its descriptor, or by the
+   * address it was spawned or invoked at.
+   *
+   * A host that runs the `Logic` and child machines of the states also routes
+   * `sendTo` and `stop` to them, and refuses to `spawn` a child at an address
+   * that one of them holds, with `ChildAlreadyExistsError`.
+   *
+   * @category models
+   * @since 0.48.0
+   */
+  export interface Children {
+    /** Starts a child machine, as `ChildOwner.spawn` does. */
+    readonly spawn: (
+      child: ChildMachine.Any,
+      options: { readonly input: unknown } | undefined
+    ) => StepEffect<MachineRef<unknown, never, unknown, unknown, unknown>, unknown>
+
+    /** Starts process logic, as `Machine.spawn` does. */
+    readonly spawnLogic: (
+      logic: StepLogic<unknown>,
+      options: SpawnOptions | undefined
+    ) => StepEffect<MachineRef<unknown, never, unknown, unknown, unknown>, unknown>
+
+    /** Sends an event to a child. A child that does not run is ignored. */
+    readonly sendTo: (
+      child: ChildMachine.Any | ChildAddress<never>,
+      event: unknown
+    ) => Effect.Effect<void, StoppedError>
+
+    /** Stops a child. A child that does not run is ignored. */
+    readonly stop: (child: ChildMachine.Any | ChildAddress<never>) => Effect.Effect<void>
+  }
+
+  /**
+   * What {@link toStep} asks of a host for a machine.
+   *
+   * **Details**
+   *
+   * - `self` is the target of the running machine, through which the host takes
+   *   the events that the machine and its work send to it.
+   * - `parent` is the target of the owner of a machine that declares a parent,
+   *   and is required when that parent is. Transitions and input mappers receive
+   *   it as `parent`.
+   * - `children` are the children of the machine. They are required when work
+   *   of the machine requires `Machine.MachineRuntime` or
+   *   `Machine.ChildMachineRuntime`. Without them, every operation on children
+   *   fails the machine with `ProcessLocalError`.
+   *
+   * @category models
+   * @since 0.48.0
+   */
+  export type Options<M extends Machine.Any> =
+    & { readonly self: MachineTarget<Machine.EventInputOf<Machine.InputEvents<M>>> }
+    & ParentOption<Machine.ParentEvents<M>>
+    & ChildrenOption<Machine.Services<M>>
+
+  /**
+   * Refuses, at compile time, a machine that a host cannot run.
+   *
+   * **When to use**
+   *
+   * Intersect it with the machine parameter of a host that runs only some
+   * kinds of work: `machine: M & MachineStep.Supported<M, "Stream", never>`.
+   *
+   * **Details**
+   *
+   * `Kinds` are the kinds of {@link InvocationSupport} that the host runs, and
+   * `Capabilities` are the services of children that it supplies as
+   * {@link Children}. Effects and timers need no kind. A machine that needs
+   * more resolves to an object whose property
+   * `~effect/Machine/MachineStep/Unsupported` names what is missing.
+   *
+   * @category utility types
+   * @since 0.48.0
+   */
+  export type Supported<
+    M extends Machine.Any,
+    Kinds extends InvocationSupport.Kind,
+    Capabilities extends MachineRuntime | ChildMachineRuntime = never
+  > = IsAny<Machine.Services<M>> extends true ? unknown
+    : [
+      | UnsupportedInvocation<Machine.Services<M>, Kinds>
+      | UnsupportedCapability<Machine.Services<M>, Capabilities>
+    ] extends [never] ? unknown
+    : {
+      readonly "~effect/Machine/MachineStep/Unsupported": {
+        readonly invocations: UnsupportedInvocation<Machine.Services<M>, Kinds>
+        readonly capabilities: UnsupportedCapability<Machine.Services<M>, Capabilities>
+      }
+    }
+
+  /**
+   * Services that the work of a machine requires of its host. The services of
+   * children come from {@link Children}.
    *
    * @category utility types
    * @since 0.48.0
    */
   export type Requirements<M extends Machine.Any> = Exclude<
     Machine.Services<M>,
-    InvocationSupport<"Stream"> | Scope.Scope
+    InvocationSupport<InvocationSupport.Kind> | MachineRuntime | ChildMachineRuntime | Scope.Scope
   >
 
   /**
@@ -7896,28 +8233,31 @@ export declare namespace MachineStep {
   export type Rejection = MachineSchemaDecodeError | StoppedError
 }
 
-// The kinds of work are named `Effect` and `Stream` in their namespace, so they
-// refer to the modules through these aliases.
-type StepEffect<R> = Effect.Effect<unknown, unknown, R>
+// The kinds of work are named `Effect`, `Stream`, and `Logic` in their
+// namespace, so they refer to the modules through these aliases.
+type StepEffect<A, R> = Effect.Effect<A, unknown, R>
 
 type StepStream<R> = Stream.Stream<unknown, unknown, R>
 
-// This host runs Effects, timers, and Streams. It owns no children, so a kind
-// added to `InvocationSupport` is refused until this host states that it runs it.
-type StepUnsupportedInvocation<R> = R extends InvocationSupport<infer Kind> ? Exclude<Kind, "Stream"> : never
+type StepLogic<R> = Logic<unknown, unknown, unknown, R, unknown, unknown>
 
-type StepUnsupportedCapability<R> = R extends MachineRuntime ? "MachineRuntime"
-  : R extends ChildMachineRuntime ? "ChildMachineRuntime"
+type ParentOption<ParentEvents extends ReadonlyArray<Machine.TaggedSchema>> = Machine.ParentModeOf<ParentEvents> extends
+  "required" ? { readonly parent: MachineTarget<Machine.EventInputOf<ParentEvents>> }
+  : Machine.ParentModeOf<ParentEvents> extends "optional"
+    ? { readonly parent?: MachineTarget<Machine.EventInputOf<ParentEvents>> | undefined }
+  : { readonly parent?: undefined }
+
+type ChildrenOption<R> = IsAny<R> extends true ? { readonly children?: MachineStep.Children | undefined }
+  : [Extract<R, MachineRuntime | ChildMachineRuntime>] extends [never]
+    ? { readonly children?: MachineStep.Children | undefined }
+  : { readonly children: MachineStep.Children }
+
+type UnsupportedInvocation<R, Kinds> = R extends InvocationSupport<infer Kind> ? Exclude<Kind, Kinds> : never
+
+type UnsupportedCapability<R, Capabilities> = R extends MachineRuntime
+  ? [MachineRuntime] extends [Capabilities] ? never : "MachineRuntime"
+  : R extends ChildMachineRuntime ? [ChildMachineRuntime] extends [Capabilities] ? never : "ChildMachineRuntime"
   : never
-
-type EnsureStepSupported<R> = 0 extends (1 & R) ? unknown
-  : [StepUnsupportedInvocation<R> | StepUnsupportedCapability<R>] extends [never] ? unknown
-  : {
-    readonly "~effect/Machine/toStep/Unsupported": {
-      readonly invocations: StepUnsupportedInvocation<R>
-      readonly capabilities: StepUnsupportedCapability<R>
-    }
-  }
 
 /**
  * Extracts the step function of a machine: its pure form, for code that runs
@@ -7932,44 +8272,36 @@ type EnsureStepSupported<R> = 0 extends (1 & R) ? unknown
  *
  * **Details**
  *
- * The returned {@link MachineStep} runs nothing. Each of its functions returns
- * the next state, as a value, together with the work to stop and to start, in
- * the order the host carries them out. Work is an Effect, a timer, or a Stream.
- * The current entry of a state is part of the state value, so a result of work
- * whose state was exited is ignored without the host comparing anything.
+ * The returned {@link MachineStep} runs nothing, and calls no user code for the
+ * work it lists. Each of its functions returns the next state, as a value,
+ * together with the commands to carry out, the work to stop and to start, in
+ * the order the host carries them out. Work is an Effect, a timer, a Stream, a
+ * `Logic`, or a child machine, described as data that the host evaluates when
+ * it starts it. The current entry of a state is part of the state value, so a
+ * result of work whose state was exited is ignored without the host comparing
+ * anything.
  *
- * The step evaluates the sources and input mappers of the work it starts. One
- * that throws fails the machine in that step, and none of the work of the step
- * starts. The local runtime evaluates them as it starts each piece of work, so
- * the work before it has already started there.
- *
- * Each transition that calls `enqueue.sendTo` with a target puts that event in
- * {@link MachineStep.Step} `sends`. `self` is the target that the host passes
- * in `options`, which transitions and input mappers receive, so an event that
- * the machine or its work sends to itself reaches the host.
+ * `toStep` accepts every machine that `LocalMachine.start` accepts, and also a
+ * machine that declares a parent. A host states in its own types which kinds of
+ * work it runs, with {@link MachineStep.Supported}. The options are the
+ * {@link MachineStep.Options} of the machine: `self`, the `parent` of a machine
+ * that has one, and the `children` that its work acts on.
  *
  * `send` rejects an event that does not match its schema, and keeps the
  * machine. `LocalMachine` takes such an event and fails the machine.
  *
  * **Gotchas**
  *
- * A machine whose states invoke a `Logic` or a child machine, or whose work
- * requires `Machine.MachineRuntime` or `Machine.ChildMachineRuntime`, does not
- * compile: those need a host that owns children. The error names the property
- * `~effect/Machine/toStep/Unsupported`, and lists the invocation kinds and the
- * capabilities to remove.
- *
- * The compiler reads only the requirements of a machine, so a host that owns no
- * children refuses these at run time with `ProcessLocalError`, as a defect that
- * fails the machine: work that uses an operation of `children` from the context
- * of its input mapper, and a transition that addresses a child with
- * `enqueue.sendTo` or `enqueue.stop`.
+ * The compiler reads only the requirements of a machine, and an input mapper
+ * receives `children` whatever its machine requires. A host that passes no
+ * `children` refuses every operation on them at run time with
+ * `ProcessLocalError`, as a defect that fails the machine.
  *
  * **Example** (Stepping a machine that loads a document)
  *
  * ```ts import.meta.vitest
  * import { Machine } from "@typeonce/effect-machine"
- * import { Effect, Schema } from "effect"
+ * import { Effect, Exit, Schema } from "effect"
  *
  * const Events = Machine.events({ Load: {} })
  * const machine = Machine.make({
@@ -7994,11 +8326,51 @@ type EnsureStepSupported<R> = 0 extends (1 & R) ? unknown
  *   const loading = yield* step.send(started.state, Events.Load())
  *   const [work] = loading.start
  *   if (work?._tag !== "Effect") return "no work"
- *   const loaded = step.settle(loading.state, work, yield* Effect.exit(work.effect))
+ *   const effect = work.effect()
+ *   if (Exit.isFailure(effect)) return "cannot start"
+ *   const loaded = step.settle(loading.state, work, yield* Effect.exit(effect.value))
  *   return loaded.snapshot.state.path
  * })
  *
  * await Effect.runPromise(program) // => "Loaded"
+ * ```
+ *
+ * **Example** (Starting work whose input mapper throws)
+ *
+ * ```ts import.meta.vitest
+ * import { Machine } from "@typeonce/effect-machine"
+ * import { Effect, Exit } from "effect"
+ *
+ * const machine = Machine.make({
+ *   root: Machine.state({ states: { Loading: {} } }),
+ *   events: Machine.events({}),
+ *   effects: { load: (_: string) => Effect.void }
+ * }).handle({
+ *   initial: { target: "Loading" },
+ *   states: {
+ *     Loading: {
+ *       invoke: {
+ *         src: "load",
+ *         input: (): string => {
+ *           throw new Error("no input")
+ *         },
+ *         onDone: { stay: true }
+ *       }
+ *     }
+ *   }
+ * })
+ *
+ * const self = { id: "loader", sessionId: "loader-1", send: () => Effect.void }
+ * const step = Machine.toStep(machine, { self })
+ *
+ * // An `Exit` is an Effect, so the step that starts the machine runs as one.
+ * const started = Effect.runSync(step.start())
+ * const [work] = started.start
+ * // The step called no user code: the host evaluates work as it starts it.
+ * const effect = work?._tag === "Effect" ? work.effect() : undefined
+ * const failed = effect !== undefined && Exit.isFailure(effect) ? step.settle(started.state, work!, effect) : started
+ *
+ * failed.exit !== undefined && Exit.isFailure(failed.exit) // => true
  * ```
  *
  * @see {@link plan} for planning one event without work.
@@ -8034,13 +8406,23 @@ export const toStep: <
       InputEvents,
       ParentEvents
     >
-    & EnsureExecutable<States, UnhandledStates, OutputStates>
-    & Machine.RootCompatible<ParentEvents>
-    & EnsureStepSupported<R>,
-  options: {
-    /** The target of the running machine, through which the host takes the events sent to it. */
-    readonly self: MachineTarget<Machine.EventInputOf<InputEvents>>
-  }
+    & EnsureExecutable<States, UnhandledStates, OutputStates>,
+  options: MachineStep.Options<
+    Machine<
+      States,
+      Events,
+      Input,
+      UnhandledStates,
+      E,
+      R,
+      FinalStates,
+      Output,
+      Emits,
+      OutputStates,
+      InputEvents,
+      ParentEvents
+    >
+  >
 ) => MachineStep<
   Machine<
     States,

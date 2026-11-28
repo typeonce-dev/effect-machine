@@ -1,4 +1,4 @@
-import { type Duration, Effect, type Exit, Schema, Stream } from "effect"
+import { type Duration, Effect, type Exit, Schema, type Scope, Stream } from "effect"
 import { describe, expect, it } from "tstyche"
 import { Machine } from "../../src/index.js"
 import type { Rebuilt } from "../support/rebuilt.js"
@@ -80,14 +80,63 @@ describe("Machine.toStep", () => {
 
   it("types the work by its kind, with the services it requires", () => {
     type Work = Machine.MachineStep.Work<M>
+    // Work is evaluated by its host, and a failure to evaluate it is a defect.
     expect<Extract<Work, { readonly _tag: "Effect" }>["effect"]>().type.toBe<
-      Effect.Effect<unknown, unknown, Database>
+      () => Exit.Exit<Effect.Effect<unknown, unknown, Database>>
     >()
     expect<Extract<Work, { readonly _tag: "Stream" }>["stream"]>().type.toBe<
-      Stream.Stream<unknown, unknown, Database>
+      () => Exit.Exit<Stream.Stream<unknown, unknown, Database>>
     >()
-    expect<Extract<Work, { readonly _tag: "Timer" }>["duration"]>().type.toBe<Duration.Duration>()
+    expect<Extract<Work, { readonly _tag: "Timer" }>["duration"]>().type.toBe<
+      () => Exit.Exit<Exit.Exit<Duration.Duration>>
+    >()
+    expect<Extract<Work, { readonly _tag: "Timer" }>["effect"]>().type.toBe<
+      () => Exit.Exit<Effect.Effect<void, unknown>>
+    >()
     expect<Work["path"]>().type.toBe<"" | "Idle" | "Loading" | "Done">()
+    expect<Work["_tag"]>().type.toBe<"Effect" | "Timer" | "Stream" | "Logic" | "Child">()
+  })
+
+  it("types the work of process logic and of child machines, with the services of the host", () => {
+    type Logic = Machine.MachineStep.Work.Logic<M>
+    expect<Logic["address"]>().type.toBe<Machine.ChildAddress<never>>()
+    expect<Logic["logic"]>().type.toBe<
+      () => Exit.Exit<Machine.Logic<unknown, unknown, unknown, Database | Scope.Scope, unknown, unknown>>
+    >()
+    type Child = Machine.MachineStep.Work.Child<M>
+    expect<Child["child"]>().type.toBe<Machine.ChildMachine.Any>()
+    expect<Child["input"]>().type.toBe<() => Exit.Exit<ReadonlyArray<unknown>>>()
+    expect(step.report).type.not.toBeCallableWith(
+      null! as Machine.MachineStep.State<M>,
+      null! as Machine.MachineStep.Work.Effect<M>,
+      1
+    )
+    expect(step.element).type.not.toBeCallableWith(
+      null! as Machine.MachineStep.State<M>,
+      null! as Machine.MachineStep.Work.Logic<M>,
+      1
+    )
+  })
+
+  it("types the commands, the microsteps, and the progress of a resume", () => {
+    type Step = Machine.MachineStep.Step<M>
+    expect<Step["commands"][number]["_tag"]>().type.toBe<"Send" | "SendToChild" | "StopChild">()
+    expect<Extract<Step["commands"][number], { readonly _tag: "StopChild" }>["work"]>().type.toBe<
+      Machine.MachineStep.Work.Logic<M> | Machine.MachineStep.Work.Child<M> | undefined
+    >()
+    expect<Step["microsteps"][number]["next"]>().type.toBe<Machine.Snapshot<M>>()
+    expect<Step["event"]>().type.toBe<
+      Machine.Machine.LifecycleEvent<Machine.Machine.Events<M>> | undefined
+    >()
+    expect(step.resume).type.toBeCallableWith(null! as Machine.Snapshot<M>, [
+      { path: "Loading", id: "load", status: "Running" }
+    ])
+    expect(step.resume).type.not.toBeCallableWith(null! as Machine.Snapshot<M>, [
+      { path: "Missing", id: "load", status: "Running" }
+    ])
+    expect(step.resume).type.not.toBeCallableWith(null! as Machine.Snapshot<M>, [
+      { path: "Loading", id: "load", status: "Waiting" }
+    ])
   })
 
   it("keeps the state of one machine apart from the state of another", () => {
@@ -108,5 +157,39 @@ describe("Machine.toStep", () => {
       self: null! as Machine.MachineTarget<{ readonly _tag: "Other" }>
     })
     expect(Effect.succeed(step)).type.toBe<Effect.Effect<Machine.MachineStep<M>>>()
+  })
+
+  describe("parent", () => {
+    const Reports = Machine.events({ Reported: { count: Schema.Number } })
+    const required = Machine.make({
+      root: Machine.state({ states: { Idle: {} } }),
+      events: Events,
+      parent: Machine.parent(Reports)
+    }).handle({ initial: { target: "Idle" } })
+    const optional = Machine.make({
+      root: Machine.state({ states: { Idle: {} } }),
+      events: Events,
+      parent: Machine.optionalParent(Reports)
+    }).handle({ initial: { target: "Idle" } })
+    // A target that takes every event, as the target of a host that routes them.
+    const parent = null! as Machine.MachineTarget<unknown>
+    const childSelf = null! as Machine.MachineTarget<
+      Machine.Machine.EventInputOf<Machine.Machine.InputEvents<Rebuilt<typeof required>>>
+    >
+
+    it("requires the parent of a machine that requires one, and takes it as an option otherwise", () => {
+      expect(Machine.toStep).type.toBeCallableWith(required, { self: childSelf, parent })
+      expect(Machine.toStep).type.not.toBeCallableWith(required, { self: childSelf })
+      expect(Machine.toStep).type.toBeCallableWith(optional, { self: childSelf, parent })
+      expect(Machine.toStep).type.toBeCallableWith(optional, { self: childSelf })
+      expect(Machine.toStep).type.not.toBeCallableWith(machine, { self, parent })
+    })
+
+    it("requires a parent that takes the events of its protocol", () => {
+      expect(Machine.toStep).type.not.toBeCallableWith(required, {
+        self: childSelf,
+        parent: null! as Machine.MachineTarget<{ readonly _tag: "Other" }>
+      })
+    })
   })
 })

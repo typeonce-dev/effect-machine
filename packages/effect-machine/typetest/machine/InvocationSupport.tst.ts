@@ -408,29 +408,25 @@ describe("Machine.toStep", () => {
     expect(streamingStep).type.toBe<Machine.MachineStep<Rebuilt<typeof streaming>>>()
   })
 
-  it("refuses a machine that invokes a Logic or a child machine, which need a host that owns children", () => {
-    // @ts-expect-error { readonly invocations: "Logic"; readonly capabilities: never; }
-    Machine.toStep(working, { self })
-    // @ts-expect-error { readonly invocations: "Child"; readonly capabilities: never; }
-    Machine.toStep(owning, { self })
-    // @ts-expect-error { readonly invocations: "Child"; readonly capabilities: never; }
-    Machine.toStep(owningStreaming, { self })
+  it("accepts a machine that invokes a Logic or a child machine, whose work a host describes as data", () => {
+    expect(Machine.toStep).type.toBeCallableWith(working, { self })
+    expect(Machine.toStep).type.toBeCallableWith(owning, { self })
+    expect(Machine.toStep).type.toBeCallableWith(owningStreaming, { self })
   })
 
-  it("refuses a machine whose work acts on children", () => {
-    // @ts-expect-error { readonly invocations: never; readonly capabilities: "MachineRuntime"; }
-    Machine.toStep(stopping, { self })
-    // @ts-expect-error { readonly invocations: never; readonly capabilities: "MachineRuntime"; }
-    Machine.toStep(stoppingStream, { self })
-    // @ts-expect-error { readonly invocations: "Logic"; readonly capabilities: "MachineRuntime"; }
-    Machine.toStep(spawning, { self })
-    // @ts-expect-error { readonly invocations: "Logic"; readonly capabilities: "MachineRuntime"; }
-    Machine.toStep(several, { self })
-    // @ts-expect-error { readonly invocations: never; readonly capabilities: "MachineRuntime"; }
-    Machine.toStep(choosingInList, { self })
+  it("asks for the children of the host when work acts on them", () => {
+    const children = null! as Machine.MachineStep.Children
+    expect(Machine.toStep).type.not.toBeCallableWith(stopping, { self })
+    expect(Machine.toStep).type.toBeCallableWith(stopping, { self, children })
+    expect(Machine.toStep).type.not.toBeCallableWith(stoppingStream, { self })
+    expect(Machine.toStep).type.toBeCallableWith(spawning, { self, children })
+    expect(Machine.toStep).type.toBeCallableWith(several, { self, children })
+    expect(Machine.toStep).type.toBeCallableWith(choosingInList, { self, children })
+    // Children are optional for a machine whose work does not require them.
+    expect(Machine.toStep).type.toBeCallableWith(handled, { self, children })
   })
 
-  it("refuses work that acts on the child machine of a state", () => {
+  it("asks for the children of the host when work acts on the child machine of a state", () => {
     const Quiet = Machine.child("quiet", quiet)
     const driving = Machine.make({ root, events, effects: { drive: Machine.sendTo(Quiet, { _tag: "Start" }) } })
       .handle({
@@ -438,8 +434,40 @@ describe("Machine.toStep", () => {
         states: { Busy: { invoke: { src: "drive", onDone: { stay: true }, onFailure: { stay: true } } } }
       })
     expect<Services<typeof driving>>().type.toBe<Machine.ChildMachineRuntime>()
-    // @ts-expect-error { readonly invocations: never; readonly capabilities: "ChildMachineRuntime"; }
-    Machine.toStep(driving, { self })
+    expect(Machine.toStep).type.not.toBeCallableWith(driving, { self })
+    expect(Machine.toStep).type.toBeCallableWith(driving, { self, children: null! as Machine.MachineStep.Children })
+    expect<Machine.MachineStep.Requirements<typeof driving>>().type.toBe<never>()
+  })
+
+  it("lets a host refuse at compile time what it does not run", () => {
+    expect<Machine.MachineStep.Supported<typeof handled, never>>().type.toBe<unknown>()
+    expect<Machine.MachineStep.Supported<typeof streaming, "Stream">>().type.toBe<unknown>()
+    expect<Machine.MachineStep.Supported<typeof streaming, never>>().type.toBe<{
+      readonly "~effect/Machine/MachineStep/Unsupported": {
+        readonly invocations: "Stream"
+        readonly capabilities: never
+      }
+    }>()
+    expect<Machine.MachineStep.Supported<typeof working, "Stream">>().type.toBe<{
+      readonly "~effect/Machine/MachineStep/Unsupported": {
+        readonly invocations: "Logic"
+        readonly capabilities: never
+      }
+    }>()
+    expect<Machine.MachineStep.Supported<typeof stopping, never>>().type.toBe<{
+      readonly "~effect/Machine/MachineStep/Unsupported": {
+        readonly invocations: never
+        readonly capabilities: "MachineRuntime"
+      }
+    }>()
+    expect<Machine.MachineStep.Supported<typeof stopping, never, Machine.MachineRuntime>>().type.toBe<unknown>()
+    expect<Machine.MachineStep.Supported<Machine.Machine.Any, never>>().type.toBe<unknown>()
+
+    const host = <M extends Machine.Machine.Any>(
+      machine: M & Machine.MachineStep.Supported<M, "Stream">
+    ): M => machine
+    expect(host).type.toBeCallableWith(streaming)
+    expect(host).type.not.toBeCallableWith(working)
   })
 })
 

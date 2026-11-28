@@ -47,18 +47,6 @@ const rejected = (scenario: string): Difference => ({
 const step = ["Machine.toStep"]
 const machineDocs = "src/Machine.ts"
 
-/** The work of a state whose sources cannot all be evaluated. */
-const startsNothing = {
-  kind: "Deliberate",
-  hosts: step,
-  differs: "Fails before any work of the step starts, so none starts and none is stopped.",
-  because: "A step evaluates every source of the states it enters before it returns, and the host runs the work after.",
-  documentedIn: {
-    file: machineDocs,
-    text: "One that throws fails the machine in that step, and none of the work of the step starts."
-  }
-} as const
-
 const resumesAWait = {
   kind: "Deliberate",
   hosts: cluster,
@@ -228,15 +216,5 @@ export const differences: ReadonlyArray<Difference> = [
       "an invalid payload": { answers: ["Rejected"], outcome: running },
       "an event after it": { answers: ["Accepted"], happens: [{ Count: { length: 5 } }] }
     }
-  },
-  {
-    ...startsNothing,
-    scenario: "fails when work cannot start, in the state that owns it",
-    steps: { "send Load": { happens: [{ Loading: { id: "a", notes: 0 } }], stopped: [] } }
-  },
-  {
-    ...startsNothing,
-    scenario: "fails when the duration of a timer throws, in the state that owns it",
-    steps: { "send Wait": { happens: [{ Waiting: { notes: 0, seconds: 10 } }], stopped: [] } }
   }
 ]

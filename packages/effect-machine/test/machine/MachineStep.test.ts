@@ -6,7 +6,7 @@ import { Machine } from "../../src/index.js"
 const dataOf = (step: Machine.MachineStep.Step<any>) => ({
   snapshot: step.snapshot,
   emitted: step.emitted,
-  sends: step.sends,
+  commands: step.commands,
   stop: step.stop.map(keyOf),
   start: step.start.map(keyOf),
   exit: step.exit
@@ -18,6 +18,9 @@ const success = <A, E>(exit: Exit.Exit<A, E>): A => {
   if (Exit.isFailure(exit)) throw new Error(`Expected a success, received ${Cause.pretty(exit.cause)}`)
   return exit.value
 }
+
+/** The value of an accessor of work that evaluated. */
+const runnable = <A>(exit: Exit.Exit<A>): A => success(exit)
 
 const only = <W>(work: ReadonlyArray<W>): W => {
   assert.strictEqual(work.length, 1)
@@ -105,7 +108,7 @@ describe("Machine.toStep", () => {
       assert.strictEqual(work.source, "load")
       if (work._tag !== "Effect") throw new Error(`Unexpected ${work._tag}`)
 
-      const loaded = step.settle(loading.state, work, yield* Effect.exit(work.effect))
+      const loaded = step.settle(loading.state, work, yield* Effect.exit(runnable(work.effect())))
       assert.deepStrictEqual(loaded.snapshot.state.value, { _tag: "Loaded", result: "document a" })
       assert.deepStrictEqual(loaded.emitted, [{ _tag: "Loaded", id: "a" }])
       assert.deepStrictEqual(loaded.stop, [])
@@ -120,7 +123,7 @@ describe("Machine.toStep", () => {
       const loading = success(step.send(success(step.start()).state, Events.Load({ id: "missing" })))
       const work = only(loading.start)
       if (work._tag !== "Effect") throw new Error(`Unexpected ${work._tag}`)
-      const failed = step.settle(loading.state, work, yield* Effect.exit(work.effect))
+      const failed = step.settle(loading.state, work, yield* Effect.exit(runnable(work.effect())))
       assert.deepStrictEqual(failed.snapshot.state.value, { _tag: "Failed", reason: "not found" })
     }))
 
@@ -128,7 +131,7 @@ describe("Machine.toStep", () => {
     const waiting = success(step.send(success(step.start()).state, Events.Wait()))
     const timer = only(waiting.start)
     if (timer._tag !== "Timer") throw new Error(`Unexpected ${timer._tag}`)
-    assert.deepStrictEqual(timer.duration, Duration.seconds(90))
+    assert.deepStrictEqual(timer.duration(), Exit.succeed(Exit.succeed(Duration.seconds(90))))
     assert.strictEqual(leafOf(step.settle(waiting.state, timer, Exit.void)), "TimedOut")
   })
 
@@ -158,7 +161,7 @@ describe("Machine.toStep", () => {
       assert.deepStrictEqual(dataOf(step.settle(waiting.state, work, Exit.succeed("document a"))), {
         ...dataOf(waiting),
         emitted: [],
-        sends: [],
+        commands: [],
         stop: [],
         start: []
       })
@@ -175,7 +178,7 @@ describe("Machine.toStep", () => {
       const late = step.settle(idle.state, work, Exit.succeed("document a"))
       assert.strictEqual(late.state, idle.state)
       assert.strictEqual(leafOf(late), "Idle")
-      assert.deepStrictEqual([late.emitted, late.sends, late.stop, late.start], [[], [], [], []])
+      assert.deepStrictEqual([late.emitted, late.commands, late.stop, late.start], [[], [], [], []])
     })
 
     it("ignores the end of work of an earlier entry of the same state", () => {
@@ -241,16 +244,25 @@ describe("Machine.toStep", () => {
   })
 
   describe("failures", () => {
-    it("fails the machine in the step whose source throws, and starts none of its work", () => {
-      const loading = step.send(success(step.start()).state, Events.Load({ id: "throws" }))
-      const failed = success(loading)
-      assert.strictEqual(leafOf(failed), "Loading")
-      assert.deepStrictEqual(failed.start, [])
+    it("calls no source in a step, and fails the machine once the host starts work whose input mapper throws", () => {
+      const loading = success(step.send(success(step.start()).state, Events.Load({ id: "throws" })))
+      assert.strictEqual(leafOf(loading), "Loading")
+      assert.strictEqual(loading.exit, undefined)
+      const work = only(loading.start)
+      if (work._tag !== "Effect") throw new Error(`Unexpected ${work._tag}`)
+
+      const evaluated = work.effect()
+      assert.isTrue(Exit.isFailure(evaluated) && Exit.hasDies(evaluated))
+      // The mapper ran once, and the accessor keeps its failure.
+      assert.strictEqual(work.effect(), evaluated)
+
+      const failed = step.settle(loading.state, work, evaluated)
       const exit = failed.exit
       assert.isTrue(exit !== undefined && Exit.isFailure(exit) && Exit.hasDies(exit))
       if (exit !== undefined && Exit.isFailure(exit)) {
         assert.strictEqual((Cause.squash(exit.cause) as Error).message, "no input")
       }
+      assert.deepStrictEqual(failed.running, [])
       assert.deepStrictEqual(step.send(failed.state, Events.Cancel()), Exit.fail(new Machine.StoppedError()))
     })
 
@@ -286,35 +298,13 @@ describe("Machine.toStep", () => {
       assert.strictEqual(failed.snapshot, started.snapshot)
       assert.isTrue(failed.exit !== undefined && Exit.hasDies(failed.exit))
     })
-
-    it("refuses a command addressed to a child, which this host cannot own", () => {
-      const Child = Machine.child(
-        "child",
-        Machine.make({ root: Machine.state({ states: { Idle: {} } }), events: Machine.events({ Ping: {} }) }).handle({
-          initial: { target: "Idle" }
-        })
-      )
-      const addressing = Machine.make({
-        root: Machine.state({ states: { Idle: {} } }),
-        events: Machine.events({ Ping: {} })
-      }).handle({
-        initial: { target: "Idle" },
-        states: {
-          Idle: { on: { Ping: { stay: true, commands: (_, enqueue) => enqueue.sendTo(Child, { _tag: "Ping" }) } } }
-        }
-      })
-      const steps = Machine.toStep(addressing, { self })
-      const failed = success(steps.send(success(steps.start()).state, { _tag: "Ping" }))
-      assert.isDefined(failed.exit)
-      if (failed.exit === undefined || Exit.isSuccess(failed.exit)) return
-      assert.instanceOf(Cause.squash(failed.exit.cause), Machine.ProcessLocalError)
-    })
   })
 
   it("lists an event that a transition sends to the machine itself, for a later step", () => {
     const asked = success(step.send(success(step.start()).state, Events.Ask()))
     assert.strictEqual(leafOf(asked), "Asked")
-    const sent = only(asked.sends)
+    const sent = only(asked.commands)
+    if (sent._tag !== "Send") throw new Error(`Unexpected ${sent._tag}`)
     assert.strictEqual(sent.target, self)
     assert.deepStrictEqual(sent.event, { _tag: "Answer" })
     assert.strictEqual(leafOf(success(step.send(asked.state, sent.event as never))), "Idle")
@@ -357,7 +347,7 @@ describe("Machine.toStep", () => {
         if (work._tag !== "Stream") throw new Error(`Unexpected ${work._tag}`)
         let state = counting.state
         const totals: Array<unknown> = []
-        const exit = yield* Effect.exit(Stream.runForEach(work.stream, (element) =>
+        const exit = yield* Effect.exit(Stream.runForEach(runnable(work.stream()), (element) =>
           Effect.sync(() => {
             const taken = steps.element(state, work, element)
             state = taken.state
@@ -406,6 +396,11 @@ describe("Machine.toStep", () => {
         const resumed = success(steps.resume(yield* Machine.decodeSnapshot(resumable, encoded)))
         assert.deepStrictEqual(resumed.snapshot, loading.snapshot)
         assert.deepStrictEqual(resumed.start.map(keyOf), [{ _tag: "Effect", path: "Loading", id: "load", run: 0 }])
+        // A host evaluates the work it starts, which runs its input mapper.
+        assert.strictEqual(events.length, 0)
+        for (const work of [only(loading.start), only(resumed.start)]) {
+          if (work._tag === "Effect") work.effect()
+        }
         assert.strictEqual(events.length, 2)
         assert.isTrue(Machine.isInitialEvent(events[1]))
       }))

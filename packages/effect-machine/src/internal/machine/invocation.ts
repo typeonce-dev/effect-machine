@@ -5,8 +5,6 @@
  */
 
 import * as Effect from "effect/Effect"
-import * as Exit from "effect/Exit"
-import * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
 import type { ChildMachine, ChildOwner, Machine } from "../../Machine.js"
 import * as ChildRegistry from "./childRegistry.js"
@@ -15,6 +13,7 @@ import { ChildAlreadyExistsError } from "./errors.js"
 import type * as InvocationEvent from "./invocationEvent.js"
 import * as InvocationOutcome from "./invocationOutcome.js"
 import * as InvocationResolution from "./invocationResolution.js"
+import * as LogicScope from "./logicScope.js"
 import * as Runtime from "./runtimeProtocol.js"
 
 type AnyProcessLogic = Runtime.ProcessLogic<any, any, any, any, any, any>
@@ -48,33 +47,6 @@ const delay = (
   initial: () => Effect.void,
   run: () => Effect.flatMap(duration, Effect.sleep)
 })
-
-/**
- * Gives a `Logic` process one `Scope` from its `initial` through the end of its
- * `run`. The scope is forked from the owner's, so a process stopped before its
- * `run` starts is still released when its owner stops.
- */
-const scopedLogic = (logic: AnyProcessLogic): AnyProcessLogic => {
-  let scope: Scope.Closeable | undefined
-  return {
-    ...logic,
-    initial: (context) =>
-      Effect.flatMap(Effect.scope, (owner) => {
-        const own = scope = Scope.forkUnsafe(owner, "sequential")
-        return logic.initial(context).pipe(
-          Scope.provide(own),
-          Effect.onError((cause) => Scope.close(own, Exit.failCause(cause)))
-        )
-      }),
-    run: (context) => {
-      const own = scope!
-      return logic.run(context).pipe(
-        Scope.provide(own),
-        Effect.onExit((exit) => Scope.close(own, exit))
-      )
-    }
-  }
-}
 
 const streamLogic = (
   invocation: InvocationResolution.StreamInvocation,
@@ -216,7 +188,7 @@ const spawn = (
     isProgram(invocation)
       ? () => programLogic(scope, invocation, generation)
       : invocation._tag === "Logic"
-      ? () => scopedLogic(invocation.logic() as AnyProcessLogic)
+      ? () => LogicScope.scoped(invocation.logic() as AnyProcessLogic)
       // The runtime builds the child's logic from this description, so a
       // running parent retains no closure for it.
       : invocation,

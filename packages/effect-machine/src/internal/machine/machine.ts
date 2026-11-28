@@ -12,7 +12,6 @@ import type {
   Machine,
   MachineSchemaDecodeError,
   MachineSchemaEncodeError,
-  MachineTarget,
   Parent,
   ParentMode,
   SpawnOptions,
@@ -1060,10 +1059,7 @@ export const plan: (
   event: any
 ) => Effect.Effect<any, PlanningError> = internalPlanner.plan
 
-export const toStep: (
-  machine: Machine.Any,
-  options: { readonly self: MachineTarget<any> }
-) => Step.MachineStep = Step.make
+export const toStep: (machine: Machine.Any, options: Step.Options) => Step.MachineStep = Step.make
 
 export const logic = <
   State,
