@@ -421,6 +421,19 @@ const initialResult = (
     ? { state: planned.state, done: true, output: planned.output }
     : { state: planned.state, done: false, output: undefined }
 
+const eventDecoders = new WeakMap<Machine.Any, internalRuntimeProtocol.EventDecoder>()
+
+// One decoder per machine, so a started process holds no closure of its own
+// for it. An invocation event is the runtime's own and is not decoded.
+const eventDecoderOf = (machine: Machine.Any): internalRuntimeProtocol.EventDecoder => {
+  let decoder = eventDecoders.get(machine)
+  if (decoder === undefined) {
+    decoder = (event) => InvocationEvent.isInvocationEvent(event) ? event : decodeEventSync(machine, event)
+    eventDecoders.set(machine, decoder)
+  }
+  return decoder
+}
+
 // Process logic executes erased machine definitions. The public `LocalMachine`
 // module owns the typed contract that specializes this boundary.
 const makeProcessLogic = (
@@ -485,7 +498,7 @@ const makeProcessLogic = (
     execution: {
       _tag: "Compiled",
       childless: !hasInvokes,
-      decodeEvent: (event) => InvocationEvent.isInvocationEvent(event) ? event : decodeEventSync(machine, event),
+      decodeEvent: eventDecoderOf(machine),
       ...(entry._tag === "Initial" ? { initial: makeInitial } : {}),
       ...(makeCompiledInitial === undefined ? {} : { initialSync: makeCompiledInitial }),
       drain: hasInvokes

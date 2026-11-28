@@ -113,9 +113,11 @@ export const startGenericInternal: StartProcess = Effect.fnUntraced(
         offerProcessMailbox(mailbox, message, onAccepted) ? Effect.void : Effect.fail(new StoppedError())
       )
     // A machine decodes an event as it enters the mailbox; other logic takes
-    // its events as they are.
+    // its events as they are. Logic that neither decodes nor is inspected
+    // offers directly, without the closures below.
     const decodeEvent = logic.execution?._tag === "Compiled" ? logic.execution.decodeEvent : undefined
-    const offerEvent = (
+    const direct = inspector === undefined && decodeEvent === undefined
+    const offerEvent = direct ? undefined! : (
       event: Event,
       source: Inspection.Subject | undefined,
       causedBy: Inspection.Causation | undefined,
@@ -137,31 +139,27 @@ export const startGenericInternal: StartProcess = Effect.fnUntraced(
       })
     // A delivery from work, a child, a parent or a command of another machine:
     // a refused event fails this machine when it is planned.
-    const deliver = (
-      event: Event,
-      source: Inspection.Subject | undefined,
-      causedBy: Inspection.Causation | undefined
-    ): Effect.Effect<void, StoppedError> =>
-      Effect.suspend(() =>
-        offerEvent(
-          decodeEvent === undefined ? event : decodeDelivered(decodeEvent, event) as Event,
-          source,
-          causedBy,
-          undefined,
-          event
+    const deliver: InspectedOffer<Event> = direct
+      ? undefined!
+      : decodeEvent === undefined
+      ? (event, source, causedBy) => offerEvent(event, source, causedBy, undefined, event)
+      : (event, source, causedBy) =>
+        Effect.suspend(() =>
+          offerEvent(decodeDelivered(decodeEvent, event) as Event, source, causedBy, undefined, event)
         )
-      )
-    // A public `send` rejects an event that the schema refuses, and the machine
-    // keeps running. A machine that has ended rejects first.
-    const sendPublic = (event: Event): Effect.Effect<void, StoppedError | MachineSchemaDecodeError> =>
-      Effect.suspend((): Effect.Effect<void, StoppedError | MachineSchemaDecodeError> => {
-        if (decodeEvent === undefined) return deliver(event, undefined, undefined)
-        if (mailbox.closed) return Effect.fail(new StoppedError())
-        const decoded = decodeSent(decodeEvent, event)
-        return decoded._tag === "Rejected"
-          ? Effect.fail(decoded.error)
-          : offerEvent(decoded.event as Event, undefined, undefined, undefined, event)
-      })
+    // A public `send` of a machine rejects an event that the schema refuses,
+    // and the machine keeps running. A machine that has ended rejects first.
+    const sendPublic: ((event: Event) => Effect.Effect<void, StoppedError | MachineSchemaDecodeError>) | undefined =
+      decodeEvent === undefined ?
+        undefined :
+        (event) =>
+          Effect.suspend((): Effect.Effect<void, StoppedError | MachineSchemaDecodeError> => {
+            if (mailbox.closed) return Effect.fail(new StoppedError())
+            const decoded = decodeSent(decodeEvent, event)
+            return decoded._tag === "Rejected"
+              ? Effect.fail(decoded.error)
+              : offerEvent(decoded.event as Event, undefined, undefined, undefined, event)
+          })
     const offerInspected: InspectedOffer<Event> | undefined = inspector === undefined ? undefined : deliver
     const sendAcknowledged:
       | ((event: Event) => Effect.Effect<AcknowledgedDelivery<State>, Error | StoppedError>)
@@ -197,7 +195,9 @@ export const startGenericInternal: StartProcess = Effect.fnUntraced(
           ? requestStop
           : requestStop.pipe(Effect.andThen(Effect.never))
       ),
-      send: (event) => deliver(event, undefined, undefined),
+      send: direct
+        ? (event) => offerDirect(event)
+        : (event) => deliver(event, undefined, undefined),
       ...(inspector === undefined
         ? undefined
         : { inspectionSubject: subject!, sendInspected: offerInspected! })
@@ -758,8 +758,8 @@ export const startGenericInternal: StartProcess = Effect.fnUntraced(
       emissions: emissions.stream as Stream.Stream<never>,
       join: Deferred.await(done),
       stop,
-      send: sendPublic,
-      [deliverEvent]: deliver as Deliverable[typeof deliverEvent],
+      send: sendPublic ?? self.send,
+      ...(decodeEvent === undefined ? undefined : { [deliverEvent]: deliver as Deliverable[typeof deliverEvent] }),
       ...(sendAcknowledged === undefined ? undefined : {
         [acknowledgedSend]: (event: Event) =>
           Effect.suspend(

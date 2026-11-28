@@ -77,6 +77,36 @@ type CompiledLifecycle = "Active" | "TerminationRequested" | "Completed"
 type CompiledRunState = "Initializing" | "Idle" | "Draining"
 
 /**
+ * The endpoint of a compiled process: what its work, its children and its
+ * parent send to. It delivers, so a refused event fails the machine when it is
+ * planned. `send` and `sendInspected` live on the prototype, so an endpoint
+ * costs no closure; an endpoint copied by spreading keeps only its fields and
+ * replaces both.
+ */
+class CompiledAddress implements ProcessEndpoint<unknown> {
+  readonly id: string
+  readonly sessionId: string
+  declare readonly inspectionSubject?: Inspection.Subject
+  constructor(private readonly process: CompiledProcess, readonly stop: Effect.Effect<void>) {
+    this.id = process.id
+    this.sessionId = process.sessionId
+    if (process.inspectionSubject !== undefined) {
+      ;(this as { inspectionSubject?: Inspection.Subject }).inspectionSubject = process.inspectionSubject
+    }
+  }
+  send(event: unknown): Effect.Effect<void, StoppedError> {
+    return this.process.deliver(event, undefined, undefined)
+  }
+  sendInspected(
+    event: unknown,
+    source: Inspection.Subject | undefined,
+    causedBy: Inspection.Causation | undefined
+  ): Effect.Effect<void, StoppedError> {
+    return this.process.deliver(event, source, causedBy)
+  }
+}
+
+/**
  * Compact runtime for compiled statecharts.
  *
  * All long-lived state is stored directly on this object. Operations are
@@ -127,7 +157,7 @@ class CompiledProcess implements MachineRef<any, any, any, any> {
     index: 0,
     closed: false
   }
-  private readonly address: ProcessEndpoint<unknown>
+  private readonly address: CompiledAddress
   private childRuntime: ChildRuntime = childlessRuntime
   private processScope!: ProcessInitialContext<unknown>
   private processContext: ProcessRunContext<unknown, unknown> | undefined
@@ -173,24 +203,7 @@ class CompiledProcess implements MachineRef<any, any, any, any> {
     }
     this.externalEmissions = options.emissions
     this.send = (event) => this.sendPublic(event)
-    // The endpoint is what the work, the children and the parent of this
-    // machine send to: it delivers, so a refused event fails this machine.
-    this.address = {
-      id: this.id,
-      sessionId,
-      stop: Effect.suspend(() => this.stopFromProcess()),
-      send: (event) => this.deliver(event, undefined, undefined),
-      ...(inspector === undefined
-        ? undefined
-        : {
-          inspectionSubject: this.inspectionSubject!,
-          sendInspected: (
-            event: unknown,
-            source: Inspection.Subject | undefined,
-            causedBy: Inspection.Causation | undefined
-          ) => this.deliver(event, source, causedBy)
-        })
-    }
+    this.address = new CompiledAddress(this, Effect.suspend(() => this.stopFromProcess()))
   }
 
   private get inspector(): InspectionRuntime.Runtime | undefined {
@@ -272,7 +285,7 @@ class CompiledProcess implements MachineRef<any, any, any, any> {
     const sendParent = this.options.sendParent ?? (parent === undefined
       ? noParentSend
       : this.inspector === undefined
-      ? parent.send
+      ? (event: unknown) => parent.send(event)
       : (event: unknown) => sendEndpoint(parent, event, this.inspectionSubject, this.causation()))
     this.processScope = {
       self: this.address,
@@ -354,7 +367,7 @@ class CompiledProcess implements MachineRef<any, any, any, any> {
       const sendParent = self.options.sendParent ?? (parent === undefined
         ? noParentSend
         : self.inspector === undefined
-        ? parent.send
+        ? (event: unknown) => parent.send(event)
         : (event: unknown) => sendEndpoint(parent, event, self.inspectionSubject, self.causation()))
       self.processScope = {
         self: self.address,
@@ -569,7 +582,7 @@ class CompiledProcess implements MachineRef<any, any, any, any> {
   }
 
   /** A delivery from work, a child, a parent or a command of another machine. */
-  private deliver(
+  deliver(
     event: unknown,
     source: Inspection.Subject | undefined,
     causedBy: Inspection.Causation | undefined

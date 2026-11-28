@@ -303,17 +303,19 @@ export const sendEndpoint = (
 ): Effect.Effect<void, StoppedError> =>
   endpoint.sendInspected === undefined ? endpoint.send(event) : endpoint.sendInspected(event, source, causedBy)
 
-/** Delivers to a child, which this runtime started and which always delivers. */
+/**
+ * Delivers to a child, which this runtime started: a machine takes the
+ * delivery, and other logic decodes nothing, so its `send` rejects nothing.
+ */
 const deliverToChild = (
   ref: MachineRef<any, any, any, any>,
   event: unknown,
   source: Inspection.Subject | undefined,
   causedBy: Inspection.Causation | undefined
-): Effect.Effect<void, StoppedError> => {
-  return ref[deliverEvent] === undefined
-    ? Effect.die(new Error("A child of a local machine cannot take deliveries"))
+): Effect.Effect<void, StoppedError> =>
+  ref[deliverEvent] === undefined
+    ? sendMachineTarget(ref, event, source, causedBy) as Effect.Effect<void, StoppedError>
     : ref[deliverEvent](event, source, causedBy)
-}
 
 export interface ProcessInitialContext<Event> {
   readonly self: ProcessEndpoint<Event>
