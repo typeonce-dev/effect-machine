@@ -95,12 +95,17 @@ it on every host. To add one:
 1. Implement `Host` from `test/conformance/support/host.ts` under
    `test/conformance/support/hosts`. A host that needs library internals goes
    under `test/internal/machine/support` instead.
-2. Declare its `Capabilities`. They are the only reason a scenario skips a
+2. Give each instance its `Scheduling`: `settle`, which lets everything happen
+   that does not wait for time, and `advance`, which lets time pass. The suite
+   assumes no scheduler and no clock of its own. A host that runs on fibers and
+   the `TestClock` takes `fiberScheduling`; a host with its own task queue or
+   timers implements both.
+3. Declare its `Capabilities`. They are the only reason a scenario skips a
    host, so declare what the host can do.
-3. Add it to `hosts` in `HostConformance.test.ts`, run
+4. Add it to `hosts` in `HostConformance.test.ts`, run
    `pnpm vitest run test/conformance` in the package, and read the change to
    `matrix.txt` (update it with `-u`).
-4. A failing scenario is a bug of the host, unless users are told about the
+5. A failing scenario is a bug of the host, unless users are told about the
    difference. Record a documented difference as a `Deliberate` entry in
    `differences.ts`, with the sentence of the documentation that promises it,
    and an undocumented one or a known bug as an `Open` entry with its

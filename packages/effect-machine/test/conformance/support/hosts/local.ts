@@ -1,8 +1,7 @@
 import { Effect, Exit, Fiber, Scope, Stream } from "effect"
-import { TestClock } from "effect/testing"
 import { Machine } from "../../../../src/index.js"
 import type { Answer, Capabilities, Host, Outcome } from "../host.js"
-import { decode, encode, renderFailure } from "../host.js"
+import { decode, encode, fiberScheduling, renderFailure } from "../host.js"
 
 /** A reference whose types do not matter to the suite. */
 export type AnyRef = Machine.MachineRef<any, any, any, any, any>
@@ -53,7 +52,7 @@ export const makeLocalHost = (options: {
 }): Host => ({
   name: options.name,
   capabilities,
-  start: Effect.fnUntraced(function*({ input, machine }) {
+  start: Effect.fnUntraced(function*({ activity, input, machine }) {
     const outer = yield* Effect.scope
     const states: Array<Machine.Machine.EncodedSnapshot> = []
     const emitted: Array<unknown> = []
@@ -85,7 +84,9 @@ export const makeLocalHost = (options: {
     let opened = yield* open(options.start(machine, ...input))
     const current = () =>
       opened._tag === "Failed" ? undefined : encode(machine, Effect.runSync(opened.ref.snapshot).state)
+    const scheduling = fiberScheduling(activity)
     return {
+      ...scheduling,
       states,
       emitted,
       current,
@@ -106,7 +107,7 @@ export const makeLocalHost = (options: {
         if (opened._tag === "Failed") return
         const stored = current()!
         yield* opened.close
-        yield* TestClock.adjust(downtimeMillis)
+        yield* scheduling.advance(downtimeMillis)
         opened = yield* open(options.resume(machine, decode(machine, stored)))
       })
     }

@@ -1,7 +1,6 @@
 /** Runs scenarios on hosts, and compares what they did. */
 import { assert } from "@effect/vitest"
 import { Cause, Deferred, Effect, Exit, Fiber, Queue, type Scope } from "effect"
-import { TestClock } from "effect/testing"
 import { readFileSync } from "node:fs"
 import { resolve } from "node:path"
 import { isDeepStrictEqual } from "node:util"
@@ -184,17 +183,8 @@ const runScenario = Effect.fnUntraced(function*(
       fixture.log.length,
       pending()
     ].join()
-  /** Lets everything that does not wait for time happen. */
-  const settle = Effect.gen(function*() {
-    let before = ""
-    let quiet = 0
-    while (quiet < (pending() ? 10 : 4)) {
-      for (let turn = 0; turn < 10; turn++) yield* Effect.yieldNow
-      const now = progress()
-      quiet = now === before ? quiet + 1 : 0
-      before = now
-    }
-  })
+  /** Lets everything that does not wait for time happen, as the host does it. */
+  const settle = Effect.suspend(() => instance!.settle)
 
   const seen = { states: 0, starts: 0, log: 0, emitted: 0, sent: 0 }
   const stoppedBefore = new Set<unknown>()
@@ -256,7 +246,7 @@ const runScenario = Effect.fnUntraced(function*(
       case "Element":
         return Effect.asVoid(Queue.offer(fixture.find(action.source, action.run).elements, action.value))
       case "Advance":
-        return TestClock.adjust(action.duration)
+        return instance!.advance(action.duration)
       case "Restart":
         return instance!.restart(action.downtimeMillis)
       case "Stop":
@@ -266,7 +256,8 @@ const runScenario = Effect.fnUntraced(function*(
 
   instance = yield* host.start({
     machine: scenario.machine(fixture),
-    input: "input" in scenario ? [scenario.input] : []
+    input: "input" in scenario ? [scenario.input] : [],
+    activity: { progress, pending }
   })
   const trace: Array<Observation> = [yield* observe("start")]
   for (const { actions, name, settled } of scenario.steps) {

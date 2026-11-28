@@ -1,10 +1,9 @@
 import { Effect, Option, Scope } from "effect"
-import { TestClock } from "effect/testing"
 import type { Machine } from "../../../../src/index.js"
 import { ClusterMachine } from "../../../../src/unstable/cluster/index.js"
 import { makeMessages, makeTestStorage, startRunner } from "../../../unstable/cluster/support/harness.js"
 import type { Answer, Host, Outcome } from "../host.js"
-import { unsupported } from "../host.js"
+import { fiberScheduling, unsupported } from "../host.js"
 
 const answerOf = (rejected: ClusterMachine.Rejected): Answer =>
   rejected.reason === "MachineFailed" ? "Ended" : "Rejected"
@@ -45,7 +44,7 @@ export const clusterHost: Host = {
     rejection: true,
     initialState: "WithFirstEvent"
   },
-  start: Effect.fnUntraced(function*({ input, machine }) {
+  start: Effect.fnUntraced(function*({ activity, input, machine }) {
     const scope = yield* Effect.scope
     const storage = makeTestStorage()
     const messages = yield* makeMessages
@@ -58,7 +57,9 @@ export const clusterHost: Host = {
         })
     }).pipe(Effect.provideService(Scope.Scope, scope))
     let runner = yield* start
+    const scheduling = fiberScheduling(activity)
     return {
+      ...scheduling,
       // Only the machine's own checkpoints: its children store theirs too.
       get states() {
         return storage.historyOf("Worker", "worker-1").map(({ snapshot }) => snapshot)
@@ -82,7 +83,7 @@ export const clusterHost: Host = {
       stop: unsupported("Stop"),
       restart: Effect.fnUntraced(function*(downtimeMillis) {
         yield* runner.stop
-        yield* TestClock.adjust(downtimeMillis - startupMillis)
+        yield* scheduling.advance(downtimeMillis - startupMillis)
         runner = yield* start
       })
     }
