@@ -6,7 +6,6 @@ import * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
 import * as InspectionRuntime from "./inspectionRuntime.js"
 import { startCompactCompiledInternal, startCompiledSync } from "./runtimeCompiled.js"
-import { startGenericInternal } from "./runtimeGeneric.js"
 import {
   type MachineRef,
   type MakeChildLogic,
@@ -18,13 +17,8 @@ import {
   type StartProcess
 } from "./runtimeProtocol.js"
 
-const startLogicInternal: StartProcess = ((
-  logic: ProcessLogic<any, any, any, any, any, any>,
-  options: StartInternalOptions
-) =>
-  logic.execution?._tag === "Compiled"
-    ? startCompactCompiledInternal(logic, options)
-    : startGenericInternal(logic, options)) as StartProcess
+// Every logic runs on one local process.
+const startLogicInternal: StartProcess = startCompactCompiledInternal
 
 export type ProcessRuntimeStrategy = "generic" | "compiled" | "auto"
 
@@ -113,9 +107,6 @@ export const make = (makeChildLogic: MakeChildLogic) => {
         detached: true,
         runtime
       }
-    if (strategy === "generic") {
-      return yield* ownedByScope((hooks) => startGenericInternal(logic, { ...internalOptions, ...hooks }))
-    }
     if (strategy === "compiled") {
       if (logic.execution?._tag !== "Compiled") {
         return yield* Effect.die(new Error("Machine cannot force the compiled runtime for generic process logic"))
@@ -228,9 +219,7 @@ export const make = (makeChildLogic: MakeChildLogic) => {
       }
     const initialize = (hooks: OwnershipHooks) => {
       const startOptions = { ...internalOptions, ...hooks }
-      return strategy === "generic"
-        ? startGenericInternal(logic, startOptions)
-        : strategy === "compiled"
+      return strategy === "compiled"
         ? logic.execution?._tag === "Compiled"
           ? startCompactCompiledInternal(logic, startOptions)
           : Effect.die(new Error("Machine cannot force the compiled runtime for generic process logic"))

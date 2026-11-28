@@ -817,9 +817,10 @@ export interface Target<in Event> extends Machine.MachineTarget<Event> {
  *
  * An event that its schema refuses is rejected as `InvalidEvent` before it is
  * sent, and the machine never sees it. A request that the machine rejects fails
- * with the same {@link Rejected}, carrying its reason. A local machine instead
- * fails when it is sent an event that its schema refuses, because a local
- * `send` does not wait for the step.
+ * with the same {@link Rejected}, carrying its reason. A transition that throws
+ * is such a rejection, because the client waits for the step: by the rule that
+ * `Machine.MachineRef` states for `send`, the error goes to the sender, and the
+ * machine goes on.
  *
  * `snapshot`, `changes`, and `join` read the machine from {@link Storage}, which
  * is the truth, and never ask the entity. A read works from any process that

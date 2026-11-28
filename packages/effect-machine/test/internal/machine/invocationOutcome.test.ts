@@ -2,7 +2,6 @@ import { assert, describe, it } from "@effect/vitest"
 import { Cause, Exit } from "effect"
 import { StoppedError } from "../../../src/internal/machine/errors.js"
 import * as InvocationEvent from "../../../src/internal/machine/invocationEvent.js"
-import { InvocationGenerations } from "../../../src/internal/machine/invocationGeneration.js"
 import * as InvocationOutcome from "../../../src/internal/machine/invocationOutcome.js"
 import type * as InvocationResolution from "../../../src/internal/machine/invocationResolution.js"
 
@@ -125,22 +124,5 @@ describe("invocation outcome policy", () => {
     })
     const defect = Cause.die("boom")
     assert.deepStrictEqual(InvocationOutcome.fromExit(Exit.failCause(defect)), { _tag: "Cause", cause: defect })
-  })
-})
-
-describe("invocation generations", () => {
-  it("keeps a generation current until its path exits or is entered again", () => {
-    const generations = new InvocationGenerations()
-    const left = generations.beginGeneration("Active.left")
-    const right = generations.beginGeneration("Active.right")
-    generations.retireGenerations(["Unrelated", "Active.left"])
-    assert.deepStrictEqual([left.current, right.current], [false, true])
-
-    const reentered = generations.beginGeneration("Active.left")
-    const replaced = generations.beginGeneration("Active.left")
-    assert.deepStrictEqual([reentered.current, replaced.current, right.current], [false, true, true])
-
-    generations.retireAllGenerations()
-    assert.deepStrictEqual([replaced.current, right.current], [false, false])
   })
 })

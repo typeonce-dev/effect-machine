@@ -423,13 +423,13 @@ const unevaluable = (name: string, duration: () => Duration.Input, failure: stri
 })
 
 const unnamed: Scenario = {
-  name: "fails when the input of a timer names no duration, as the end of the timer",
+  name: "fails when the input of a timer names no duration, in the state that owns it",
   machine: (fixture) =>
     Machine.make({
       root,
       events: Events,
       effects: { first: fixture.work("first"), last: fixture.work("last") },
-      // A string that names no duration, which only the timer itself reads.
+      // A string that names no duration, so the timer cannot start.
       timers: { wait: (input: string) => input as Duration.Input }
     }).handle({
       initial: { target: "Idle" },
@@ -447,8 +447,8 @@ const unnamed: Scenario = {
   start,
   steps: [
     send(wait(10), {
-      happens: [waiting(10), started("first"), started("last")],
-      stopped: ["first", "last"],
+      happens: [waiting(10), started("first")],
+      stopped: ["first"],
       outcome: failed("Error: Invalid Input: soon")
     }),
     send({ _tag: "Note" }, { answers: ["Ended"] })

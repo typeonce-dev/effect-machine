@@ -470,6 +470,14 @@ Do not read the clock, generate randomness, call a service, or await work while
 choosing a transition. Receive such values in an event or produce them through
 state-owned work first.
 
+A transition that throws follows one rule on every host: the error goes to the
+sender when one waits for the event to be processed, and otherwise the machine
+fails with it. `send` of `LocalMachine` returns before the event is processed,
+so the machine fails; a `ClusterMachine` client waits, so it is rejected and the
+machine goes on. An event that its schema refuses is different: every host
+rejects it at `send`, `LocalMachine` with `MachineSchemaDecodeError` and
+`ClusterMachine` as `InvalidEvent`, and the machine keeps running.
+
 `resolve` is checked against `branches` in both directions, and each `select`
 call takes the values of the path it is given. An agent can edit this one
 transition without reading anything else: a missing entry, an entry that is never

@@ -632,8 +632,12 @@ export interface MachineTarget<in Event> {
   /** Unique identity of the running target. */
   readonly sessionId: string
 
-  /** Accepts an event for delivery, or fails with `StoppedError` once the target has terminated. */
-  readonly send: (event: Event) => Effect.Effect<void, StoppedError>
+  /**
+   * Accepts an event for delivery. Fails with `StoppedError` once the target has
+   * terminated, and with `MachineSchemaDecodeError` when the target rejects an
+   * event that its schema refuses.
+   */
+  readonly send: (event: Event) => Effect.Effect<void, StoppedError | MachineSchemaDecodeError>
 }
 
 /**
@@ -1319,8 +1323,19 @@ export interface MachineRef<out State, in Event, out Error = never, out Output =
   /** Stops this machine instance and the children it owns. */
   readonly stop: Effect.Effect<void>
 
-  /** Accepts an event for delivery. When the machine processes it is up to its host. */
-  readonly send: (event: Event) => Effect.Effect<void, StoppedError>
+  /**
+   * Accepts an event for delivery. When the machine processes it is up to its
+   * host. An event that the schema of the machine refuses is rejected with
+   * `MachineSchemaDecodeError`, and the machine keeps running; once the machine
+   * has ended, `send` fails with `StoppedError`.
+   *
+   * A transition that throws follows one rule on every host: the error goes to
+   * the sender when one waits for the event to be processed, and otherwise the
+   * machine fails with it. A `send` of `LocalMachine` returns before its event
+   * is processed, so the machine fails; a `ClusterMachine` client waits, so it
+   * is rejected and the machine goes on.
+   */
+  readonly send: (event: Event) => Effect.Effect<void, StoppedError | MachineSchemaDecodeError>
 
   /**
    * Returns the current directly owned child for a typed descriptor.
@@ -1450,9 +1465,17 @@ export declare namespace Logic {
     /** Starts a child process owned by this process. */
     readonly spawn: Spawn<Event>
 
-    /** Sends an event to a machine target or typed parent-local child address. */
+    /**
+     * Sends an event to a machine target or typed parent-local child address.
+     * An endpoint, such as `parent`, takes every event, and a machine target
+     * can reject one that its schema refuses.
+     */
     readonly sendTo: {
-      <TargetEvent>(target: MachineTarget<TargetEvent>, event: TargetEvent): Effect.Effect<void, StoppedError>
+      <TargetEvent>(target: Endpoint<TargetEvent>, event: TargetEvent): Effect.Effect<void, StoppedError>
+      <TargetEvent>(
+        target: MachineTarget<TargetEvent>,
+        event: TargetEvent
+      ): Effect.Effect<void, StoppedError | MachineSchemaDecodeError>
       <Address extends ChildAddress<never>>(
         id: Address,
         event: ChildAddress.Event<Address>
@@ -7992,17 +8015,16 @@ export declare namespace MachineStep {
      *
      * **Details**
      *
-     * `duration` evaluates how long the timer waits, at most once. Its outer
-     * `Exit` follows the rule of every kind of work: a failure means that the
-     * timer could not start. The inner `Exit` is how the timer ends: wait for
-     * the duration it holds, or, when the input of the timer names no duration,
-     * end at once with its failure, as a timer of zero duration does. A host
-     * that keeps timers of its own, or stores a due time before it commits a
-     * step, reads `duration` in the step that enters the state, and settles the
-     * timer with the inner failure when it would have fallen due.
+     * `duration` evaluates how long the timer waits, at most once. It follows
+     * the rule of every kind of work: a failure means that the timer could not
+     * start, whether its input mapper or source threw, or its input names no
+     * duration. A host that keeps timers of its own, or stores a due time
+     * before it commits a step, reads `duration` in the step that enters the
+     * state, and settles the timer with that failure where it would have
+     * started.
      *
-     * `effect` is the timer as an Effect that sleeps for the duration, or fails
-     * as the timer fails, for a host whose timers wait on fibers.
+     * `effect` is the timer as an Effect that sleeps for the duration, for a
+     * host whose timers wait on fibers. It fails as `duration` fails.
      *
      * @category models
      * @since 0.48.0
@@ -8011,7 +8033,7 @@ export declare namespace MachineStep {
       readonly _tag: "Timer"
 
       /** Evaluates how long the timer waits, at most once. */
-      readonly duration: () => Exit.Exit<Exit.Exit<Duration.Duration>>
+      readonly duration: () => Exit.Exit<Duration.Duration>
 
       /** Evaluates the timer as an Effect that waits for its duration. */
       readonly effect: () => Exit.Exit<StepEffect<void, never>>
@@ -8305,7 +8327,7 @@ type UnsupportedCapability<R, Capabilities> = R extends MachineRuntime
  * that has one, and the `children` that its work acts on.
  *
  * `send` rejects an event that does not match its schema, and keeps the
- * machine. `LocalMachine` takes such an event and fails the machine.
+ * machine, as `send` of every host does.
  *
  * **Gotchas**
  *

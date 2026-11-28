@@ -27,9 +27,9 @@ const rejectsTheEvent = {
   hosts: cluster,
   because: "The sender waits for a reply, so the step is rolled back and the sender is told.",
   documentedIn: {
-    file: clusterDocs,
-    text: "Rejected Cluster machine request. Transaction-participating durable storage leaves the previous " +
-      "checkpoint in place and suppresses emitted events."
+    file: "src/Machine.ts",
+    text: "A transition that throws follows one rule on every host: the error goes to the sender when one waits for " +
+      "the event to be processed, and otherwise the machine fails with it."
   }
 } as const
 
@@ -43,9 +43,6 @@ const rejected = (scenario: string): Difference => ({
     "an event after it": { answers: ["Accepted"], happens: [{ Idle: { notes: 2 } }] }
   }
 })
-
-const step = ["Machine.toStep"]
-const machineDocs = "src/Machine.ts"
 
 const resumesAWait = {
   kind: "Deliberate",
@@ -184,37 +181,6 @@ export const differences: ReadonlyArray<Difference> = [
     steps: {
       restart: { happens: [], outcome: failed("Error: broken") },
       "load succeeds": { happens: [] }
-    }
-  },
-  {
-    kind: "Deliberate",
-    hosts: cluster,
-    scenario: "refuses the payload of an event that its schema refuses",
-    differs: "The client rejects the event before it sends it, and the machine goes on.",
-    because: "The sender waits for a reply, so it is told, and the machine never sees the event.",
-    documentedIn: {
-      file: clusterDocs,
-      text: "An event that its schema refuses is rejected as `InvalidEvent` before it is sent, and the machine never " +
-        "sees it."
-    },
-    steps: {
-      "an invalid payload": { answers: ["Rejected"], outcome: running },
-      "an event after it": { answers: ["Accepted"], happens: [{ Count: { length: 5 } }] }
-    }
-  },
-  {
-    kind: "Deliberate",
-    hosts: step,
-    scenario: "refuses the payload of an event that its schema refuses",
-    differs: "Rejects the event and keeps the machine, instead of failing it.",
-    because: "The caller of a step holds the state it stepped from, so a refused event leaves it as it was.",
-    documentedIn: {
-      file: machineDocs,
-      text: "`send` rejects an event that does not match its schema, and keeps the machine."
-    },
-    steps: {
-      "an invalid payload": { answers: ["Rejected"], outcome: running },
-      "an event after it": { answers: ["Accepted"], happens: [{ Count: { length: 5 } }] }
     }
   }
 ]

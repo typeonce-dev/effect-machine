@@ -98,12 +98,13 @@ export interface MachineAtom<State, Event, Error = never, Output = never, StartE
    * in write order once startup succeeds. The write result is waiting until
    * the event is delivered, and fails with the startup failure when startup
    * fails. Writes after the machine stopped or completed fail with
-   * `StoppedError`.
+   * `StoppedError`. A write of an event that the schema of the machine refuses
+   * fails with `MachineSchemaDecodeError`, and the machine keeps running.
    *
    * @since 0.4.0
    */
   readonly send: Atom.Writable<
-    AsyncResult.AsyncResult<void, StartError | Machine.StoppedError>,
+    AsyncResult.AsyncResult<void, StartError | Machine.StoppedError | Machine.MachineSchemaDecodeError>,
     Event
   >
 
@@ -289,12 +290,17 @@ export interface ChildMachineAtom<Child extends Machine.ChildMachine.Any, StartE
    *
    * Events written while the parent machine is still starting are held and
    * delivered in write order once the parent is ready. Writes fail with
-   * `ChildNotActiveError` when the state that owns the child is not active.
+   * `ChildNotActiveError` when the state that owns the child is not active,
+   * and with `MachineSchemaDecodeError` for an event that the schema of the
+   * child refuses.
    *
    * @since 0.4.0
    */
   readonly send: Atom.Writable<
-    AsyncResult.AsyncResult<void, StartError | ChildNotActiveError | Machine.StoppedError>,
+    AsyncResult.AsyncResult<
+      void,
+      StartError | ChildNotActiveError | Machine.StoppedError | Machine.MachineSchemaDecodeError
+    >,
     Machine.ChildMachine.Event<Child>
   >
   /**

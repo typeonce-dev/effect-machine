@@ -16,7 +16,7 @@ plans raised events in the step that raises them, in order                      
 emits the events of every kind of transition, in order                                      | runs                   | runs                    | runs        | runs                         | runs
 ends in a final state with its output, and takes no event after it                          | runs                   | runs                    | runs        | differs                      | runs
 ends at once when its initial state is final                                                | runs                   | runs                    | runs        | differs                      | runs
-refuses the payload of an event that its schema refuses                                     | runs                   | runs                    | runs        | differs                      | differs
+refuses the payload of an event that its schema refuses                                     | runs                   | runs                    | runs        | runs                         | runs
 a transition throws                                                                         | runs                   | runs                    | runs        | differs                      | runs
 a step never settles                                                                        | runs                   | runs                    | runs        | differs                      | runs
 a transition leads to a state that its schema refuses                                       | runs                   | runs                    | runs        | differs                      | runs
@@ -68,7 +68,7 @@ fires a timer that stays once, until its state is entered again                 
 fires again and again in a state that its completion enters again                           | runs                   | runs                    | runs        | runs                         | runs
 fails when the completion of a timer cannot be applied                                      | runs                   | runs                    | runs        | runs                         | runs
 fails when the duration of a timer throws, in the state that owns it                        | runs                   | runs                    | runs        | runs                         | runs
-fails when the input of a timer names no duration, as the end of the timer                  | runs                   | runs                    | runs        | runs                         | runs
+fails when the input of a timer names no duration, in the state that owns it                | runs                   | runs                    | runs        | runs                         | runs
 evaluates a duration in order with the other invocations of its state                       | runs                   | runs                    | runs        | differs                      | runs
 never fires a timer of infinite duration                                                    | runs                   | runs                    | runs        | runs                         | runs
 counts the timer of its initial state from its start                                        | runs                   | runs                    | runs        | differs                      | runs

@@ -131,7 +131,7 @@ describe("Machine.toStep", () => {
     const waiting = success(step.send(success(step.start()).state, Events.Wait()))
     const timer = only(waiting.start)
     if (timer._tag !== "Timer") throw new Error(`Unexpected ${timer._tag}`)
-    assert.deepStrictEqual(timer.duration(), Exit.succeed(Exit.succeed(Duration.seconds(90))))
+    assert.deepStrictEqual(timer.duration(), Exit.succeed(Duration.seconds(90)))
     assert.strictEqual(leafOf(step.settle(waiting.state, timer, Exit.void)), "TimedOut")
   })
 

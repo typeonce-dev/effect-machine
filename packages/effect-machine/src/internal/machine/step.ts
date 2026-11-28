@@ -21,12 +21,11 @@
  * over and may update its storage in place. Both are one implementation, which
  * differs only in whether a plan copies or updates what it writes.
  *
- * The order is the one of the generic runtime in `process.ts`: commands, the
- * work of exited states, the new state, emitted events, and the work of entered
- * states. A step calls no user code for the work it lists: each piece of work
- * evaluates its source and its input mapper when its host starts it, at most
- * once, inside its own startup failure boundary, as `invocationResolution.ts`
- * requires of a host.
+ * A host applies a step in one order, as the local host in `stepHost.ts`
+ * does: commands, the work of exited states, the new state, emitted events, and
+ * the work of entered states. A step calls no user code for the work it lists:
+ * each piece of work evaluates its source and its input mapper when its host
+ * starts it, at most once, inside its own startup failure boundary.
  *
  * @since 0.48.0
  */
@@ -34,7 +33,9 @@
 import * as Context from "effect/Context"
 import type * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
+import * as Equal from "effect/Equal"
 import * as Exit from "effect/Exit"
+import * as Hash from "effect/Hash"
 import * as Stream from "effect/Stream"
 import type { ChildMachine, ChildOwner, Logic, Machine, MachineTarget } from "../../Machine.js"
 import { ChildMachineRuntime, MachineRuntime } from "./capability.js"
@@ -114,7 +115,7 @@ export type Work =
   }
   | WorkBase & {
     readonly _tag: "Timer"
-    readonly duration: () => Exit.Exit<Exit.Exit<Duration.Duration>>
+    readonly duration: () => Exit.Exit<Duration.Duration>
     readonly effect: () => Exit.Exit<Effect.Effect<void>>
   }
   | WorkBase & {
@@ -198,10 +199,56 @@ interface PublishedMicrostep {
   readonly changed: boolean
 }
 
-/** The machine of a step function, and the plan it steps with. */
-interface Planning {
-  readonly machine: Machine.Any
-  readonly plan: ExecutionPlan.CompiledExecutionPlan
+/**
+ * The machine of a step function, the plan it steps with, and the host it runs
+ * on: what its transitions address, and the children its work acts on. A host
+ * builds one for each machine it runs, and every state of that machine carries
+ * it. What work needs of it is built when work first needs it, so a machine
+ * that invokes nothing holds only these fields.
+ *
+ * @internal
+ */
+export class Planning implements Configuration.PlanningMachineReferences {
+  #services: Context.Context<MachineRuntime | ChildMachineRuntime> | undefined
+
+  constructor(
+    readonly machine: Machine.Any,
+    readonly plan: ExecutionPlan.CompiledExecutionPlan,
+    readonly self: MachineTarget<any>,
+    readonly parent: MachineTarget<any> | undefined,
+    /** The children of the machine, or `undefined` for a host that owns them itself. */
+    children: Children | undefined,
+    /**
+     * Whether the host runs work inside the services of this machine already,
+     * as the local runtime runs work in processes of the machine, so work is
+     * not provided them again.
+     */
+    readonly ambient = false
+  ) {
+    this.children = children ?? (this as unknown as Children)
+  }
+
+  readonly children: Children;
+
+  // A host is compared by identity: hashing a state, as a failure that holds one
+  // may be hashed, never reads the targets of the host.
+  [Hash.symbol](): number {
+    return Hash.random(this)
+  }
+
+  [Equal.symbol](that: unknown): boolean {
+    return this === that
+  }
+
+  /** What the source and input mapper of work receive, built for each entry that resolves work. */
+  get capabilities(): InvocationResolution.InvocationCapabilities {
+    return { self: this.self, parent: this.parent, children: childOwnerOf(this.children) }
+  }
+
+  /** The services through which work acts on the children of this machine. */
+  get services(): Context.Context<MachineRuntime | ChildMachineRuntime> {
+    return this.#services ??= servicesOf(this.children)
+  }
 }
 
 const empty: ReadonlyArray<never> = []
@@ -212,6 +259,10 @@ const empty: ReadonlyArray<never> = []
  * runtime attaches them. The configuration and the public snapshot are built
  * from it on first read.
  *
+ * A state that rests holds only its snapshot, its work and its runs: its
+ * execution state is built again from the snapshot when a step needs it, as a
+ * host that keeps a machine idle does not hold it.
+ *
  * A `"Persistent"` state never changes after it is built. The `execution` of
  * an `"Owned"` state is written in place by the step that it is handed over to,
  * and so is everything read from it that was not read before.
@@ -219,8 +270,9 @@ const empty: ReadonlyArray<never> = []
  * @internal
  */
 export class State<O extends Ownership = "Persistent"> {
-  readonly [StateTypeId]: typeof StateTypeId = StateTypeId
+  declare readonly [StateTypeId]: typeof StateTypeId
   declare readonly [OwnershipTypeId]: O
+  #execution: unknown
   #configuration: Configuration.ActiveConfiguration | undefined
   #snapshot: Machine.Snapshot<any> | undefined
   /** Whether an owned state was handed over to a step, which may have written it. */
@@ -228,7 +280,8 @@ export class State<O extends Ownership = "Persistent"> {
 
   constructor(
     readonly planning: Planning,
-    readonly execution: unknown,
+    /** The execution state of the plan, or `undefined` for a state that rests. */
+    execution: unknown,
     configuration: Configuration.ActiveConfiguration | undefined,
     snapshot: Machine.Snapshot<any> | undefined,
     /** The work that runs, in start order. */
@@ -237,6 +290,7 @@ export class State<O extends Ownership = "Persistent"> {
     readonly runs: number,
     readonly exit: Exit.Exit<unknown, unknown> | undefined
   ) {
+    this.#execution = execution
     this.#configuration = configuration
     this.#snapshot = snapshot
   }
@@ -245,17 +299,34 @@ export class State<O extends Ownership = "Persistent"> {
     return this.planning.machine
   }
 
+  /** The execution state of the plan. Building it again from the snapshot may throw. */
+  get execution(): unknown {
+    return this.#execution ??= this.planning.plan.fromConfiguration(this.configuration)
+  }
+
   get configuration(): Configuration.ActiveConfiguration {
-    return this.#configuration ??= this.planning.plan.toConfiguration(this.execution)
+    return this.#configuration ??= this.#execution === undefined
+      ? Configuration.normalizeConfigurationSync(this.planning.machine, this.#snapshot!)
+      : this.planning.plan.toConfiguration(this.#execution)
   }
 
   get snapshot(): Machine.Snapshot<any> {
-    return this.#snapshot ??= this.planning.plan.snapshot(this.execution)
+    return this.#snapshot ??= this.planning.plan.snapshot(this.#execution)
   }
 
   /** This state with other running work, keeping what was read of it. */
   withRunning(running: ReadonlyArray<Work>): State<O> {
-    return new State(this.planning, this.execution, this.#configuration, this.#snapshot, running, this.runs, this.exit)
+    return new State(this.planning, this.#execution, this.#configuration, this.#snapshot, running, this.runs, this.exit)
+  }
+
+  /** This state as it rests: its snapshot, its work and its runs. */
+  resting(): State<O> {
+    return new State(this.planning, undefined, undefined, this.snapshot, this.running, this.runs, this.exit)
+  }
+
+  /** What was built of this state, without building anything. */
+  get built(): { readonly execution: unknown; readonly configuration: Configuration.ActiveConfiguration | undefined } {
+    return { execution: this.#execution, configuration: this.#configuration }
   }
 
   /**
@@ -289,6 +360,16 @@ interface Paths {
 }
 
 const noPaths: Paths = { exited: empty, entered: empty }
+
+/** The paths of an initial step, sorted when first read. */
+class InitialPaths implements Paths {
+  #entered: ReadonlyArray<string> | undefined
+  readonly exited: ReadonlyArray<string> = empty
+  constructor(private readonly machine: Machine.Any, private readonly paths: () => ReadonlyArray<string>) {}
+  get entered(): ReadonlyArray<string> {
+    return this.#entered ??= Planner.sortEntryPaths(this.machine, this.paths())
+  }
+}
 
 const pathsOf = (microsteps: ReadonlyArray<InvocationChanges.Microstep>): Paths => {
   const changes = InvocationChanges.fromMicrosteps(microsteps)
@@ -336,6 +417,11 @@ export class Step<O extends Ownership = "Persistent"> {
     return this.state.snapshot
   }
 
+  /** Whether the step planned a microstep, so its state is a new one to publish. */
+  get planned(): boolean {
+    return (this.#microsteps ?? this.#published!).length > 0
+  }
+
   get running(): ReadonlyArray<Work> {
     return this.state.running
   }
@@ -377,6 +463,11 @@ export class Step<O extends Ownership = "Persistent"> {
 export interface MachineStep<O extends Ownership = "Persistent"> {
   readonly start: (...input: ReadonlyArray<unknown>) => Exit.Exit<Step<O>, unknown>
   readonly send: (state: State<O>, event: unknown) => Exit.Exit<Step<O>, unknown>
+  /**
+   * Plans an event that its host decoded already, as `send` does after it
+   * decodes. A machine that has ended takes no event: its host stops sending.
+   */
+  readonly sendDecoded: (state: State<O>, event: Machine.EventOf<any>) => Step<O>
   readonly settle: (state: State<O>, work: Work, exit: Exit.Exit<unknown, unknown>) => Step<O>
   readonly element: (state: State<O>, work: Work, element: unknown) => Step<O>
   readonly report: (state: State<O>, work: Work, snapshot: unknown) => Step<O>
@@ -395,8 +486,180 @@ export interface MachineStep<O extends Ownership = "Persistent"> {
  */
 export type OwnedMachineStep = MachineStep<"Owned">
 
+/**
+ * The step functions of a machine, built once for each machine, ownership and
+ * planner, for every host that runs it. A state carries the {@link Planning}
+ * of its host, so only `start` and `resume`, which take no state, are passed
+ * one.
+ *
+ * @internal
+ */
+export interface Kernel<O extends Ownership>
+  extends Omit<MachineStep<O>, "start" | "resume" | "sendDecoded" | "settle" | "element" | "report">
+{
+  readonly plan: ExecutionPlan.CompiledExecutionPlan
+  /**
+   * As in {@link MachineStep}. A host that reads no microstep of the step it
+   * gets passes `retain: false`, so an owned plan writes in place and keeps no
+   * transition; the step still lists the paths it exited and entered.
+   */
+  readonly sendDecoded: (state: State<O>, event: Machine.EventOf<any>, retain?: boolean) => Step<O>
+  /**
+   * Plans a decoded event whose microsteps no one reads, as `sendDecoded`
+   * without `retain` does. A step that only moves the machine to a new state,
+   * with no command, emitted event, work or end, is returned as that state, so
+   * a host that applies it allocates no step: the state passed in when the
+   * event changed nothing, and a new state otherwise.
+   */
+  readonly move: (state: State<O>, event: Machine.EventOf<any>) => State<O> | Step<O>
+  readonly settle: (state: State<O>, work: Work, exit: Exit.Exit<unknown, unknown>, retain?: boolean) => Step<O>
+  readonly element: (state: State<O>, work: Work, element: unknown, retain?: boolean) => Step<O>
+  readonly report: (state: State<O>, work: Work, snapshot: unknown, retain?: boolean) => Step<O>
+  /**
+   * Starts the machine with `input`. Without `retain`, a machine that the
+   * execution plan starts itself starts there, and its step lists no microstep.
+   */
+  readonly start: (
+    planning: Planning,
+    input: ReadonlyArray<unknown>,
+    retain?: boolean
+  ) => Exit.Exit<Step<O>, unknown>
+  readonly resume: (
+    planning: Planning,
+    snapshot: Machine.Snapshot<any>,
+    progress?: ReadonlyArray<Progress>
+  ) => Exit.Exit<Step<O>, unknown>
+  /**
+   * The state of an active machine that invokes no work, from a snapshot that
+   * its host published: a host that keeps only that snapshot while the machine
+   * is idle builds its state again with it. It throws for a machine that
+   * invokes work, whose work a snapshot does not hold, and for a snapshot that
+   * does not normalize.
+   */
+  readonly fromSnapshot: (planning: Planning, snapshot: Machine.Snapshot<any>) => State<O>
+  /**
+   * The state as it rests, for a host that keeps a machine idle: its snapshot,
+   * its work and its runs. A later step builds its execution state again from
+   * the snapshot. An owned state is handed over.
+   */
+  readonly rest: (state: State<O>) => State<O>
+}
+
 /** @internal */
 export const isState = (value: unknown): value is State<Ownership> => value instanceof State
+
+/**
+ * One piece of work, as a step lists it. What it describes is read from its
+ * invocation, and each accessor evaluates user code once and keeps its result,
+ * so a piece of work holds no closure of its own. Work is compared by identity.
+ */
+class WorkOf {
+  #evaluated: Exit.Exit<unknown> | undefined
+  readonly [WorkTypeId]: InvocationResolution.ResolvedInvocation
+
+  constructor(
+    invocation: InvocationResolution.ResolvedInvocation,
+    readonly run: number,
+    private readonly planning: Planning
+  ) {
+    this[WorkTypeId] = invocation
+  }
+
+  [Hash.symbol](): number {
+    return Hash.random(this)
+  }
+
+  [Equal.symbol](that: unknown): boolean {
+    return this === that
+  }
+
+  get _tag(): Work["_tag"] {
+    return this[WorkTypeId]._tag
+  }
+
+  get path(): string {
+    return this[WorkTypeId].path
+  }
+
+  get id(): string {
+    return this[WorkTypeId].id
+  }
+
+  get source(): string | undefined {
+    const invocation = this[WorkTypeId]
+    return invocation._tag === "Child" ? undefined : invocation.sourceName
+  }
+
+  get address(): string | undefined {
+    const invocation = this[WorkTypeId]
+    return invocation._tag === "Logic" ? invocation.address : undefined
+  }
+
+  get child(): ChildMachine.Any | undefined {
+    const invocation = this[WorkTypeId]
+    return invocation._tag === "Child" ? invocation.child : undefined
+  }
+
+  /** Evaluates user code once, and keeps its result or its throw. */
+  private evaluate<A>(evaluate: (invocation: any) => A): Exit.Exit<A> {
+    if (this.#evaluated === undefined) {
+      try {
+        this.#evaluated = Exit.succeed(evaluate(this[WorkTypeId]))
+      } catch (error) {
+        this.#evaluated = Exit.die(error)
+      }
+    }
+    return this.#evaluated as Exit.Exit<A>
+  }
+
+  /** Work acts on the children of its machine through the services of its host. */
+  private provide<A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, E, unknown> {
+    const planning = this.planning
+    return planning.ambient
+      ? effect
+      : Effect.updateContext(effect, (context: Context.Context<unknown>) => Context.merge(context, planning.services))
+  }
+
+  effect(): Exit.Exit<Effect.Effect<unknown, unknown, unknown>> {
+    if (this[WorkTypeId]._tag === "Timer") return Exit.map(this.duration(), Effect.sleep)
+    // Each run owns a scope, closed with its exit, as on the local runtime.
+    return this.evaluate((invocation: InvocationResolution.EffectInvocation) =>
+      this.provide(Effect.scoped(invocation.effect()))
+    )
+  }
+
+  duration(): Exit.Exit<Duration.Duration> {
+    return this.evaluate((invocation: InvocationResolution.TimerInvocation) => invocation.duration())
+  }
+
+  stream(): Exit.Exit<Stream.Stream<unknown, unknown, unknown>> {
+    // A run of a Stream owns a scope too, closed with its end or its stop.
+    return this.evaluate((invocation: InvocationResolution.StreamInvocation) => {
+      const planning = this.planning
+      const stream = Stream.scoped(invocation.stream())
+      return planning.ambient
+        ? stream
+        : Stream.updateContext(stream, (context: Context.Context<unknown>) => Context.merge(context, planning.services))
+    })
+  }
+
+  logic(): Exit.Exit<AnyLogic> {
+    return this.evaluate((invocation: InvocationResolution.LogicInvocation) => {
+      const scoped = LogicScope.scoped(invocation.logic())
+      if (this.planning.ambient) return scoped
+      return {
+        initial: (context) => this.provide(scoped.initial(context)),
+        run: (context) => this.provide(scoped.run(context))
+      }
+    })
+  }
+
+  input(): Exit.Exit<ReadonlyArray<unknown>> {
+    return this.evaluate((invocation: Extract<InvocationResolution.ResolvedInvocation, { readonly _tag: "Child" }>) =>
+      invocation.input === undefined ? empty : [invocation.input()]
+    )
+  }
+}
 
 const unchanged = <O extends Ownership>(state: State<O>): Step<O> =>
   new Step(state, undefined, empty, empty, empty, empty, empty)
@@ -408,21 +671,6 @@ const exitOfThrow = (error: unknown): Exit.Exit<never, unknown> =>
 /** The work that runs in a state, latest first, as a host stops it when its machine ends. */
 const latestFirst = (running: ReadonlyArray<Work>): ReadonlyArray<Work> =>
   running.length < 2 ? running : running.slice().reverse()
-
-/** Calls user code once, and keeps its result or its throw. */
-const once = <A>(evaluate: () => A): () => Exit.Exit<A> => {
-  let result: Exit.Exit<A> | undefined
-  return () => {
-    if (result === undefined) {
-      try {
-        result = Exit.succeed(evaluate())
-      } catch (error) {
-        result = Exit.die(error)
-      }
-    }
-    return result
-  }
-}
 
 /** Whether a running piece of work is the child that a command selects, as the local registry matches it. */
 const selects = (work: Work, child: ChildSelector): boolean =>
@@ -494,89 +742,18 @@ const invokingPaths = (machine: Machine.Any): ReadonlySet<string> => {
  */
 const build = <O extends Ownership>(
   machine: Machine.Any,
-  options: Options,
   ownership: O,
   plan: ExecutionPlan.CompiledExecutionPlan
-): MachineStep<O> => {
-  const planning: Planning = { machine, plan }
+): Kernel<O> => {
   // A machine that invokes no work runs none, so its steps track none.
   const invoking = invokingPaths(machine)
-  const references: Configuration.PlanningMachineReferences = { self: options.self, parent: options.parent }
-  const initialMachine = Planner.withMachineReferences(machine, references)
-  const children = options.children ?? refusedChildren
-  const capabilities: InvocationResolution.InvocationCapabilities = {
-    self: options.self,
-    parent: options.parent,
-    children: childOwnerOf(children)
-  }
-  // Work acts on the children of this machine through the services of its host.
-  const services = servicesOf(children)
-  const provide = <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, E, unknown> =>
-    Effect.updateContext(effect, (context: Context.Context<unknown>) => Context.merge(context, services))
-
-  const scopedLogic = (logic: AnyLogic): AnyLogic => {
-    const scoped = LogicScope.scoped(logic)
-    return {
-      initial: (context) => provide(scoped.initial(context)),
-      run: (context) => provide(scoped.run(context))
-    }
-  }
 
   /** Describes one invocation, without calling any of its user code. */
-  const describe = (invocation: InvocationResolution.ResolvedInvocation, run: number): Work => {
-    const base = { [WorkTypeId]: invocation, path: invocation.path, id: invocation.id, run }
-    switch (invocation._tag) {
-      case "Effect":
-        return {
-          ...base,
-          _tag: "Effect",
-          source: invocation.sourceName,
-          // Each run owns a scope, closed with its exit, as on the local runtime.
-          effect: once(() => provide(Effect.scoped(invocation.effect())))
-        }
-      case "Timer": {
-        const duration = once(invocation.duration)
-        return {
-          ...base,
-          _tag: "Timer",
-          source: invocation.sourceName,
-          duration,
-          effect: () => Exit.map(duration(), (wait) => Effect.flatMap(wait, Effect.sleep))
-        }
-      }
-      case "Stream":
-        return {
-          ...base,
-          _tag: "Stream",
-          source: invocation.sourceName,
-          // A run of a Stream owns a scope too, closed with its end or its stop.
-          stream: once(() =>
-            Stream.updateContext(
-              Stream.scoped(invocation.stream()),
-              (context: Context.Context<unknown>) => Context.merge(context, services)
-            )
-          )
-        }
-      case "Logic":
-        return {
-          ...base,
-          _tag: "Logic",
-          source: invocation.sourceName,
-          address: invocation.address,
-          logic: once(() => scopedLogic(invocation.logic()))
-        }
-      case "Child": {
-        const input = invocation.input
-        return {
-          ...base,
-          _tag: "Child",
-          source: undefined,
-          child: invocation.child,
-          input: once(() => input === undefined ? empty : [input()])
-        }
-      }
-    }
-  }
+  const describe = (
+    planning: Planning,
+    invocation: InvocationResolution.ResolvedInvocation,
+    run: number
+  ): Work => new WorkOf(invocation, run, planning) as unknown as Work
 
   /**
    * Commands of a transition, as data, in order. A command that selects a
@@ -626,6 +803,7 @@ const build = <O extends Ownership>(
 
   /** The logical state that a step reached, and what was built of it already. */
   interface Reached {
+    readonly planning: Planning
     readonly execution: unknown
     readonly configuration: Configuration.ActiveConfiguration | undefined
     readonly snapshot: Machine.Snapshot<any> | undefined
@@ -633,11 +811,12 @@ const build = <O extends Ownership>(
   }
 
   const reached = (
+    planning: Planning,
     execution: unknown,
     configuration: Configuration.ActiveConfiguration | undefined,
     snapshot: Machine.Snapshot<any> | undefined,
     runs: number
-  ): Reached => ({ execution, configuration, snapshot, runs })
+  ): Reached => ({ planning, execution, configuration, snapshot, runs })
 
   /**
    * A machine that ends in a step stops all of its work. `next` is the state the
@@ -650,7 +829,7 @@ const build = <O extends Ownership>(
     published: Published = nothing
   ): Step<O> =>
     new Step(
-      new State<O>(planning, next.execution, next.configuration, next.snapshot, empty, next.runs, exit),
+      new State<O>(next.planning, next.execution, next.configuration, next.snapshot, empty, next.runs, exit),
       published.event,
       published.microsteps,
       published.emitted,
@@ -662,8 +841,10 @@ const build = <O extends Ownership>(
 
   // A plan that throws leaves the state it received as it was, so the state
   // before a failed step is still the state that was passed in.
-  const endedFrom = (state: State<O>): Reached =>
-    reached(state.execution, state.configuration, state.snapshot, state.runs)
+  const endedFrom = (state: State<O>): Reached => {
+    const built = state.built
+    return reached(state.planning, built.execution, built.configuration, state.snapshot, state.runs)
+  }
 
   /**
    * Lists the work of the entered paths, one run per entry. Work that `progress`
@@ -687,21 +868,36 @@ const build = <O extends Ownership>(
     let added: Array<Work> | undefined
     if (entered.some(([paths]) => paths.some((path) => invoking.has(path)))) {
       configuration ??= plan.toConfiguration(next.execution)
-      for (const group of InvocationResolution.resolveEntries(machine, configuration, entered, capabilities)) {
+      for (
+        const group of InvocationResolution.resolveEntries(machine, configuration, entered, next.planning.capabilities)
+      ) {
         const run = runs++
         for (const invocation of group.invocations) {
           const status = progress?.find((entry) => entry.path === invocation.path && entry.id === invocation.id)
             ?.status
           if (status === "Ended") continue
-          const work = describe(invocation, run)
-          ;(added ??= []).push(work)
+          const work = describe(next.planning, invocation, run)
+          // A literal holds one entry where a push onto an empty array
+          // reserves seventeen, and the running work outlives this step.
+          if (added === undefined) added = [work]
+          else added.push(work)
           if (status !== "Running") (start ??= []).push(work)
         }
       }
     }
     const running = added === undefined ? kept : kept.length === 0 ? added : [...kept, ...added]
     return new Step(
-      new State<O>(planning, next.execution, configuration, next.snapshot, running, runs, undefined),
+      // An owned state keeps only what its host reads again: the configuration
+      // is built again when a later step needs it.
+      new State<O>(
+        next.planning,
+        next.execution,
+        ownership === "Owned" ? undefined : configuration,
+        next.snapshot,
+        running,
+        runs,
+        undefined
+      ),
       published.event,
       published.microsteps,
       published.emitted,
@@ -716,21 +912,37 @@ const build = <O extends Ownership>(
    * Plans one event on a state that runs `running`: a public event that `send`
    * decoded, or the invocation event of a result.
    */
-  const advance = (
+  function advance(
     state: State<O>,
     running: ReadonlyArray<Work>,
-    event: Machine.EventOf<any> | InvocationEvent.InvocationEvent
-  ): Step<O> => {
+    event: Machine.EventOf<any> | InvocationEvent.InvocationEvent,
+    retain: boolean
+  ): Step<O>
+  function advance(
+    state: State<O>,
+    running: ReadonlyArray<Work>,
+    event: Machine.EventOf<any> | InvocationEvent.InvocationEvent,
+    retain: false,
+    bare: true
+  ): State<O> | Step<O>
+  function advance(
+    state: State<O>,
+    running: ReadonlyArray<Work>,
+    event: Machine.EventOf<any> | InvocationEvent.InvocationEvent,
+    retain: boolean,
+    bare = false
+  ): State<O> | Step<O> {
     let planned: ExecutionPlan.ExecutionMacrostep
     try {
-      // A step publishes its microsteps, so every plan retains them.
-      planned = plan.planDecoded(state.execution, event, ownership, true, references)
+      // A step publishes its microsteps, so a plan retains them unless its host reads none.
+      planned = plan.planDecoded(state.execution, event, ownership, retain, state.planning)
     } catch (error) {
       // The step planned the event, as transitions receive it, and its planning failed.
       const planning = InvocationEvent.isInvocationEvent(event) ? InvocationEvent.toLifecycleEvent(event) : event
       return ended(endedFrom(state), latestFirst(running), exitOfThrow(error), { ...nothing, event: planning })
     }
     if (planned.microsteps.length === 0) {
+      if (bare && running === state.running) return state
       return new Step(
         running === state.running ? state : state.withRunning(running),
         planned.event,
@@ -744,15 +956,18 @@ const build = <O extends Ownership>(
     const commanded = planned.commands.length === 0 ? undefined : commandsOf(planned.commands, running)
     const commands = commanded === undefined ? empty : commanded.commands
     if (invoking.size === 0) {
+      if (bare && !planned.done && commands.length === 0 && planned.emittedEvents.length === 0) {
+        return new State<O>(state.planning, planned.next, undefined, undefined, empty, state.runs, undefined)
+      }
       return planned.done
         ? ended(
-          reached(planned.next, undefined, undefined, state.runs),
+          reached(state.planning, planned.next, undefined, undefined, state.runs),
           empty,
           Exit.succeed(planned.output),
           { event: planned.event, microsteps: planned.microsteps, emitted: planned.emittedEvents, commands }
         )
         : new Step(
-          new State<O>(planning, planned.next, undefined, undefined, empty, state.runs, undefined),
+          new State<O>(state.planning, planned.next, undefined, undefined, empty, state.runs, undefined),
           planned.event,
           planned.microsteps,
           planned.emittedEvents,
@@ -768,7 +983,7 @@ const build = <O extends Ownership>(
       emitted: planned.emittedEvents,
       commands
     }
-    const next = reached(planned.next, undefined, undefined, state.runs)
+    const next = reached(state.planning, planned.next, undefined, undefined, state.runs)
     const { kept, stop } = InvocationChanges.partition(commanded === undefined ? running : commanded.running, changes)
     if (planned.done) {
       return ended(next, [...stop, ...latestFirst(kept)], Exit.succeed(planned.output), published)
@@ -790,17 +1005,21 @@ const build = <O extends Ownership>(
 
   /** The state a step starts in, from a configuration that the reference planner built. */
   const initial = (
+    planning: Planning,
     configuration: Configuration.ActiveConfiguration,
     snapshot: Machine.Snapshot<any>
-  ): Reached => reached(plan.fromConfiguration(configuration), configuration, snapshot, 0)
+  ): Reached => reached(planning, plan.fromConfiguration(configuration), configuration, snapshot, 0)
 
   // Starting and resuming plan with the reference planner: they happen once per
   // machine, and their result enters the plan through `fromConfiguration`.
-  const start: MachineStep<O>["start"] = (...input) => {
+  const start: Kernel<O>["start"] = (planning, input, retain = true) => {
+    // The execution plan starts a machine that it covers without publishing
+    // microsteps: a host that reads none takes that start.
+    if (!retain && plan.initial !== undefined) return startUnretained(planning, plan.initial, input)
     let planned: ReturnType<typeof Planner.planInitialSync>
     let configuration: Configuration.ActiveConfiguration
     try {
-      planned = Planner.planInitialSync(initialMachine, ...input)
+      planned = Planner.planInitialSync(Planner.withMachineReferences(machine, planning), ...input)
       configuration = Configuration.normalizeConfigurationSync(machine, planned.state)
     } catch (error) {
       return Exit.fail(toStartupFailure(error))
@@ -810,18 +1029,60 @@ const build = <O extends Ownership>(
       microsteps: planned.microsteps,
       emitted: planned.emittedEvents,
       commands: commandsOf(planned.commands, empty).commands,
-      paths: {
-        exited: empty,
-        entered: Planner.sortEntryPaths(machine, Configuration.getInitialEntryPaths(machine, configuration))
-      }
+      paths: new InitialPaths(machine, () => Configuration.getInitialEntryPaths(machine, configuration))
     }
-    const next = initial(configuration, planned.state)
+    const next = initial(planning, configuration, planned.state)
     if (planned.done) {
       return Exit.succeed(ended(next, empty, Exit.succeed(planned.output), published))
     }
     return Exit.succeed(
-      enter(next, InvocationResolution.initialEntries(machine, configuration), empty, empty, published)
+      enter(
+        next,
+        invoking.size === 0 ? empty : InvocationResolution.initialEntries(machine, configuration),
+        empty,
+        empty,
+        published
+      )
     )
+  }
+
+  const startUnretained = (
+    planning: Planning,
+    initialOf: NonNullable<ExecutionPlan.CompiledExecutionPlan["initial"]>,
+    input: ReadonlyArray<unknown>
+  ): Exit.Exit<Step<O>, unknown> => {
+    let planned: ReturnType<typeof initialOf>
+    try {
+      planned = initialOf(input, planning)
+    } catch (error) {
+      return Exit.fail(toStartupFailure(error))
+    }
+    const configuration = planned.activeConfiguration
+    const published: Published = {
+      event: Planner.InitialEvent,
+      microsteps: empty,
+      emitted: empty,
+      commands: empty,
+      paths: new InitialPaths(machine, () => planned.initialEntryPaths)
+    }
+    const next = reached(planning, planned.configuration, configuration, planned.state, 0)
+    if (planned.done) {
+      return Exit.succeed(ended(next, empty, Exit.succeed(planned.output), published))
+    }
+    return Exit.succeed(
+      enter(
+        next,
+        invoking.size === 0 ? empty : InvocationResolution.initialEntries(machine, configuration),
+        empty,
+        empty,
+        published
+      )
+    )
+  }
+
+  const fromSnapshot: Kernel<O>["fromSnapshot"] = (planning, snapshot) => {
+    if (invoking.size > 0) throw new Error("A machine that invokes work runs its work in its state")
+    return new State<O>(planning, undefined, undefined, snapshot, empty, 0, undefined)
   }
 
   const send = (state: State<O>, event: unknown): Exit.Exit<Step<O>, unknown> => {
@@ -836,17 +1097,23 @@ const build = <O extends Ownership>(
         ? Exit.fail(error)
         : Exit.succeed(ended(endedFrom(state), latestFirst(state.running), Exit.die(error)))
     }
-    return Exit.succeed(advance(state, state.running, decoded))
+    return Exit.succeed(advance(state, state.running, decoded, true))
   }
 
-  const settle = (state: State<O>, work: Work, exit: Exit.Exit<unknown, unknown>): Step<O> => {
+  const sendDecoded = (state: State<O>, event: Machine.EventOf<any>, retain = true): Step<O> =>
+    state.exit === undefined ? advance(state, state.running, event, retain) : unchanged(state)
+
+  const move = (state: State<O>, event: Machine.EventOf<any>): State<O> | Step<O> =>
+    state.exit === undefined ? advance(state, state.running, event, false, true) : unchanged(state)
+
+  const settle = (state: State<O>, work: Work, exit: Exit.Exit<unknown, unknown>, retain = true): Step<O> => {
     const settled = current(state, work)
     if (settled === undefined) return unchanged(state)
     const running = state.running.filter((other) => other !== settled)
     const decision = InvocationOutcome.decide(settled[WorkTypeId], generation(), InvocationOutcome.fromExit(exit))
     switch (decision._tag) {
       case "Deliver":
-        return advance(state, running, decision.event)
+        return advance(state, running, decision.event, retain)
       case "Fail":
         return ended(endedFrom(state), latestFirst(running), Exit.failCause(decision.cause))
       case "Ignore":
@@ -854,23 +1121,23 @@ const build = <O extends Ownership>(
     }
   }
 
-  const element = (state: State<O>, work: Work, value: unknown): Step<O> => {
+  const element = (state: State<O>, work: Work, value: unknown, retain = true): Step<O> => {
     const streaming = current(state, work)
     if (streaming === undefined) return unchanged(state)
     const invocation = streaming[WorkTypeId]
     if (invocation._tag !== "Stream") return unchanged(state)
     const decision = InvocationOutcome.decideElement(invocation, generation(), value)
-    return decision._tag === "Ignore" ? unchanged(state) : advance(state, state.running, decision.event)
+    return decision._tag === "Ignore" ? unchanged(state) : advance(state, state.running, decision.event, retain)
   }
 
-  const report = (state: State<O>, work: Work, snapshot: unknown): Step<O> => {
+  const report = (state: State<O>, work: Work, snapshot: unknown, retain = true): Step<O> => {
     const reporting = current(state, work)
     if (reporting === undefined) return unchanged(state)
     const invocation = reporting[WorkTypeId]
     if (invocation._tag !== "Logic" && invocation._tag !== "Child") return unchanged(state)
     // Owners read the state of an active process, as the local runtime reports it.
     const decision = InvocationOutcome.decideSnapshot(invocation, generation(), { status: "active", state: snapshot })
-    return decision._tag === "Ignore" ? unchanged(state) : advance(state, state.running, decision.event)
+    return decision._tag === "Ignore" ? unchanged(state) : advance(state, state.running, decision.event, retain)
   }
 
   const stop = (state: State<O>): Step<O> =>
@@ -878,7 +1145,7 @@ const build = <O extends Ownership>(
       ? ended(endedFrom(state), latestFirst(state.running), Exit.fail(new StoppedError()))
       : unchanged(state)
 
-  const resume: MachineStep<O>["resume"] = (snapshot, progress) => {
+  const resume: Kernel<O>["resume"] = (planning, snapshot, progress) => {
     const normalized = Effect.runSyncExit(Serialization.normalizeSnapshotEffect(machine, snapshot))
     if (Exit.isFailure(normalized)) return Exit.failCause(normalized.cause)
     const state = normalized.value
@@ -889,7 +1156,7 @@ const build = <O extends Ownership>(
       return exitOfThrow(error)
     }
     const published: Published = { ...nothing, event: Planner.InitialEvent }
-    const next = initial(configuration, state)
+    const next = initial(planning, configuration, state)
     if (!Planner.isFinalState(machine, state)) {
       return Exit.succeed(
         enter(next, InvocationResolution.initialEntries(machine, configuration), empty, empty, published, progress)
@@ -902,29 +1169,108 @@ const build = <O extends Ownership>(
   }
 
   if (ownership === "Persistent") {
-    return { start, send, settle, element, report, stop, resume }
+    return {
+      plan,
+      start,
+      fromSnapshot,
+      rest: (state) => state.resting(),
+      send,
+      sendDecoded,
+      move,
+      settle,
+      element,
+      report,
+      stop,
+      resume
+    }
   }
   // An owned state is taken over by the step it is passed to, and handed back
   // when the step returns that very state, or refuses the event.
   return {
+    plan,
     start,
+    fromSnapshot,
+    rest: (state) => state.handOverNeverReuse().resting(),
     send: (state, event) => {
       const exit = send(state.handOverNeverReuse(), event)
       if (Exit.isFailure(exit) || exit.value.state === state) state.giveBackUnchanged()
       return exit
     },
-    settle: (state, work, exit) => givenBackIfUnchanged(state, settle(state.handOverNeverReuse(), work, exit)),
-    element: (state, work, value) => givenBackIfUnchanged(state, element(state.handOverNeverReuse(), work, value)),
-    report: (state, work, snapshot) => givenBackIfUnchanged(state, report(state.handOverNeverReuse(), work, snapshot)),
+    sendDecoded: (state, event, retain) =>
+      givenBackIfUnchanged(state, sendDecoded(state.handOverNeverReuse(), event, retain)),
+    move: (state, event) => {
+      const moved = move(state.handOverNeverReuse(), event)
+      if (moved === state || (moved instanceof Step && moved.state === state)) state.giveBackUnchanged()
+      return moved
+    },
+    settle: (state, work, exit, retain) =>
+      givenBackIfUnchanged(state, settle(state.handOverNeverReuse(), work, exit, retain)),
+    element: (state, work, value, retain) =>
+      givenBackIfUnchanged(state, element(state.handOverNeverReuse(), work, value, retain)),
+    report: (state, work, snapshot, retain) =>
+      givenBackIfUnchanged(state, report(state.handOverNeverReuse(), work, snapshot, retain)),
     stop: (state) => givenBackIfUnchanged(state, stop(state.handOverNeverReuse())),
     resume
   }
 }
 
+Object.defineProperty(State.prototype, StateTypeId, { value: StateTypeId })
+
 /** Gives an owned state back to the caller of a step that returned it unchanged. */
 const givenBackIfUnchanged = <O extends Ownership>(state: State<O>, step: Step<O>): Step<O> => {
   if (step.state === state) state.giveBackUnchanged()
   return step
+}
+
+type PlannerKind = "Compiled" | "Reference"
+
+const kernels = {
+  Persistent: { Compiled: new WeakMap(), Reference: new WeakMap() },
+  Owned: { Compiled: new WeakMap(), Reference: new WeakMap() }
+} satisfies Record<Ownership, Record<PlannerKind, WeakMap<Machine.Any, Kernel<any>>>>
+
+/**
+ * The step functions of `machine` that take states of `ownership` and plan
+ * with `planner`: the execution plan of the machine, which `compileExecutionPlan`
+ * selects, or always the reference planner. They are built once per machine.
+ *
+ * @internal
+ */
+export const kernel = <O extends Ownership>(machine: Machine.Any, ownership: O, planner: PlannerKind): Kernel<O> => {
+  const cache = kernels[ownership][planner] as WeakMap<Machine.Any, Kernel<O>>
+  let built = cache.get(machine)
+  if (built === undefined) {
+    built = build(
+      machine,
+      ownership,
+      planner === "Compiled"
+        ? ExecutionPlan.compileExecutionPlan(machine)
+        : ExecutionPlan.selectExecutionPlanForTesting(machine, "generic").plan
+    )
+    cache.set(machine, built)
+  }
+  return built
+}
+
+/** The step functions of `kernel`, bound to one host. */
+const bind = <O extends Ownership>(machine: Machine.Any, kernel: Kernel<O>, options: Options): MachineStep<O> => {
+  const planning = new Planning(
+    machine,
+    kernel.plan,
+    options.self,
+    options.parent,
+    options.children ?? refusedChildren
+  )
+  return {
+    start: (...input) => kernel.start(planning, input),
+    send: kernel.send,
+    sendDecoded: kernel.sendDecoded,
+    settle: kernel.settle,
+    element: kernel.element,
+    report: kernel.report,
+    stop: kernel.stop,
+    resume: (snapshot, progress) => kernel.resume(planning, snapshot, progress)
+  }
 }
 
 /**
@@ -933,7 +1279,7 @@ const givenBackIfUnchanged = <O extends Ownership>(state: State<O>, step: Step<O
  * @internal
  */
 export const make = (machine: Machine.Any, options: Options): MachineStep<"Persistent"> =>
-  build(machine, options, "Persistent", ExecutionPlan.compileExecutionPlan(machine))
+  bind(machine, kernel(machine, "Persistent", "Compiled"), options)
 
 /**
  * Step functions that take each state over and may update it in place, for a
@@ -944,7 +1290,7 @@ export const make = (machine: Machine.Any, options: Options): MachineStep<"Persi
  * @internal
  */
 export const makeOwned = (machine: Machine.Any, options: Options): OwnedMachineStep =>
-  build(machine, options, "Owned", ExecutionPlan.compileExecutionPlan(machine))
+  bind(machine, kernel(machine, "Owned", "Compiled"), options)
 
 /**
  * Step functions of either ownership that plan with the planner of `planner`:
@@ -957,13 +1303,5 @@ export const makeForTesting = <O extends Ownership>(
   machine: Machine.Any,
   options: Options,
   ownership: O,
-  planner: "Compiled" | "Reference"
-): MachineStep<O> =>
-  build(
-    machine,
-    options,
-    ownership,
-    planner === "Compiled"
-      ? ExecutionPlan.compileExecutionPlan(machine)
-      : ExecutionPlan.selectExecutionPlanForTesting(machine, "generic").plan
-  )
+  planner: PlannerKind
+): MachineStep<O> => bind(machine, kernel(machine, ownership, planner), options)

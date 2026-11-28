@@ -1,5 +1,5 @@
 import { assert, describe, it } from "@effect/vitest"
-import { Duration, Effect, Exit, Schema, Stream } from "effect"
+import { Duration, Effect, Schema, Stream } from "effect"
 import { Machine } from "../../../src/index.js"
 import * as Configuration from "../../../src/internal/machine/configuration.js"
 import * as InvocationChanges from "../../../src/internal/machine/invocationChanges.js"
@@ -282,13 +282,12 @@ describe("resolved invocations", () => {
     assert.strictEqual(withoutInput.input, undefined)
   })
 
-  it("separates a throwing timer source from an input that names no duration", () => {
+  it("throws from a timer that cannot start: a throwing source, or an input that names no duration", () => {
     const { calls, invocations: started } = makeHost()
-    assert.deepStrictEqual(find(started, "Timer", "fixed").duration(), Exit.succeed(Duration.seconds(2)))
-    assert.deepStrictEqual(find(started, "Timer", "mapped").duration(), Exit.succeed(Duration.millis(5)))
+    assert.deepStrictEqual(find(started, "Timer", "fixed").duration(), Duration.seconds(2))
+    assert.deepStrictEqual(find(started, "Timer", "mapped").duration(), Duration.millis(5))
     assert.deepStrictEqual(calls, ["timer input", "timer source"])
     assert.throws(() => find(started, "Timer", "throwing").duration(), "timer source")
-    const invalid = find(started, "Timer", "invalid").duration()
-    assert.isTrue(Exit.hasDies(invalid))
+    assert.throws(() => find(started, "Timer", "invalid").duration())
   })
 })

@@ -422,9 +422,15 @@ export const prepare: <
  * The delivery order above belongs to references of local machines. The
  * `Machine.MachineRef` contract promises only delivery.
  *
- * Transition failures are reported through the runtime snapshot, `changes`, and
- * `join` rather than being returned by `send`. Sending after the machine reaches
- * any terminal state fails immediately with `StoppedError`.
+ * `send` rejects an event that the schema of the machine refuses with
+ * `MachineSchemaDecodeError`, and the machine keeps running. Sending after the
+ * machine reaches any terminal state fails immediately with `StoppedError`.
+ *
+ * A transition that throws fails the machine: no sender waits for its event,
+ * so the failure is reported through the runtime snapshot, `changes`, and
+ * `join`, by the rule that `Machine.MachineRef` states for `send`. An event that another machine, a child or
+ * work delivers is not checked at `send`: one that the schema refuses fails the
+ * machine when it is planned.
  *
  * **Example** (Starting a machine in a scope)
  *

@@ -53,9 +53,9 @@ most once and returns an `Exit`:
 
 - `Effect`: `work.effect()`, then run it and settle its `Exit`.
 - `Timer`: `work.duration()` holds how long to wait, then settle with
-  `Exit.void`. When the input names no duration, the inner `Exit` fails: settle
-  with it at once, as a timer of zero duration ends. `work.effect()` is the same
-  timer as an Effect, for a host whose timers wait on fibers.
+  `Exit.void`. It fails, like every accessor, when the timer cannot start,
+  also when its input names no duration. `work.effect()` is the same timer as
+  an Effect, for a host whose timers wait on fibers.
 - `Stream`: `work.stream()`. Report each element with `element`, pull the next
   element after that step, and settle with the end of the stream.
 - `Logic`: `work.logic()`. Run `initial` and `run` with contexts of the host,

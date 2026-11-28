@@ -164,9 +164,7 @@ const track = (variant: Variant, step: Step.Step<any>, now: number): void => {
       const duration = work.duration()
       variant.due.set(
         work,
-        Exit.isSuccess(duration) && Exit.isSuccess(duration.value)
-          ? now + Duration.toMillis(duration.value.value)
-          : now
+        Exit.isSuccess(duration) ? now + Duration.toMillis(duration.value) : now
       )
     }
   }

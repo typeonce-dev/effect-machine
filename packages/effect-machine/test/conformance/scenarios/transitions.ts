@@ -848,13 +848,8 @@ const eventPayload: Scenario = {
   start: { happens: [{ Count: { length: 0 } }] },
   steps: [
     named("a valid payload", send({ _tag: "Set", value: "ok" }, { happens: [{ Count: { length: 2 } }] })),
-    named(
-      "an invalid payload",
-      send({ _tag: "Set", value: "" }, {
-        outcome: failed("MachineSchemaDecodeError: {\"boundary\":\"event\",\"event\":\"Set\"}")
-      })
-    ),
-    named("an event after it", send({ _tag: "Set", value: "later" }, { answers: ["Ended"] }))
+    named("an invalid payload", send({ _tag: "Set", value: "" }, { answers: ["Rejected"] })),
+    named("an event after it", send({ _tag: "Set", value: "later" }, { happens: [{ Count: { length: 5 } }] }))
   ]
 }
 

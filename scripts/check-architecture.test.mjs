@@ -103,15 +103,15 @@ test("rejects value back-edges and execution-layer inversions", () => {
 
 test("rejects outward machine semantic dependencies", () => {
   const root = makeProject({
-    "src/internal/machine/topology.ts": 'import { decode } from "./protocol.js"\nimport { invoke } from "./invocation.js"\nexport const topology = decode + invoke',
+    "src/internal/machine/topology.ts": 'import { decode } from "./protocol.js"\nimport { invoke } from "./stepHost.js"\nexport const topology = decode + invoke',
     "src/internal/machine/protocol.ts": "export const decode = 1",
-    "src/internal/machine/invocation.ts": "export const invoke = 1"
+    "src/internal/machine/stepHost.ts": "export const invoke = 1"
   })
   assert.deepEqual(rules(root), ["ARCH005", "ARCH005", "ARCH014"])
 })
 
 test("enforces semantic boundaries for each runtime strategy and shared protocol", () => {
-  for (const module of ["runtimeProtocol", "runtimeGeneric", "runtimeCompiled"]) {
+  for (const module of ["runtimeProtocol", "runtimeCompiled"]) {
     const root = makeProject({
       "src/internal/machine/planner.ts": `import { run } from "./${module}.js"\nexport const plan = run`,
       [`src/internal/machine/${module}.ts`]: 'import type { value } from "./process.js"\nexport const run: typeof value = 1',
@@ -122,18 +122,17 @@ test("enforces semantic boundaries for each runtime strategy and shared protocol
 })
 
 test("keeps host-neutral invocation modules independent of the local runtime", () => {
-  for (const module of ["invocationChanges", "invocationGeneration", "invocationOutcome", "invocationResolution"]) {
+  for (const module of ["invocationChanges", "invocationOutcome", "invocationResolution", "step"]) {
     for (
       const local of [
         "childRegistry",
         "commandRuntime",
         "inspectionRuntime",
-        "invocation",
         "process",
         "runtime",
         "runtimeCompiled",
-        "runtimeGeneric",
-        "runtimeProtocol"
+        "runtimeProtocol",
+        "stepHost"
       ]
     ) {
       const root = makeProject({
@@ -150,12 +149,11 @@ const localRuntimeModules = [
   "src/internal/machine/childRegistry",
   "src/internal/machine/commandRuntime",
   "src/internal/machine/inspectionRuntime",
-  "src/internal/machine/invocation",
   "src/internal/machine/process",
   "src/internal/machine/runtime",
   "src/internal/machine/runtimeCompiled",
-  "src/internal/machine/runtimeGeneric",
-  "src/internal/machine/runtimeProtocol"
+  "src/internal/machine/runtimeProtocol",
+  "src/internal/machine/stepHost"
 ]
 
 const relativeModule = (from, to) => {
@@ -265,12 +263,11 @@ test("keeps the public local host behind its implementation seam", () => {
   assert.deepEqual(new Set(rules(root)), new Set(["ARCH002", "ARCH003", "ARCH009", "ARCH013"]))
 })
 
-test("keeps the halves split out of the invocation host outside inner layers", () => {
+test("keeps invocation semantics outside the planner and the runtime", () => {
   const root = makeProject({
     "src/internal/machine/planner.ts": 'import type { Outcome } from "./invocationOutcome.js"\nexport type Planned = Outcome',
-    "src/internal/machine/runtimeProtocol.ts": 'import type { Outcome } from "./invocationOutcome.js"\nimport type { Generations } from "./invocationGeneration.js"\nexport type Runtime = [Outcome, Generations]',
-    "src/internal/machine/invocationOutcome.ts": "export type Outcome = 1",
-    "src/internal/machine/invocationGeneration.ts": "export type Generations = 1"
+    "src/internal/machine/runtimeProtocol.ts": 'import type { Outcome } from "./invocationOutcome.js"\nexport type Runtime = Outcome',
+    "src/internal/machine/invocationOutcome.ts": "export type Outcome = 1"
   })
   assert.deepEqual(rules(root), ["ARCH005", "ARCH006"])
 })

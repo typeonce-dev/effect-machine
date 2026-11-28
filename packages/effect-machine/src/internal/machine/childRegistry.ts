@@ -15,7 +15,6 @@ export type ChildEntry =
     readonly _tag: "Starting"
     readonly token: symbol
     readonly ownerKey?: string
-    readonly ownerPath?: string
     ownerActive?: boolean
   }
   | {
@@ -24,7 +23,6 @@ export type ChildEntry =
     readonly descriptor: ChildDescriptor | undefined
     readonly ref: MachineRef<any, any, any, any>
     readonly ownerKey?: string
-    readonly ownerPath?: string
     ownerActive?: boolean
   }
 
@@ -141,7 +139,6 @@ export const registerChild = (
       descriptor,
       ref,
       ownerKey: entry.ownerKey,
-      ownerPath: entry.ownerPath!,
       ownerActive: entry.ownerActive === true
     }
   registry.children.set(key, started)

@@ -800,22 +800,33 @@ describe("MachineTest causal runtime commands", () => {
     }))
   it.effect("attributes processing failures to the exact causal command and prefix", () =>
     Effect.gen(function*() {
-      const ref = yield* LocalMachine.start(causalMachine)
-      const probe = yield* MachineTest.probe(causalMachine, ref)
+      // The second Add leaves a state that its schema refuses, which fails the
+      // machine while it processes the command.
+      const corrupting = Machine.make({
+        root: CounterStates,
+        events: Machine.eventsFromSchemas(Add)
+      }).handle({
+        initial: { target: "Counter", decoded: true, data: new Counter({ count: 0 }) },
+        states: {
+          Counter: {
+            on: {
+              Add: {
+                target: "Counter",
+                data: ({ event, state }) => ({ count: event.amount === 2 ? "invalid" as never : state.count + 1 })
+              }
+            }
+          }
+        }
+      })
+      const ref = yield* LocalMachine.start(corrupting)
+      const probe = yield* MachineTest.probe(corrupting, ref)
       const commands = [
         MachineTest.sendCommand(new Add({ amount: 1 })),
-        MachineTest.sendCommand({ _tag: "Add", amount: "invalid" } as unknown as Add)
+        MachineTest.sendCommand(new Add({ amount: 2 }))
       ]
       const failure = yield* MachineTest.runCausalCommands(probe, commands, {
         initialModel: 0,
-        transition: (count, command) =>
-          Effect.succeed({
-            model: count + (command._tag === "Send" && command.event._tag === "Add" &&
-                typeof command.event.amount === "number"
-              ? command.event.amount
-              : 0),
-            expected: undefined
-          }),
+        transition: (count) => Effect.succeed({ model: count + 1, expected: undefined }),
         assert: () => Effect.void
       }).pipe(Effect.flip)
       assert.strictEqual(failure.phase, "execution")
@@ -831,6 +842,31 @@ describe("MachineTest causal runtime commands", () => {
       assert.match(formatted, /failure: phase=execution index=1/)
       const snapshot = yield* ref.snapshot
       assert.strictEqual(snapshot.status, "failed")
+    }))
+  it.effect("records an event that its schema refuses as a rejected causal send", () =>
+    Effect.gen(function*() {
+      const ref = yield* LocalMachine.start(causalMachine)
+      const probe = yield* MachineTest.probe(causalMachine, ref)
+      const transcript = yield* MachineTest.runCausalCommands(probe, [
+        MachineTest.sendCommand({ _tag: "Add", amount: "invalid" } as unknown as Add),
+        MachineTest.sendCommand(new Add({ amount: 1 }))
+      ], {
+        initialModel: 0,
+        transition: (count, command) =>
+          Effect.succeed({
+            model: count +
+              (command._tag === "Send" && command.event._tag === "Add" && typeof command.event.amount === "number"
+                ? 1
+                : 0),
+            expected: undefined
+          }),
+        assert: () => Effect.void
+      })
+      const rejected = transcript.records[0]?.actual.result
+      assert.strictEqual(rejected?._tag, "SendRejected")
+      if (rejected?._tag === "SendRejected") assert.instanceOf(rejected.error, Machine.MachineSchemaDecodeError)
+      assert.strictEqual(transcript.records[1]?.actual.result._tag, "SendProcessed")
+      assert.strictEqual((yield* ref.snapshot).status, "active")
     }))
   it.effect("does not confuse a processing StoppedError with mailbox rejection", () =>
     Effect.gen(function*() {
