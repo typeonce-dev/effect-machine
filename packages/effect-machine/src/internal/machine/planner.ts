@@ -2041,13 +2041,26 @@ const macrostepConfiguration = (
   machine: Machine.Any,
   configuration: ActiveConfiguration,
   event: Machine.EventOf<any> | InvocationEvent.InvocationEvent
+) =>
+  macrostepDecodedConfiguration(
+    machine,
+    configuration,
+    InvocationEvent.isInvocationEvent(event) ? event : decodeEventSync(machine, event)
+  )
+
+/**
+ * Plans an event that needs no decoding: a public event that
+ * `decodeEventSync` returned, or an invocation event.
+ */
+const macrostepDecodedConfiguration = (
+  machine: Machine.Any,
+  configuration: ActiveConfiguration,
+  event: Machine.EventOf<any> | InvocationEvent.InvocationEvent
 ) => {
   // User code sees the public lifecycle view of an invocation message; only
   // transition selection reads the message itself.
   const invocation = InvocationEvent.isInvocationEvent(event) ? event : undefined
-  const decodedEvent = invocation === undefined
-    ? decodeEventSync(machine, event)
-    : InvocationEvent.toLifecycleEvent(invocation)
+  const decodedEvent = invocation === undefined ? event : InvocationEvent.toLifecycleEvent(invocation)
   if (isActiveFinalConfiguration(machine, configuration)) {
     const completed = completeConfigurationSync(machine, configuration, decodedEvent)
     const root = getRootPath(machine, completed.configuration)
@@ -2142,6 +2155,8 @@ const macrostep = (
 export const planSync = macrostep
 
 export const planConfiguration = macrostepConfiguration
+
+export const planDecodedConfiguration = macrostepDecodedConfiguration
 
 const planningEffect = <A>(thunk: () => A): Effect.Effect<A, PlanningError> =>
   Effect.suspend(() => {

@@ -3,7 +3,9 @@ import { Effect } from "effect"
 import { LocalMachine, Machine } from "../../../../src/index.js"
 import * as Configuration from "../../../../src/internal/machine/configuration.js"
 import * as ExecutionPlan from "../../../../src/internal/machine/executionPlan.js"
+import * as InvocationEvent from "../../../../src/internal/machine/invocationEvent.js"
 import * as Process from "../../../../src/internal/machine/process.js"
+import { verifyStepStrategies } from "./stepDifferential.js"
 
 const encodeState = (
   machine: Machine.Machine.Any,
@@ -46,6 +48,7 @@ const verifyPlannerStrategiesEffect = Effect.fn(function*(options: {
   readonly expected?: "indexed-flat" | "indexed-hierarchical" | "generic"
   readonly initialArgs?: ReadonlyArray<unknown>
   readonly label: string
+  readonly steps?: boolean
 }) {
   const initialArgs = options.initialArgs ?? []
   const initial = yield* (Machine.planInitial as any)(options.machine, ...initialArgs) as Effect.Effect<
@@ -78,8 +81,8 @@ const verifyPlannerStrategiesEffect = Effect.fn(function*(options: {
     const event = options.events[index]!
     const retainedSelectedSnapshot = selected.plan.snapshot(selectedState)
     const retainedSelectedEncoding = yield* encodeState(options.machine, retainedSelectedSnapshot)
-    const genericPlan = generic.plan.plan(genericState, event, true)
-    const selectedPlan = selected.plan.plan(selectedState, event, true)
+    const genericPlan = generic.plan.plan(genericState, event, "Owned", true)
+    const selectedPlan = selected.plan.plan(selectedState, event, "Owned", true)
     assert.deepStrictEqual(
       yield* canonicalMacrostep(options.machine, selected.plan, selectedPlan),
       yield* canonicalMacrostep(options.machine, generic.plan, genericPlan),
@@ -94,6 +97,19 @@ const verifyPlannerStrategiesEffect = Effect.fn(function*(options: {
     selectedState = selectedPlan.next
     if (genericPlan.done) break
   }
+  // The step functions plan the same public events with either planner and
+  // either ownership. Invocation events reach them only as results of work.
+  if (options.steps !== false) {
+    verifyStepStrategies({
+      label: `${options.label} step`,
+      make: () => ({ machine: options.machine }),
+      input: initialArgs,
+      inputs: options.events.filter((event) => !InvocationEvent.isInvocationEvent(event)).map((event) => ({
+        _tag: "Send",
+        event
+      }))
+    })
+  }
   return selected.strategy
 })
 
@@ -103,6 +119,8 @@ export const verifyPlannerStrategies: <Event extends { readonly _tag: PropertyKe
   readonly expected?: "indexed-flat" | "indexed-hierarchical" | "generic"
   readonly initialArgs?: ReadonlyArray<unknown>
   readonly label: string
+  /** `false` leaves out the step functions, for a machine that counts how often its callbacks run. */
+  readonly steps?: boolean
 }) => Effect.Effect<"indexed-flat" | "indexed-hierarchical" | "generic", unknown> = verifyPlannerStrategiesEffect as any
 
 export const openWithRuntimeStrategy = (

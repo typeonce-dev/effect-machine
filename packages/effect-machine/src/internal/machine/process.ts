@@ -184,6 +184,9 @@ const makeChildlessCompiledDrain = (
           context.executionState ??
             executionPlan.fromConfiguration(Configuration.normalizeConfigurationSync(machine, before)),
           event,
+          // The drain owns its execution state, and builds the acknowledged
+          // plan from what it retained before it plans the next message.
+          "Owned",
           acknowledged,
           context.scope
         )
@@ -299,6 +302,7 @@ const makeInvokingCompiledDrain = (
           configuration ??
             executionPlan.fromConfiguration(Configuration.normalizeConfigurationSync(machine, current)),
           event,
+          "Owned",
           acknowledged,
           scope
         )
