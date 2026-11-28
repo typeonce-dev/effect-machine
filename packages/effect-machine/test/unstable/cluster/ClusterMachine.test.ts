@@ -1970,7 +1970,11 @@ describe("ClusterMachine", () => {
 
     describe("host capabilities", () => {
       const refused: Record<string, (context: any) => Effect.Effect<unknown, any, any>> = {
-        "children.spawn": ({ children }) => children.spawn(UnsupportedChild),
+        "children.spawn": ({ children }) => children.spawn(UnsupportedChild)
+      }
+      // They act on the child entities of the machine, as `Machine.sendTo` and
+      // `Machine.stopChild` do, and ignore a child that does not run.
+      const ignored: Record<string, (context: any) => Effect.Effect<unknown, any, any>> = {
         "children.sendTo": ({ children }) => children.sendTo(UnsupportedChild, { _tag: "Note" }),
         "children.stop": ({ children }) => children.stop(UnsupportedChild)
       }
@@ -2012,6 +2016,17 @@ describe("ClusterMachine", () => {
               }))
           }))
       }
+      for (const [operation, use] of Object.entries(ignored)) {
+        it.effect(`ignores ${operation} of work for a child that does not run`, () =>
+          Effect.gen(function*() {
+            yield* run(makeCapable(use, []), {}, ({ send, stored }) =>
+              Effect.gen(function*() {
+                assertAccepted(yield* send(Event.Note()))
+                yield* until(() => pathOf(stored()) === "Done")
+                assert.strictEqual(stored()?.status._tag, "Active")
+              }))
+          }))
+      }
       it.effect("names the machine, and has no parent", () =>
         Effect.gen(function*() {
           const contexts: Array<any> = []
@@ -2034,7 +2049,7 @@ describe("ClusterMachine", () => {
               )
               const status = stored()!.status
               assert(status._tag === "Failed")
-              assert.match(status.failure, /Service not found: effect\/Machine\/MachineRuntime/)
+              assert.strictEqual(status.failure, "stopChild is process-local and is not supported")
             }))
         }))
       it.effect("gives each run a scope that closes with it", () =>

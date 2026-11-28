@@ -76,7 +76,11 @@ matched by identity, so a result from before a `resume` is ignored too.
 A durable host passes `progress` to `resume`: `{ path, id, status }` for each
 invocation of an active state that `"Ended"` or is still `"Running"`. Ended work
 is not listed again. Running work is not in `start`; find it in `step.running`
-and settle it when it ends.
+and settle it when it ends. To keep that progress, read `step.exited` and
+`step.entered`, the paths of the states a step left and entered, without
+building a snapshot: forget what you stored for the work of an exited state.
+A result that is ignored returns a step whose `state` is the state you passed.
+`ClusterMachine` is such a host.
 
 A host that runs only some kinds of work refuses the others at compile time:
 `machine: M & Machine.MachineStep.Supported<M, "Stream">`.

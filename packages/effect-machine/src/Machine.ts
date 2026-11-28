@@ -7802,6 +7802,22 @@ export declare namespace MachineStep {
     readonly running: ReadonlyArray<Work<M>>
 
     /**
+     * Paths of the states that this step exited, in exit order, each once. A
+     * durable host forgets what it stored about the work of these states. A
+     * state that the step exited and entered again is in `exited` and in
+     * `entered`. `start`, `resume`, `stop`, and a result that is ignored exit
+     * nothing.
+     */
+    readonly exited: ReadonlyArray<Machine.StateIdentifier<Machine.States<M>>>
+
+    /**
+     * Paths of the states that this step entered, in entry order, each once.
+     * `start` enters the states of the initial state. `resume` restores its
+     * states and enters none.
+     */
+    readonly entered: ReadonlyArray<Machine.StateIdentifier<Machine.States<M>>>
+
+    /**
      * How the machine ended, once it has: its output, or why it failed or
      * stopped. A machine that has ended runs no work and takes no event.
      */

@@ -1,12 +1,9 @@
 import { assert, describe, it } from "@effect/vitest"
-import { Cause, Clock, Duration, Effect } from "effect"
+import { Clock, Duration, Effect, Exit } from "effect"
 import { Machine } from "../../../src/index.js"
 import * as ClusterProgress from "../../../src/internal/machine/clusterProgress.js"
 import * as ClusterTimer from "../../../src/internal/machine/clusterTimer.js"
-import * as ClusterWork from "../../../src/internal/machine/clusterWork.js"
-import * as Configuration from "../../../src/internal/machine/configuration.js"
-import * as internalMachine from "../../../src/internal/machine/machine.js"
-import * as Planner from "../../../src/internal/machine/planner.js"
+import * as Step from "../../../src/internal/machine/step.js"
 
 describe("ClusterTimer", () => {
   /** A clock whose sleeps end when the test says so. */
@@ -90,41 +87,26 @@ describe("ClusterTimer", () => {
     })
   }
 
-  it.effect("leaves every timer with progress or unscheduled, in start order", () =>
-    Effect.gen(function*() {
-      const order: Array<string> = []
-      const machine = makeMachine(order)
-      const { state } = yield* internalMachine.planInitial(machine)
-      const configuration = Configuration.normalizeConfigurationSync(machine, state)
-      const schedule = (progress: ClusterProgress.Progress, now: number) =>
-        ClusterTimer.schedule({
-          machine,
-          configuration,
-          paths: Planner.sortEntryPaths(machine, Configuration.getInitialEntryPaths(machine, configuration)),
-          eventOf: (path) => path === "right" ? { _tag: "Go" } : Planner.InitialEvent,
-          capabilities: ClusterWork.makeCapabilities("Test", undefined),
-          progress,
-          now
-        })
-      const initial = String(Machine.InitialEvent._tag)
-      const first = schedule(ClusterProgress.empty, 100)
-      assert.deepStrictEqual(order, ["one Go", "invalid Go", `throws ${initial}`, `two ${initial}`])
-      assert.deepStrictEqual(ClusterProgress.toStored(first.progress), {
-        "right": { one: { _tag: "Waiting", dueAt: 1100 } },
-        "left.Busy": { two: { _tag: "Waiting", dueAt: 2100 } }
-      })
-      assert.deepStrictEqual(first.unscheduled.map(({ key, stage }) => [key, stage]), [
-        [{ path: "right", id: "invalid" }, "Outcome"],
-        [{ path: "left.Busy", id: "throws" }, "Source"]
-      ])
-      assert.strictEqual((Cause.squash(first.unscheduled[1]!.cause) as Error).message, "no duration")
+  it("gives a due time to each timer without progress, in start order, and reads each duration once", () => {
+    const order: Array<string> = []
+    const machine = makeMachine(order)
+    const self = { id: "Test", sessionId: "test", send: () => Effect.void }
+    const started = Step.make(machine, { self }).start()
+    assert(Exit.isSuccess(started))
+    const { running } = started.value
+    const initial = String(Machine.InitialEvent._tag)
+    const first = ClusterTimer.schedule(ClusterProgress.empty, running, 100)
+    assert.deepStrictEqual(order, [`one ${initial}`, `invalid ${initial}`, `throws ${initial}`, `two ${initial}`])
+    // A timer whose duration cannot be read has none, and fails where it starts.
+    assert.deepStrictEqual(ClusterProgress.toStored(first), {
+      "right": { one: { _tag: "Waiting", dueAt: 1100 } },
+      "left.Busy": { two: { _tag: "Waiting", dueAt: 2100 } }
+    })
 
-      // What has progress is left as it is, settled timers included.
-      order.length = 0
-      const kept = ClusterProgress.settle(first.progress, { path: "right", id: "one" })
-      const second = schedule(kept, 9000)
-      assert.strictEqual(second.progress, kept)
-      assert.deepStrictEqual(order, ["invalid Go", `throws ${initial}`])
-      assert.strictEqual(second.unscheduled.length, 2)
-    }))
+    // What has progress is left as it is, settled timers included.
+    order.length = 0
+    const kept = ClusterProgress.settle(first, { path: "right", id: "one" })
+    assert.strictEqual(ClusterTimer.schedule(kept, running, 9000), kept)
+    assert.deepStrictEqual(order, [])
+  })
 })

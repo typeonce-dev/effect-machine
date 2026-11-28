@@ -1756,8 +1756,12 @@ target or with the descriptor of an invoked child saves the event with the
 checkpoint of the step, so it is sent if and only if the step is stored, and
 applied once. `enqueue.stop` with the descriptor of an invoked child stops the
 running child in the same transaction and settles its progress so it does not
-restart while its state stays active. Work sends with `Machine.sendTo` and stops
-a child with `Machine.stopChild`, given the child's descriptor.
+restart while its state stays active. Commands run before the work of the states
+a step enters starts, as they do locally, so both drop a child that the same step
+enters. Work sends with `Machine.sendTo` and stops a child with
+`Machine.stopChild`, given the child's descriptor, and an input mapper does the
+same with `children.sendTo` and `children.stop`. `children.spawn` fails the
+machine.
 
 ### What is refused, and why
 
@@ -1937,7 +1941,11 @@ matched by identity, so a result from before a `resume` is ignored too.
 A durable host passes `progress` to `resume`: `{ path, id, status }` for each
 invocation of an active state that `"Ended"` or is still `"Running"`. Ended work
 is not listed again. Running work is not in `start`; find it in `step.running`
-and settle it when it ends.
+and settle it when it ends. To keep that progress, read `step.exited` and
+`step.entered`, the paths of the states a step left and entered, without
+building a snapshot: forget what you stored for the work of an exited state.
+A result that is ignored returns a step whose `state` is the state you passed.
+`ClusterMachine` is such a host.
 
 A host that runs only some kinds of work refuses the others at compile time:
 `machine: M & Machine.MachineStep.Supported<M, "Stream">`.

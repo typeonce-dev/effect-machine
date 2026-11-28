@@ -6,8 +6,12 @@
 
 import type { Machine } from "../../Machine.js"
 
-/** The part of a planned microstep that decides which work stops and starts. */
-interface Microstep {
+/**
+ * The part of a planned microstep that decides which work stops and starts.
+ *
+ * @internal
+ */
+export interface Microstep {
   readonly event: Machine.LifecycleEvent<any>
   readonly exitPaths: ReadonlyArray<string>
   readonly entryPaths: ReadonlyArray<string>
