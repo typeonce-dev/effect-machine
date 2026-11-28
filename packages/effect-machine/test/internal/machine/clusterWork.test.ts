@@ -28,7 +28,7 @@ const workOf = (
     effects: sources.effects ?? {},
     timers: sources.timers ?? {}
   } as any).handle({ initial: { target: "A" }, states: { A: { invoke } } } as any)
-  const started = Step.make(machine as Machine.Machine.Any, { self }).start()
+  const started = Step.make(machine, { self }).start()
   if (Exit.isFailure(started)) throw new Error("The machine does not start")
   return started.value.running
 }
