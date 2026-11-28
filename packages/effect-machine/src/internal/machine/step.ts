@@ -21,12 +21,11 @@
  * over and may update its storage in place. Both are one implementation, which
  * differs only in whether a plan copies or updates what it writes.
  *
- * The order is the one of the generic runtime in `process.ts`: commands, the
- * work of exited states, the new state, emitted events, and the work of entered
- * states. A step calls no user code for the work it lists: each piece of work
- * evaluates its source and its input mapper when its host starts it, at most
- * once, inside its own startup failure boundary, as `invocationResolution.ts`
- * requires of a host.
+ * A host applies a step in one order, as the local host in `stepHost.ts`
+ * does: commands, the work of exited states, the new state, emitted events, and
+ * the work of entered states. A step calls no user code for the work it lists:
+ * each piece of work evaluates its source and its input mapper when its host
+ * starts it, at most once, inside its own startup failure boundary.
  *
  * @since 0.48.0
  */
@@ -229,7 +228,7 @@ export class Planning implements Configuration.PlanningMachineReferences {
     this.children = children ?? (this as unknown as Children)
   }
 
-  readonly children: Children
+  readonly children: Children;
 
   // A host is compared by identity: hashing a state, as a failure that holds one
   // may be hashed, never reads the targets of the host.
@@ -1119,7 +1118,19 @@ const build = <O extends Ownership>(
   }
 
   if (ownership === "Persistent") {
-    return { plan, start, fromSnapshot, rest: (state) => state.resting(), send, sendDecoded, settle, element, report, stop, resume }
+    return {
+      plan,
+      start,
+      fromSnapshot,
+      rest: (state) => state.resting(),
+      send,
+      sendDecoded,
+      settle,
+      element,
+      report,
+      stop,
+      resume
+    }
   }
   // An owned state is taken over by the step it is passed to, and handed back
   // when the step returns that very state, or refuses the event.

@@ -36,8 +36,6 @@ import {
 } from "./childRegistry.js"
 import { ChildAlreadyExistsError, MachineSchemaDecodeError, StoppedError } from "./errors.js"
 import * as InspectionRuntime from "./inspectionRuntime.js"
-import type * as InvocationEvent from "./invocationEvent.js"
-import { InvocationGenerations } from "./invocationGeneration.js"
 
 /** @internal */
 export const activeSnapshotObserver: unique symbol = Symbol.for("effect/Machine/activeSnapshotObserver")
@@ -377,8 +375,6 @@ export interface ProcessRunContext<State, Event> extends ProcessInitialContext<E
   readonly updateState: <E, R>(
     f: (state: State) => Effect.Effect<State, E, R>
   ) => Effect.Effect<void, E, R>
-  /** Present only when a compiled statechart is forced through the generic runtime. @internal */
-  readonly ownedChildren?: OwnedChildRuntime
 }
 
 /**
@@ -877,14 +873,6 @@ export interface OwnedChildRuntime {
     source: OwnedChildSource,
     options: OwnedChildSpawnOptions
   ) => Effect.Effect<void, any, any>
-  /**
-   * Begins the generation of an entered invoking state and retires the one it
-   * replaces. The generation stays current after its children finish and is
-   * retired only when the state exits, by `stopPaths` or `stopAll`.
-   */
-  readonly beginGeneration: (path: string) => InvocationEvent.Generation
-  readonly stopAll: () => Effect.Effect<void>
-  readonly stopPaths: (paths: ReadonlyArray<string>) => Effect.Effect<void> | undefined
   /** Stops the child that was spawned with `key`, while its owner holds it. */
   readonly stopKey: (key: string) => Effect.Effect<void>
 }
@@ -908,9 +896,7 @@ export interface ChildRuntime {
   readonly owned: OwnedChildRuntime
 }
 
-// Extends the generation bookkeeping so a running machine retains one object for
-// both.
-class OwnedChildRuntimeImpl extends InvocationGenerations implements OwnedChildRuntime {
+class OwnedChildRuntimeImpl implements OwnedChildRuntime {
   private scopedServices: Context.Context<any> | undefined
 
   constructor(
@@ -921,9 +907,7 @@ class OwnedChildRuntimeImpl extends InvocationGenerations implements OwnedChildR
     private readonly sendAcknowledged?: (
       event: unknown
     ) => Effect.Effect<AcknowledgedDelivery<unknown>, unknown | StoppedError>
-  ) {
-    super()
-  }
+  ) {}
 
   private has(key: string): boolean {
     for (const entry of this.registry.children.values()) {
@@ -960,7 +944,6 @@ class OwnedChildRuntimeImpl extends InvocationGenerations implements OwnedChildR
         _tag: "Starting",
         token,
         ownerKey: options.key,
-        ownerPath: options.path,
         ownerActive: true
       })
       const parent: ProcessEndpoint<unknown> = {
@@ -1039,21 +1022,6 @@ class OwnedChildRuntimeImpl extends InvocationGenerations implements OwnedChildR
     })
   }
 
-  stopAll(): Effect.Effect<void> {
-    return Effect.suspend(() => {
-      this.retireAllGenerations()
-      const effects: Array<Effect.Effect<void>> = []
-      for (const entry of this.registry.children.values()) {
-        if (entry.ownerActive) effects.push(this.stopEntry(entry))
-      }
-      return effects.length === 0
-        ? Effect.void
-        : effects.length === 1
-        ? effects[0]!
-        : Effect.all(effects, { concurrency: "unbounded", discard: true })
-    })
-  }
-
   stopKey(key: string): Effect.Effect<void> {
     return Effect.suspend(() => {
       for (const entry of this.registry.children.values()) {
@@ -1061,23 +1029,6 @@ class OwnedChildRuntimeImpl extends InvocationGenerations implements OwnedChildR
       }
       return Effect.void
     })
-  }
-
-  stopPaths(paths: ReadonlyArray<string>): Effect.Effect<void> | undefined {
-    if (paths.length === 0) return undefined
-    this.retireGenerations(paths)
-    const pathSet = new Set(paths)
-    const effects: Array<Effect.Effect<void>> = []
-    for (const entry of this.registry.children.values()) {
-      if (entry.ownerActive && entry.ownerPath !== undefined && pathSet.has(entry.ownerPath)) {
-        effects.push(this.stopEntry(entry))
-      }
-    }
-    return effects.length === 0
-      ? undefined
-      : effects.length === 1
-      ? effects[0]!
-      : Effect.all(effects, { concurrency: "unbounded", discard: true })
   }
 }
 
@@ -1146,10 +1097,6 @@ export const childlessRuntime: ChildRuntime = {
   stop: () => Effect.void,
   owned: {
     spawn: () => Effect.die(new Error("Childless machine logic cannot spawn an owned process")),
-    // Unreachable for childless logic; `spawn` reports the defect as a failure.
-    beginGeneration: () => ({ current: true }),
-    stopAll: () => Effect.void,
-    stopPaths: () => undefined,
     stopKey: () => Effect.void
   }
 }

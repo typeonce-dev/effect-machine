@@ -244,12 +244,10 @@ export const checkArchitecture = ({
   const runtimeModules = new Set([
     "src/internal/machine/runtime.ts",
     "src/internal/machine/runtimeProtocol.ts",
-    "src/internal/machine/runtimeGeneric.ts",
     "src/internal/machine/runtimeCompiled.ts"
   ])
   const hostNeutralModules = new Set([
     "src/internal/machine/invocationChanges.ts",
-    "src/internal/machine/invocationGeneration.ts",
     "src/internal/machine/invocationOutcome.ts",
     "src/internal/machine/invocationResolution.ts",
     "src/internal/machine/step.ts"
@@ -260,7 +258,7 @@ export const checkArchitecture = ({
     "src/internal/machine/childRegistry.ts",
     "src/internal/machine/commandRuntime.ts",
     "src/internal/machine/inspectionRuntime.ts",
-    "src/internal/machine/invocation.ts",
+    "src/internal/machine/stepHost.ts",
     "src/internal/machine/process.ts"
   ])
   // Hosts a local machine, so it depends on the local runtime by design.
@@ -313,7 +311,7 @@ export const checkArchitecture = ({
       "src/internal/machine/planner.ts",
       "src/internal/machine/command.ts",
       "src/internal/machine/executionPlan.ts",
-      "src/internal/machine/invocation.ts",
+      "src/internal/machine/stepHost.ts",
       "src/internal/machine/commandRuntime.ts",
       "src/internal/machine/process.ts",
       "src/internal/machine/runtime.ts"
@@ -324,7 +322,7 @@ export const checkArchitecture = ({
       "src/internal/machine/planner.ts",
       "src/internal/machine/command.ts",
       "src/internal/machine/executionPlan.ts",
-      "src/internal/machine/invocation.ts",
+      "src/internal/machine/stepHost.ts",
       "src/internal/machine/commandRuntime.ts",
       "src/internal/machine/process.ts",
       "src/internal/machine/runtime.ts"
@@ -334,7 +332,7 @@ export const checkArchitecture = ({
       "src/internal/machine/planner.ts",
       "src/internal/machine/command.ts",
       "src/internal/machine/executionPlan.ts",
-      "src/internal/machine/invocation.ts",
+      "src/internal/machine/stepHost.ts",
       "src/internal/machine/commandRuntime.ts",
       "src/internal/machine/process.ts",
       "src/internal/machine/runtime.ts"
@@ -343,14 +341,14 @@ export const checkArchitecture = ({
       "src/internal/machine/planner.ts",
       "src/internal/machine/command.ts",
       "src/internal/machine/executionPlan.ts",
-      "src/internal/machine/invocation.ts",
+      "src/internal/machine/stepHost.ts",
       "src/internal/machine/commandRuntime.ts",
       "src/internal/machine/process.ts",
       "src/internal/machine/runtime.ts"
     ])],
     ["src/internal/machine/command.ts", new Set([
       "src/internal/machine/executionPlan.ts",
-      "src/internal/machine/invocation.ts",
+      "src/internal/machine/stepHost.ts",
       "src/internal/machine/commandRuntime.ts",
       "src/internal/machine/process.ts",
       "src/internal/machine/runtime.ts"
@@ -358,14 +356,14 @@ export const checkArchitecture = ({
     ["src/internal/machine/planner.ts", new Set([
       "src/internal/machine/serialization.ts",
       "src/internal/machine/executionPlan.ts",
-      "src/internal/machine/invocation.ts",
+      "src/internal/machine/stepHost.ts",
       "src/internal/machine/commandRuntime.ts",
       "src/internal/machine/process.ts",
       "src/internal/machine/runtime.ts"
     ])],
     ["src/internal/machine/executionPlan.ts", new Set([
       "src/internal/machine/serialization.ts",
-      "src/internal/machine/invocation.ts",
+      "src/internal/machine/stepHost.ts",
       "src/internal/machine/commandRuntime.ts",
       "src/internal/machine/process.ts",
       "src/internal/machine/runtime.ts"
@@ -376,7 +374,7 @@ export const checkArchitecture = ({
     if (forbidden.has("src/internal/machine/runtime.ts")) {
       for (const module of runtimeModules) forbidden.add(module)
     }
-    if (forbidden.has("src/internal/machine/invocation.ts")) {
+    if (forbidden.has("src/internal/machine/stepHost.ts")) {
       for (const module of hostNeutralModules) forbidden.add(module)
     }
   }
@@ -437,7 +435,7 @@ export const checkArchitecture = ({
       [
         "src/internal/machine/commandRuntime.ts",
         "src/internal/machine/executionPlan.ts",
-        "src/internal/machine/invocation.ts",
+        "src/internal/machine/stepHost.ts",
         "src/internal/machine/process.ts",
         ...runtimeModules
       ].includes(edge.target)
@@ -464,7 +462,7 @@ export const checkArchitecture = ({
       [
         "src/internal/machine/configuration.ts",
         "src/internal/machine/executionPlan.ts",
-        "src/internal/machine/invocation.ts",
+        "src/internal/machine/stepHost.ts",
         "src/internal/machine/invocationOutcome.ts",
         "src/internal/machine/invocationResolution.ts",
         "src/internal/machine/planner.ts",

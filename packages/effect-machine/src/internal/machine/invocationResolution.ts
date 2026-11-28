@@ -2,28 +2,12 @@
  * Host-neutral resolution of the work owned by entered states.
  *
  * `resolve` answers which invocations a step starts, in which order, and what
- * each one is. It runs nothing. Starting the work, owning it, and returning its
- * outcomes to the planner belong to the host, such as the local runtime in
- * `invocation.ts`.
- *
- * A host must:
- *
- * - resolve against the configuration the step settled in, with the lifecycle
- *   event that last entered each path, as `InvocationChanges` reads them;
- * - stop the work and retire the generations of exited paths before it starts
- *   the work of entered ones;
- * - begin one generation for each returned group, through
- *   `InvocationGenerations`, and start the group's invocations in order;
- * - call each lazy source at most once per start, inside its own startup failure
- *   boundary, after the previous invocation has started. A host that stores when
- *   a timer is due evaluates its duration earlier, and reports a failure of that
- *   where the timer would have started;
- * - route everything the work reports through `InvocationOutcome` with the
- *   group's generation, and plan a delivered event in a later turn than the one
- *   that started the work.
- *
- * `step.ts` follows these rules for hosts outside this package, which use
- * `Machine.toStep` instead.
+ * each one is. It runs nothing. `step.ts` is its one caller: it resolves the
+ * work of entered states against the configuration the step settled in, stops
+ * the work of exited paths before it starts the work of entered ones, evaluates
+ * each lazy source at most once per start, and routes what the work reports
+ * through `InvocationOutcome`. Every host, the local runtime included, starts
+ * and owns the work that a step lists.
  *
  * @since 0.47.2
  */

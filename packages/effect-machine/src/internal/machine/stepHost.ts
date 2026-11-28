@@ -148,7 +148,9 @@ const current = (): InvocationEvent.Generation => ({ current: true })
 
 /** The exit of work as its step settles it. */
 const exitOf = (outcome: InvocationOutcome.Outcome): Exit.Exit<unknown, unknown> =>
-  outcome._tag === "Done" ? Exit.succeed(outcome.output) : Exit.failCause((outcome as { cause: Cause.Cause<unknown> }).cause)
+  outcome._tag === "Done"
+    ? Exit.succeed(outcome.output)
+    : Exit.failCause((outcome as { cause: Cause.Cause<unknown> }).cause)
 
 const traced = (scope: Scope, invocation: ProgramInvocation, logic: AnyProcessLogic): AnyProcessLogic => ({
   ...logic,
@@ -202,7 +204,11 @@ const programLogic = (scope: Scope, work: Step.Work, invocation: ProgramInvocati
                   work,
                   element,
                   inspected
-                    ? (InvocationOutcome.decideElement(invocation as InvocationResolution.StreamInvocation, current(), element) as InvocationOutcome.Deliver).event
+                    ? (InvocationOutcome.decideElement(
+                      invocation as InvocationResolution.StreamInvocation,
+                      current(),
+                      element
+                    ) as InvocationOutcome.Deliver).event
                     : undefined
                 )
               ).pipe(
@@ -393,7 +399,10 @@ const makeDrain = (machine: Machine.Any, kernel: Kernel, childless: boolean) => 
     const afterCommit: Array<Effect.Effect<void, any, any>> = []
     if (step.emitted.length > 0) {
       afterCommit.push(
-        CommandRuntime.runEmittedEvents(step.emitted, host.liveRuntime ??= CommandRuntime.makeLiveRuntime(machine, scope))
+        CommandRuntime.runEmittedEvents(
+          step.emitted,
+          host.liveRuntime ??= CommandRuntime.makeLiveRuntime(machine, scope)
+        )
       )
     }
     if (done) {
@@ -420,7 +429,9 @@ const makeDrain = (machine: Machine.Any, kernel: Kernel, childless: boolean) => 
     }
     return beforeCommit.length === 0
       ? commitAndContinue()
-      : context.runAfterChanges(runSequentialDiscard(beforeCommit).pipe(Effect.andThen(Effect.suspend(commitAndContinue))))
+      : context.runAfterChanges(
+        runSequentialDiscard(beforeCommit).pipe(Effect.andThen(Effect.suspend(commitAndContinue)))
+      )
   }
 
   // Commits queued messages whose steps need no effectful work. Returns the

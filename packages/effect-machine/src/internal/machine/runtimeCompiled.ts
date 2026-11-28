@@ -1,4 +1,8 @@
-/** Compiled statechart execution strategy. */
+/**
+ * The local process: one driver for every logic that LocalMachine runs. A
+ * machine drains its mailbox through its compiled execution, and other logic
+ * runs as a resident program that receives from the same mailbox.
+ */
 import * as Cause from "effect/Cause"
 import * as Channel from "effect/Channel"
 import * as Context from "effect/Context"
@@ -9,6 +13,7 @@ import * as Fiber from "effect/Fiber"
 import * as Option from "effect/Option"
 import * as PubSub from "effect/PubSub"
 import type { SchedulerDispatcher } from "effect/Scheduler"
+import * as Semaphore from "effect/Semaphore"
 import * as Stream from "effect/Stream"
 import type * as Take from "effect/Take"
 import type { Inspection } from "../../LocalMachine.js"
@@ -23,6 +28,7 @@ import {
   childlessRuntime,
   type ChildRuntime,
   closeCompactMailbox,
+  closeProcessMailbox,
   type CompactProcessMailbox,
   type CompiledProcessContext,
   type CompiledProcessExecution,
@@ -32,30 +38,35 @@ import {
   deliverEvent,
   type EmissionRuntime,
   EmissionsClosed,
+  type EventDecoder,
+  executionIsChildless,
   failAcknowledgedMessage,
   inspectionSubject,
   isAcknowledgedMessage,
   isMachineTarget,
   type LazyEmissions,
   type MachineRef,
-  makeChildRuntime,
   makeChildRuntimeSync,
   makeInspectedMessage,
+  makeProcessMailbox,
   messageCausation,
   messageEvent,
   noInspectInitial,
   noParentSend,
   notifyActiveSnapshot,
   offerCompactMailbox,
+  offerProcessMailbox,
   type OwnedChildRuntime,
   pollCompactMailbox,
   type ProcessEndpoint,
   type ProcessInitialContext,
   type ProcessLogic,
+  type ProcessMailbox,
   type ProcessMessage,
   type ProcessRunContext,
   type ProcessRuntime,
   publishInspectedSent,
+  receiveProcessMailbox,
   RefusedEvent,
   type RuntimeSnapshot,
   sendEndpoint,
@@ -89,7 +100,7 @@ class CompiledAddress implements ProcessEndpoint<unknown> {
   readonly id: string
   readonly sessionId: string
   declare readonly inspectionSubject?: Inspection.Subject
-  constructor(private readonly process: CompiledProcess, readonly stop: Effect.Effect<void>) {
+  constructor(private readonly process: LocalProcess, readonly stop: Effect.Effect<void>) {
     this.id = process.id
     this.sessionId = process.sessionId
     if (process.inspectionSubject !== undefined) {
@@ -109,14 +120,14 @@ class CompiledAddress implements ProcessEndpoint<unknown> {
 }
 
 /**
- * Compact runtime for compiled statecharts.
+ * A local process.
  *
  * All long-lived state is stored directly on this object. Operations are
  * implemented by shared prototype methods, and public Effect / Stream values
- * are materialized only when accessed. Arbitrary process logic continues to
- * use the general runtime above.
+ * are materialized only when accessed. `MachineProcess` drains a compiled
+ * execution, and `LogicProcess` runs other logic as a resident program.
  */
-class CompiledProcess implements MachineRef<any, any, any, any> {
+abstract class LocalProcess implements MachineRef<any, any, any, any> {
   readonly id: string
   readonly sessionId: string
   readonly inspectionSubject?: Inspection.Subject
@@ -135,17 +146,6 @@ class CompiledProcess implements MachineRef<any, any, any, any> {
   ): Effect.Effect<void, StoppedError> {
     return this.deliver(event, source, causedBy)
   }
-  [acknowledgedSend](
-    event: unknown
-  ): Effect.Effect<AcknowledgedDelivery<unknown>, unknown | StoppedError> {
-    return Effect.suspend(() => {
-      if (this.mailbox.closed || this.lifecycle !== "Active") return Effect.fail(new StoppedError())
-      const decoded = decodeSent(this.execution.decodeEvent, event)
-      return decoded._tag === "Rejected"
-        ? Effect.fail(decoded.error)
-        : this.sendAcknowledgedEffect(decoded.event, event)
-    })
-  }
   [snapshotObserver](observer: () => void): () => void {
     const observers = this.snapshotObservers ??= new Set()
     observers.add(observer)
@@ -154,34 +154,34 @@ class CompiledProcess implements MachineRef<any, any, any, any> {
     }
   }
 
-  private readonly mailbox: CompactProcessMailbox<unknown> = {
+  protected readonly mailbox: CompactProcessMailbox<unknown> = {
     items: undefined,
     index: 0,
     closed: false
   }
-  private readonly address: CompiledAddress
+  protected readonly address: CompiledAddress
   private childRuntime: ChildRuntime = childlessRuntime
-  private processScope!: ProcessInitialContext<unknown>
-  private processContext: ProcessRunContext<unknown, unknown> | undefined
+  protected processScope!: ProcessInitialContext<unknown>
+  protected processContext: ProcessRunContext<unknown, unknown> | undefined
   private compiledContext: CompiledProcessContext<unknown, unknown> | undefined
-  private current!: VersionedSnapshot<unknown, unknown, unknown>
+  protected current!: VersionedSnapshot<unknown, unknown, unknown>
   /**
    * `Active` has no terminal payload, `TerminationRequested` owns
    * `termination` and its optional reserved snapshot, and `Completed` owns
    * `completion`. `runState` independently tracks worker activity.
    */
-  private lifecycle: CompiledLifecycle = "Active"
-  private runState: CompiledRunState = "Initializing"
+  protected lifecycle: CompiledLifecycle = "Active"
+  protected runState: CompiledRunState = "Initializing"
   private completion: CompiledCompletion | undefined
   private waiter: Deferred.Deferred<unknown, unknown> | undefined
   private termination: CompiledTermination | undefined
   private terminationSnapshot: RuntimeSnapshot<unknown, unknown, unknown> | undefined
-  private worker: Fiber.Fiber<any, never> | undefined
+  protected worker: Fiber.Fiber<any, never> | undefined
   private interruptRequested = false
   private offerRevision = 0
   private snapshotObservers: Set<() => void> | undefined
   private changesFlushScheduled = false
-  private inFlightMessage: ProcessMessage<unknown> | undefined
+  protected inFlightMessage: ProcessMessage<unknown> | undefined
   private readonly externalEmissions: EmissionRuntime | undefined
   private emissionsPubSub: LazyEmissions
   private readonly programInvocation?: Inspection.ProgramInvocation
@@ -190,9 +190,9 @@ class CompiledProcess implements MachineRef<any, any, any, any> {
   private initializing?: boolean
 
   constructor(
-    private readonly logic: ProcessLogic<any, any, any, any, any, any>,
-    private readonly options: StartInternalOptions,
-    private readonly services: Context.Context<any>,
+    protected readonly logic: ProcessLogic<any, any, any, any, any, any>,
+    protected readonly options: StartInternalOptions,
+    protected readonly services: Context.Context<any>,
     sessionId: string
   ) {
     this.sessionId = sessionId
@@ -210,7 +210,7 @@ class CompiledProcess implements MachineRef<any, any, any, any> {
     this.address = new CompiledAddress(this, Effect.suspend(() => this.stopFromProcess()))
   }
 
-  private get inspector(): InspectionRuntime.Runtime | undefined {
+  protected get inspector(): InspectionRuntime.Runtime | undefined {
     return this.options.runtime.inspection
   }
 
@@ -271,20 +271,51 @@ class CompiledProcess implements MachineRef<any, any, any, any> {
     )
   }
 
-  private get execution(): CompiledProcessExecution<any, any, any, any, any, any> {
+  protected get execution(): CompiledProcessExecution<any, any, any, any, any, any> {
     return this.logic.execution as CompiledProcessExecution<any, any, any, any, any, any>
   }
 
+  /** Decodes a public event as it enters the mailbox; only a machine decodes. */
+  protected get decodeEvent(): EventDecoder | undefined {
+    const execution = this.logic.execution
+    return execution?._tag === "Compiled" ? execution.decodeEvent : undefined
+  }
+
+  private get childless(): boolean {
+    return executionIsChildless(this.logic.execution)
+  }
+
+  /** The children of this process, as its logic spawns them. */
+  protected abstract makeChildRuntime(): ChildRuntime
+
+  /** Enqueues a message that the mailbox accepts. */
+  protected enqueue(message: ProcessMessage<unknown>): void {
+    offerCompactMailbox(this.mailbox, message)
+  }
+
+  protected closeMailbox(): void {
+    closeCompactMailbox(this.mailbox)
+  }
+
+  protected prepareCompiledContext(initialized: object): void {
+    this.compiledContext = new CompiledProcessContextImpl(this.processScope, this.childRuntime.owned, this)
+    if ("executionState" in initialized) {
+      this.compiledContext.executionState = (initialized as { readonly executionState: unknown }).executionState
+    }
+  }
+
+  /** Prepares how the process runs once its initial state is known. */
+  protected abstract prepareRun(initialized: object): void
+
+  /** Runs the process once it is initialized and its startup hooks ran. */
+  protected abstract run(): Effect.Effect<void, never, any>
+
+  /** The run state of an initialized process that does not run yet. */
+  protected abstract readonly initializedRunState: CompiledRunState
+
   initializeCompiledSync(): Effect.Effect<MachineRef<any, any, any, any>, unknown> {
     this.publishCreated()
-    if (!this.execution.childless) {
-      this.childRuntime = makeChildRuntimeSync(
-        this.address,
-        this.options.runtime,
-        this.services,
-        (event) => this.sendAcknowledgedEffect(decodeDelivered(this.execution.decodeEvent, event), sentOf(event))
-      )
-    }
+    if (!this.childless) this.childRuntime = this.makeChildRuntime()
     const parent = this.options.parent
     const sendParent = this.options.sendParent ?? (parent === undefined
       ? noParentSend
@@ -334,10 +365,7 @@ class CompiledProcess implements MachineRef<any, any, any, any> {
       snapshot: { status: "active", state: initialized.state }
     }
     this.publishInitialized(initialized.state)
-    this.compiledContext = new CompiledProcessContextImpl(this.processScope, this.childRuntime.owned, this)
-    if ("executionState" in initialized) {
-      this.compiledContext.executionState = initialized.executionState
-    }
+    this.prepareCompiledContext(initialized)
     if (this.options.onReadySync !== undefined && !this.options.onReadySync(this)) {
       this.requestTerminationSync({ _tag: "Stopped" })
     }
@@ -345,7 +373,7 @@ class CompiledProcess implements MachineRef<any, any, any, any> {
       this.requestTerminationSync({ _tag: "Done", output: initialized.output })
     }
     if (
-      initialized.done === false && this.execution.childless &&
+      initialized.done === false && this.childless &&
       this.lifecycle === "Active" &&
       this.mailbox.items === undefined
     ) {
@@ -359,14 +387,7 @@ class CompiledProcess implements MachineRef<any, any, any, any> {
     const self = this
     return Effect.gen(function*() {
       self.publishCreated()
-      if (!self.execution.childless) {
-        self.childRuntime = yield* makeChildRuntime(
-          self.address,
-          self.options.runtime,
-          self.services,
-          (event) => self.sendAcknowledgedEffect(decodeDelivered(self.execution.decodeEvent, event), sentOf(event))
-        )
-      }
+      if (!self.childless) self.childRuntime = self.makeChildRuntime()
       const parent = self.options.parent
       const sendParent = self.options.sendParent ?? (parent === undefined
         ? noParentSend
@@ -402,7 +423,7 @@ class CompiledProcess implements MachineRef<any, any, any, any> {
 
       const cleanupStartupFailure = <A, E>(exit: Exit.Exit<A, E>): Effect.Effect<void> =>
         Exit.isFailure(exit) ? self.childRuntime.close(exit) : Effect.void
-      const compiledInitial = self.execution.initial
+      const compiledInitial = self.logic.execution?._tag === "Compiled" ? self.execution.initial : undefined
       const initializeEffect: Effect.Effect<
         {
           readonly state: unknown
@@ -422,7 +443,7 @@ class CompiledProcess implements MachineRef<any, any, any, any> {
           return cleanupStartupFailure(exit)
         }),
         Effect.ensuring(Effect.sync(() => {
-          self.runState = "Idle"
+          self.runState = self.initializedRunState
         }))
       )
       const initial = initialized.state
@@ -433,24 +454,7 @@ class CompiledProcess implements MachineRef<any, any, any, any> {
         snapshot: { status: "active", state: initial }
       }
       self.publishInitialized(initial)
-      if (self.execution.drain._tag === "Process") {
-        self.processContext = {
-          ...self.processScope,
-          receive: Effect.never,
-          poll: Effect.sync(() => Option.map(pollCompactMailbox(self.mailbox), messageEvent)),
-          receiveMessage: Effect.never,
-          pollMessage: Effect.sync(() => self.pollCompiledMessage()),
-          completeMessage: (delivery) => self.completeCompiledMessage(delivery),
-          state: Effect.sync(() => self.current.snapshot.state),
-          setState: (state: unknown) => self.setActiveState(state),
-          updateState: (f) => self.updateState(f)
-        }
-      } else {
-        self.compiledContext = new CompiledProcessContextImpl(self.processScope, self.childRuntime.owned, self)
-        if ("executionState" in initialized) {
-          self.compiledContext.executionState = initialized.executionState
-        }
-      }
+      self.prepareRun(initialized)
 
       if (self.options.onReadySync !== undefined && !self.options.onReadySync(self)) {
         yield* self.requestTermination({ _tag: "Stopped" })
@@ -470,14 +474,13 @@ class CompiledProcess implements MachineRef<any, any, any, any> {
       // first drain to perform. Future sends observe an idle run state and
       // start the ordinary compiled worker.
       if (
-        initialized.done === false && self.execution.childless &&
+        initialized.done === false && self.childless &&
         self.lifecycle === "Active" && self.mailbox.items === undefined
       ) {
         return self
       }
 
-      self.runState = "Draining"
-      yield* self.drainRuntime()
+      yield* self.run()
       return self
     })
   }
@@ -520,7 +523,7 @@ class CompiledProcess implements MachineRef<any, any, any, any> {
     return this.childRuntime.changes(child)
   }
 
-  private requestTermination(requested: CompiledTermination): Effect.Effect<boolean> {
+  protected requestTermination(requested: CompiledTermination): Effect.Effect<boolean> {
     return Effect.sync(() => this.requestTerminationSync(requested))
   }
 
@@ -528,7 +531,7 @@ class CompiledProcess implements MachineRef<any, any, any, any> {
     return this.lifecycle === "TerminationRequested"
   }
 
-  private requestTerminationSync(requested: CompiledTermination): boolean {
+  protected requestTerminationSync(requested: CompiledTermination): boolean {
     if (this.lifecycle !== "Active") {
       return false
     }
@@ -554,7 +557,7 @@ class CompiledProcess implements MachineRef<any, any, any, any> {
     return snapshot
   }
 
-  private stopFromProcess(): Effect.Effect<void> {
+  protected stopFromProcess(): Effect.Effect<void> {
     const request = this.requestTermination({ _tag: "Stopped" }).pipe(Effect.asVoid)
     return this.runState === "Initializing" ? request : request.pipe(Effect.andThen(Effect.interrupt))
   }
@@ -578,7 +581,7 @@ class CompiledProcess implements MachineRef<any, any, any, any> {
     if (this.inspector === undefined) return this.offerMessage(event, "Sent")
     return Effect.suspend((): Effect.Effect<void, StoppedError | MachineSchemaDecodeError> => {
       if (this.mailbox.closed || this.lifecycle !== "Active") return Effect.fail(new StoppedError())
-      const decoded = decodeSent(this.execution.decodeEvent, event)
+      const decoded = decodeSent(this.decodeEvent, event)
       return decoded._tag === "Rejected"
         ? Effect.fail(decoded.error)
         : this.offerEvent(decoded.event, undefined, undefined, undefined, event)
@@ -595,11 +598,11 @@ class CompiledProcess implements MachineRef<any, any, any, any> {
       return this.offerMessage(event, "Delivered") as Effect.Effect<void, StoppedError>
     }
     return Effect.suspend(() =>
-      this.offerEvent(decodeDelivered(this.execution.decodeEvent, event), source, causedBy, undefined, sentOf(event))
+      this.offerEvent(decodeDelivered(this.decodeEvent, event), source, causedBy, undefined, sentOf(event))
     )
   }
 
-  private sendAcknowledgedEffect(
+  protected sendAcknowledgedEffect(
     event: unknown,
     sent: unknown = event
   ): Effect.Effect<AcknowledgedDelivery<unknown>, unknown | StoppedError> {
@@ -657,7 +660,7 @@ class CompiledProcess implements MachineRef<any, any, any, any> {
           return Effect.fail(new StoppedError())
         }
         let message = offered
-        const decode = this.execution.decodeEvent
+        const decode = this.decodeEvent
         if (decoding !== "Decoded" && decode !== undefined) {
           // Decoded inline, so a send allocates nothing more than before.
           try {
@@ -673,13 +676,11 @@ class CompiledProcess implements MachineRef<any, any, any, any> {
         this.offerRevision += 1
         // Initialization drains whatever it queued once it finishes, and an
         // idle machine has an empty mailbox, so it receives the message directly.
-        const drain = this.execution.drain
         const context = this.compiledContext
-        const runSync = this.runState === "Idle" && context !== undefined && drain._tag === "Owned"
-          ? drain.runSync
-          : undefined
+        const drain = this.runState === "Idle" && context !== undefined ? this.execution.drain : undefined
+        const runSync = drain?._tag === "Owned" ? drain.runSync : undefined
         if (runSync === undefined) {
-          offerCompactMailbox(this.mailbox, message)
+          this.enqueue(message)
         }
         if (this.runState !== "Idle") {
           return Effect.void
@@ -766,7 +767,7 @@ class CompiledProcess implements MachineRef<any, any, any, any> {
 
   private finishIdleChildlessStop(): boolean {
     if (
-      !this.execution.childless || this.runState !== "Idle" || this.worker !== undefined ||
+      !this.childless || this.runState !== "Idle" || this.worker !== undefined ||
       this.lifecycle !== "Active" ||
       (this.options.onOutcome !== undefined && this.options.skipStoppedOutcome !== true) ||
       this.options.onStop !== undefined ||
@@ -784,7 +785,7 @@ class CompiledProcess implements MachineRef<any, any, any, any> {
     this.lifecycle = "TerminationRequested"
     this.termination = { _tag: "Stopped" }
     this.terminationSnapshot = snapshot
-    closeCompactMailbox(this.mailbox)
+    this.closeMailbox()
     this.current = {
       revision: this.current.revision + 1,
       terminalizing: true,
@@ -808,7 +809,7 @@ class CompiledProcess implements MachineRef<any, any, any, any> {
     return true
   }
 
-  private settleRequestedTermination(): Effect.Effect<void> {
+  protected settleRequestedTermination(): Effect.Effect<void> {
     return Effect.suspend(() => {
       if (this.runState !== "Draining") {
         return this.finishRequestedTermination()
@@ -850,7 +851,7 @@ class CompiledProcess implements MachineRef<any, any, any, any> {
     return stopped
   }
 
-  private drainRuntime(
+  protected drainRuntime(
     first?: Effect.Effect<Option.Option<unknown>, unknown, unknown>
   ): Effect.Effect<void, never, any> {
     const self = this
@@ -903,19 +904,21 @@ class CompiledProcess implements MachineRef<any, any, any, any> {
     )
   }
 
-  private finishRequestedTermination(): Effect.Effect<void> {
+  protected finishRequestedTermination(): Effect.Effect<void> {
     return Effect.suspend(() => {
       if (this.lifecycle !== "TerminationRequested") {
         return Effect.void
       }
       const requested = this.termination
       if (requested === undefined) {
-        return Effect.void
+        return this.awaitCompletion()
       }
       const snapshot = this.terminationSnapshot ?? this.reserveTermination(requested)
       if (snapshot === undefined) {
         return this.awaitCompletion()
       }
+      // One caller finishes the process; any other awaits its completion.
+      this.termination = undefined
       const exit = requested._tag === "Stopped"
         ? Exit.void
         : requested._tag === "Done"
@@ -953,7 +956,7 @@ class CompiledProcess implements MachineRef<any, any, any, any> {
         )
       return Effect.uninterruptible(
         Effect.sync(() => {
-          closeCompactMailbox(this.mailbox)
+          this.closeMailbox()
         }).pipe(
           Effect.andThen(this.childRuntime.close(exit)),
           Effect.andThen(this.setAndPublishSnapshot(snapshot)),
@@ -1094,7 +1097,7 @@ class CompiledProcess implements MachineRef<any, any, any, any> {
     })
   }
 
-  private setActiveState(state: unknown): Effect.Effect<void> {
+  protected setActiveState(state: unknown): Effect.Effect<void> {
     return Effect.suspend(() => this.commitActiveState(state) ?? Effect.void)
   }
 
@@ -1123,7 +1126,7 @@ class CompiledProcess implements MachineRef<any, any, any, any> {
     return this.commitActiveState(state, true)
   }
 
-  private commitActiveState(state: unknown, batchChanges = false): Effect.Effect<void> | undefined {
+  protected commitActiveState(state: unknown, batchChanges = false): Effect.Effect<void> | undefined {
     const latest = this.current
     if (latest.terminalizing || latest.snapshot.status !== "active") {
       return undefined
@@ -1196,7 +1199,7 @@ class CompiledProcess implements MachineRef<any, any, any, any> {
     PubSub.publishUnsafe(current.changes, pendingChanges)
   }
 
-  private updateState<E, R>(
+  protected updateState<E, R>(
     f: (state: unknown) => Effect.Effect<unknown, E, R>
   ): Effect.Effect<void, E, R> {
     return Effect.suspend(() => {
@@ -1274,13 +1277,184 @@ class CompiledProcess implements MachineRef<any, any, any, any> {
   }
 }
 
+/** A machine: its compiled execution drains its mailbox. */
+class MachineProcess extends LocalProcess {
+  [acknowledgedSend](
+    event: unknown
+  ): Effect.Effect<AcknowledgedDelivery<unknown>, unknown | StoppedError> {
+    return Effect.suspend(() => {
+      if (this.mailbox.closed || this.lifecycle !== "Active") return Effect.fail(new StoppedError())
+      const decoded = decodeSent(this.decodeEvent, event)
+      return decoded._tag === "Rejected"
+        ? Effect.fail(decoded.error)
+        : this.sendAcknowledgedEffect(decoded.event, event)
+    })
+  }
+
+  protected readonly initializedRunState: CompiledRunState = "Idle"
+
+  protected makeChildRuntime(): ChildRuntime {
+    return makeChildRuntimeSync(
+      this.address,
+      this.options.runtime,
+      this.services,
+      (event) => this.sendAcknowledgedEffect(decodeDelivered(this.decodeEvent, event), sentOf(event))
+    )
+  }
+
+  protected prepareRun(initialized: object): void {
+    if (this.execution.drain._tag === "Process") {
+      this.processContext = {
+        ...this.processScope,
+        receive: Effect.never,
+        poll: Effect.sync(() => Option.map(pollCompactMailbox(this.mailbox), messageEvent)),
+        receiveMessage: Effect.never,
+        pollMessage: Effect.sync(() => this.pollCompiledMessage()),
+        completeMessage: (delivery) => this.completeCompiledMessage(delivery),
+        state: Effect.sync(() => this.current.snapshot.state),
+        setState: (state: unknown) => this.setActiveState(state),
+        updateState: (f) => this.updateState(f)
+      }
+    } else {
+      this.prepareCompiledContext(initialized)
+    }
+  }
+
+  protected run(): Effect.Effect<void, never, any> {
+    this.runState = "Draining"
+    return this.drainRuntime()
+  }
+}
+
+/**
+ * Logic other than a machine, run as a resident program: it starts in the
+ * turn of its starter, receives from the mailbox, and its exit ends the
+ * process. Its state is updated one change at a time.
+ */
+class LogicProcess extends LocalProcess {
+  // A resident program runs from the end of its startup until it exits, so
+  // the process never rests idle and every send only enqueues.
+  protected readonly initializedRunState: CompiledRunState = "Initializing"
+  protected override readonly mailbox: ProcessMailbox<unknown> = makeProcessMailbox()
+  private updates: Semaphore.Semaphore | undefined
+
+  protected makeChildRuntime(): ChildRuntime {
+    return makeChildRuntimeSync(this.address, this.options.runtime)
+  }
+
+  protected override enqueue(message: ProcessMessage<unknown>): void {
+    offerProcessMailbox(this.mailbox, message)
+  }
+
+  protected override closeMailbox(): void {
+    closeProcessMailbox(this.mailbox)
+  }
+
+  /**
+   * Initialization finishes constructing a state before a stopped snapshot can
+   * be published, so a stop requested there is recorded and returns. Once
+   * running, the process that stops itself never continues: the program is
+   * interrupted, and the caller waits until it is.
+   */
+  protected override stopFromProcess(): Effect.Effect<void> {
+    const request = this.requestTermination({ _tag: "Stopped" }).pipe(Effect.asVoid)
+    return this.runState === "Initializing"
+      ? request
+      : request.pipe(
+        Effect.andThen(Effect.forkDetach(this.settleRequestedTermination())),
+        Effect.andThen(Effect.never)
+      )
+  }
+
+  protected prepareRun(): void {
+    const inspected = this.inspector !== undefined
+    const receive = receiveProcessMailbox(this.mailbox)
+    const poll = Effect.sync(() => pollCompactMailbox(this.mailbox))
+    this.processContext = {
+      ...this.processScope,
+      receive: inspected
+        ? Effect.map(receive, (message) => messageEvent(this.inFlightMessage = message))
+        : Effect.map(receive, messageEvent),
+      poll: inspected
+        ? Effect.map(poll, (message) => {
+          if (Option.isSome(message)) this.inFlightMessage = message.value
+          return Option.map(message, messageEvent)
+        })
+        : Effect.map(poll, Option.map(messageEvent)),
+      state: Effect.sync(() => this.current.snapshot.state),
+      setState: (state: unknown) => this.serialized(Effect.suspend(() => this.changeState(state))),
+      updateState: (f) =>
+        this.serialized(Effect.suspend(() => {
+          const observed = this.current
+          if (observed.terminalizing || observed.snapshot.status !== "active") return Effect.void
+          return Effect.flatMap(f(observed.snapshot.state), (state) => this.changeState(state))
+        }))
+    }
+  }
+
+  /** Changes of state wait for an update in progress, as one change at a time. */
+  private serialized<A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, E, R> {
+    return (this.updates ??= Semaphore.makeUnsafe(1)).withPermits(1)(effect)
+  }
+
+  /** Commits a state, reported as a change of state of logic that is not a machine. */
+  private changeState(state: unknown): Effect.Effect<void> {
+    const before = this.current
+    const published = this.commitActiveState(state)
+    const inspector = this.inspector
+    if (
+      inspector !== undefined && this.current !== before && this.logic.inspection?.kind !== "Machine"
+    ) {
+      const message = this.inFlightMessage
+      inspector.publishUnsafe({
+        _tag: "StateChanged",
+        subject: this.inspectionSubject!,
+        before: before.snapshot.state,
+        after: state,
+        causedByDeliveryId: message !== undefined && isAcknowledgedMessage(message)
+          ? message.inspection?.deliveryId
+          : undefined
+      })
+    }
+    return published ?? Effect.void
+  }
+
+  protected run(): Effect.Effect<void, never, any> {
+    return Effect.suspend(() => {
+      if (this.lifecycle !== "Active") return this.finishRequestedTermination()
+      this.runState = "Draining"
+      const program = Effect.uninterruptibleMask((restore) =>
+        restore(Effect.suspend(() => this.logic.run(this.processContext!))).pipe(
+          Effect.exit,
+          Effect.flatMap((exit) => {
+            this.requestTerminationSync(
+              Exit.isFailure(exit) ? { _tag: "Failure", cause: exit.cause } : { _tag: "Done", output: exit.value }
+            )
+            return this.finishRequestedTermination()
+          })
+        )
+      )
+      // The program starts in the caller's turn and runs until it first
+      // suspends, so a process started while an event is processed begins its
+      // work before that event's sender continues.
+      const fork = this.options.detached === true
+        ? Effect.forkDetach(program, { startImmediately: true })
+        : Effect.forkChild(program, { startImmediately: true })
+      return Effect.flatMap(fork, (fiber) =>
+        Effect.sync(() => {
+          if (fiber.pollUnsafe() === undefined) this.worker = fiber
+        }))
+    })
+  }
+}
+
 class CompiledProcessContextImpl implements CompiledProcessContext<unknown, unknown> {
   executionState: unknown
 
   constructor(
     readonly scope: ProcessInitialContext<unknown>,
     readonly ownedChildren: OwnedChildRuntime,
-    private readonly process: CompiledProcess
+    private readonly process: LocalProcess
   ) {}
 
   poll(): Option.Option<unknown> {
@@ -1319,12 +1493,14 @@ export const startCompactCompiledInternal: StartProcess = Effect.fnUntraced(func
 ) {
   const sessionId = options.sessionId ?? (yield* options.runtime.nextSessionId)
   const services = yield* Effect.context<any>()
-  const execution = logic.execution as CompiledProcessExecution<any, any, any, any, any, any>
-  const process = new CompiledProcess(logic, options, services, sessionId)
+  const execution = logic.execution?._tag === "Compiled" ? logic.execution : undefined
+  const process = logic.execution?._tag === "Compiled"
+    ? new MachineProcess(logic, options, services, sessionId)
+    : new LogicProcess(logic, options, services, sessionId)
   // A compiled initializer is synchronous by construction. Only startup
   // callbacks that themselves return Effects need the generic initialization
   // program; the compiled drain is still provided the complete service context.
-  const initialize = execution.initialSync !== undefined &&
+  const initialize = execution?.initialSync !== undefined &&
       options.onReady === undefined && options.onSnapshot === undefined
     ? process.initializeCompiledSync()
     : process.initialize()
@@ -1345,7 +1521,7 @@ export const startCompactCompiledInternal: StartProcess = Effect.fnUntraced(func
 
 /** Preserves synchronous startup for owned compiled children. */
 export const startCompiledSync: ProcessRuntime["startCompiledSync"] = (logic, options, services, sessionId) =>
-  new CompiledProcess(logic, options, services, sessionId).initializeCompiledSync()
+  new MachineProcess(logic, options, services, sessionId).initializeCompiledSync()
 
 type CompiledTermination =
   | { readonly _tag: "Stopped" }
