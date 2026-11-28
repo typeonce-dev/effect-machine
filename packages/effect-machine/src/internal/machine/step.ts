@@ -877,7 +877,10 @@ const build = <O extends Ownership>(
             ?.status
           if (status === "Ended") continue
           const work = describe(next.planning, invocation, run)
-          ;(added ??= []).push(work)
+          // A literal holds one entry where a push onto an empty array
+          // reserves seventeen, and the running work outlives this step.
+          if (added === undefined) added = [work]
+          else added.push(work)
           if (status !== "Running") (start ??= []).push(work)
         }
       }
