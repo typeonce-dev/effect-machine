@@ -361,6 +361,16 @@ interface Paths {
 
 const noPaths: Paths = { exited: empty, entered: empty }
 
+/** The paths of an initial step, sorted when first read. */
+class InitialPaths implements Paths {
+  #entered: ReadonlyArray<string> | undefined
+  readonly exited: ReadonlyArray<string> = empty
+  constructor(private readonly machine: Machine.Any, private readonly paths: () => ReadonlyArray<string>) {}
+  get entered(): ReadonlyArray<string> {
+    return this.#entered ??= Planner.sortEntryPaths(this.machine, this.paths())
+  }
+}
+
 const pathsOf = (microsteps: ReadonlyArray<InvocationChanges.Microstep>): Paths => {
   const changes = InvocationChanges.fromMicrosteps(microsteps)
   return changes === undefined
@@ -990,17 +1000,20 @@ const build = <O extends Ownership>(
       microsteps: planned.microsteps,
       emitted: planned.emittedEvents,
       commands: commandsOf(planned.commands, empty).commands,
-      paths: {
-        exited: empty,
-        entered: Planner.sortEntryPaths(machine, Configuration.getInitialEntryPaths(machine, configuration))
-      }
+      paths: new InitialPaths(machine, () => Configuration.getInitialEntryPaths(machine, configuration))
     }
     const next = initial(planning, configuration, planned.state)
     if (planned.done) {
       return Exit.succeed(ended(next, empty, Exit.succeed(planned.output), published))
     }
     return Exit.succeed(
-      enter(next, InvocationResolution.initialEntries(machine, configuration), empty, empty, published)
+      enter(
+        next,
+        invoking.size === 0 ? empty : InvocationResolution.initialEntries(machine, configuration),
+        empty,
+        empty,
+        published
+      )
     )
   }
 
@@ -1021,14 +1034,20 @@ const build = <O extends Ownership>(
       microsteps: empty,
       emitted: empty,
       commands: empty,
-      paths: { exited: empty, entered: Planner.sortEntryPaths(machine, planned.initialEntryPaths) }
+      paths: new InitialPaths(machine, () => planned.initialEntryPaths)
     }
     const next = reached(planning, planned.configuration, configuration, planned.state, 0)
     if (planned.done) {
       return Exit.succeed(ended(next, empty, Exit.succeed(planned.output), published))
     }
     return Exit.succeed(
-      enter(next, InvocationResolution.initialEntries(machine, configuration), empty, empty, published)
+      enter(
+        next,
+        invoking.size === 0 ? empty : InvocationResolution.initialEntries(machine, configuration),
+        empty,
+        empty,
+        published
+      )
     )
   }
 

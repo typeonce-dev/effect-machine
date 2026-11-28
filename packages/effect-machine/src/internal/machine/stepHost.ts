@@ -562,7 +562,7 @@ export const makeExecution = (
       if (step.commands.length > 0 || step.emitted.length > 0) {
         throw new Error("Machine started by its execution plan planned startup commands or emissions")
       }
-      if (entry._tag === "Initial") scope.inspectInitial(step.entered, step.microsteps)
+      if (entry._tag === "Initial" && isInspected(scope)) scope.inspectInitial(step.entered, step.microsteps)
       return initialOf(step, host(step))
     }
     : undefined
@@ -575,7 +575,7 @@ export const makeExecution = (
         const started = first(scope)
         if (Exit.isFailure(started)) return Effect.failCause(started.cause)
         const step = started.value
-        if (entry._tag === "Initial") scope.inspectInitial(step.entered, step.microsteps)
+        if (entry._tag === "Initial" && isInspected(scope)) scope.inspectInitial(step.entered, step.microsteps)
         const result = Effect.succeed(initialOf(step, host(step)))
         const commands = step.commands.length === 0 ? undefined : runCommands(step.commands, scope)
         const emitted = step.emitted.length === 0
