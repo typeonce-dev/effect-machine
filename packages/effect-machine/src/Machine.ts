@@ -7773,8 +7773,9 @@ export declare namespace MachineStep {
     /**
      * The event this step planned, as transitions received it: a decoded
      * public event, the lifecycle event of work, or the initial event of `start`
-     * and `resume`. `undefined` when the step planned no event, as for `stop` or
-     * a result that is ignored.
+     * and `resume`. It is set also when planning it failed the machine.
+     * `undefined` when the step planned no event, as for `stop`, a result that
+     * is ignored, or a result that fails the machine without a transition.
      */
     readonly event: Machine.LifecycleEvent<Machine.Events<M>> | undefined
 

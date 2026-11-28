@@ -1,5 +1,5 @@
 import { assert, describe, it } from "@effect/vitest"
-import { Data, Effect, Exit, Option, Schema, Stream } from "effect"
+import { Data, type Duration, Effect, Exit, Option, Schema, Stream } from "effect"
 import { Machine } from "../../src/index.js"
 import { MachineTest } from "../../src/testing/index.js"
 
@@ -282,6 +282,42 @@ describe("MachineTest.check outcomes", () => {
       assert.strictEqual(replayed.phase, "event")
     }))
 
+  it.effect("reports a result whose transition fails to plan as a planning failure", () =>
+    Effect.gen(function*() {
+      const machine = Machine.make({
+        root: Machine.state({ states: { Waiting: {}, Ready: { fields: { at: Schema.Number } } } }),
+        events: Machine.events({}),
+        timers: { wait: "1 second" }
+      }).handle({
+        initial: { target: "Waiting" },
+        states: {
+          Waiting: {
+            invoke: {
+              src: "wait",
+              onDone: {
+                target: "Ready",
+                data: () => {
+                  throw new Error("no clock")
+                }
+              }
+            }
+          }
+        }
+      })
+
+      const report = yield* MachineTest.check(machine)
+
+      assert.deepStrictEqual(laws(report), ["planning.failed"])
+      const finding = report.findings[0]!
+      assert.isTrue(finding.law === "planning.failed")
+      if (finding.law !== "planning.failed") return
+      assert.include(finding.message, "no clock")
+      assert.deepStrictEqual(
+        finding.replay.events.map((event) => MachineTest.isWorkOutcome(event) ? event.kind : event),
+        ["Elapsed"]
+      )
+    }))
+
   it.effect("reports outcomes for a name that no state invokes as an Effect", () =>
     Effect.gen(function*() {
       const report = yield* MachineTest.check(LoadMachine, {
@@ -323,6 +359,86 @@ describe("MachineTest.check outcomes", () => {
 
       assert.deepStrictEqual(report.limits, ["streams", "logic", "children"])
       assert.strictEqual(report.exploration, "bounded")
+    }))
+
+  it.effect("never evaluates a source or an input mapper of the work it explores", () =>
+    Effect.gen(function*() {
+      const evaluated = (name: string): never => {
+        throw new Error(`MachineTest evaluated ${name}`)
+      }
+      const counter = Machine.logic({ initial: () => Effect.succeed(0), run: () => Effect.never })
+      const worker = Machine.make({
+        root: Machine.state({ states: { Working: {} } }),
+        input: Schema.String,
+        events: Machine.events({})
+      }).handle({ initial: { target: "Working" } })
+      const machine = Machine.make({
+        root: Machine.state({ states: { Idle: {}, Busy: {}, Loaded: {}, Waited: {} } }),
+        events: Machine.events({ Go: {}, Reset: {} }),
+        effects: { load: (_: string): Effect.Effect<string> => evaluated("the load source") },
+        timers: { wait: (_: number): Duration.Duration => evaluated("the wait duration") },
+        streams: { feed: (_: number): Stream.Stream<number> => evaluated("the feed source") },
+        logic: { count: (_: number): typeof counter => evaluated("the count logic") },
+        children: { worker: Machine.child("worker", worker) }
+      }).handle({
+        initial: { target: "Idle" },
+        states: {
+          Idle: { on: { Go: { target: "Busy" } } },
+          Busy: {
+            invoke: [
+              { src: "load", input: () => evaluated("the load input"), onDone: { target: "Loaded" } },
+              { src: "wait", input: () => evaluated("the wait input"), onDone: { target: "Waited" } },
+              {
+                src: "feed",
+                input: () => evaluated("the feed input"),
+                onElement: { stay: true },
+                onDone: { stay: true }
+              },
+              {
+                src: "count",
+                id: "count",
+                address: Machine.childAddress("count"),
+                input: () => evaluated("the count input")
+              },
+              { src: "worker", input: () => evaluated("the worker input") }
+            ]
+          },
+          Loaded: { on: { Reset: { target: "Idle" } } },
+          Waited: { on: { Reset: { target: "Idle" } } }
+        }
+      })
+
+      const trace = yield* MachineTest.run(machine, { events: [{ _tag: "Go" }] })
+      assert.deepStrictEqual(trace.work.map((work) => work.kind), ["Effect", "Timer", "Stream", "Logic", "Child"])
+
+      const report = yield* MachineTest.check(machine, { outcomes: { load: { done: ["text"] } } })
+      assert.deepStrictEqual(laws(report), [])
+      // Idle, Busy, and the states behind the supplied result and the elapsed timer.
+      assert.strictEqual(report.stats.states, 4)
+      assert.deepStrictEqual(report.limits, ["customOutcomes", "streams", "logic", "children"])
+    }))
+
+  it.effect("tells a state apart from the same state once a transition stopped its logic", () =>
+    Effect.gen(function*() {
+      const Counter = Machine.childAddress<number>("counter")
+      const machine = Machine.make({
+        root: Machine.state({ states: { Counting: {} } }),
+        events: Machine.events({ Stop: {} }),
+        logic: { counter: Machine.logic({ initial: () => Effect.succeed(0), run: () => Effect.never }) }
+      }).handle({
+        initial: { target: "Counting" },
+        states: {
+          Counting: {
+            invoke: { src: "counter", id: "counter", address: Counter },
+            on: { Stop: { stay: true, commands: (_, enqueue) => enqueue.stop(Counter) } }
+          }
+        }
+      })
+
+      const report = yield* MachineTest.check(machine)
+      // Counting with the logic running, and after the transition stopped it.
+      assert.strictEqual(report.stats.states, 2)
+      assert.deepStrictEqual(laws(report), [])
     }))
 
   it.effect("checks that planning a result is deterministic", () =>

@@ -1697,8 +1697,8 @@ export type RunError<M extends AnyMachine> =
  * Services required while planning a complete scenario.
  *
  * Scenario execution delegates exclusively to the service-free `planInitial`
- * and `plan` APIs, so it requires no services. Invoke services belong to later
- * execution, not synchronous planning. A machine whose services are erased to
+ * and `toStep` APIs, so it requires no services. Invoke services belong to
+ * later execution, not synchronous planning. A machine whose services are erased to
  * `any` keeps `any`.
  *
  * @category models
@@ -1707,18 +1707,20 @@ export type RunError<M extends AnyMachine> =
 export type RunServices<M extends AnyMachine> = IsAny<Machine.Machine.Services<M>> extends true ? any : never
 
 /**
- * Executes a generated scenario exclusively through `planInitial` and `plan`.
+ * Executes a generated scenario exclusively through `planInitial` and the
+ * step of `Machine.toStep`, whose plans are the ones `plan` returns.
  *
  * Commands are retained in each plan but are never executed. Every event
  * is planned, including events that occur after a terminal configuration.
  * Typed planning errors retain the scenario and successfully completed prefix
  * in a `RunFailure`.
  *
- * Work is never run, but the trace follows which work runs, in `work`. A
- * {@link WorkOutcome} in the scenario is planned for the work it names while
- * that work runs, and ignored once it no longer does. An outcome that fails
- * the machine is a `RunFailure` whose cause is the typed failure, so the replay
- * of a {@link check} finding reproduces it.
+ * Work is never run, but the trace follows which work runs, in `work`, as the
+ * step decides it for every host: work also ends when a transition stops the
+ * child that it runs. A {@link WorkOutcome} in the scenario is planned for the
+ * work it names while that work runs, and ignored once it no longer does. An
+ * outcome that fails the machine is a `RunFailure` whose cause is the typed
+ * failure, so the replay of a {@link check} finding reproduces it.
  *
  * **Example** (Running a pure trace)
  *

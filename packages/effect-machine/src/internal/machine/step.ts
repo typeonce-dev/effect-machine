@@ -38,7 +38,7 @@ import {
   toStartupFailure
 } from "./errors.js"
 import * as InvocationChanges from "./invocationChanges.js"
-import type * as InvocationEvent from "./invocationEvent.js"
+import * as InvocationEvent from "./invocationEvent.js"
 import * as InvocationOutcome from "./invocationOutcome.js"
 import * as InvocationResolution from "./invocationResolution.js"
 import * as LogicScope from "./logicScope.js"
@@ -531,7 +531,9 @@ export const make = (machine: Machine.Any, options: Options): MachineStep => {
         event as Machine.EventOf<any>
       )
     } catch (error) {
-      return ended(endedFrom(state), latestFirst(running), exitOfThrow(error))
+      // The step planned the event, as transitions receive it, and its planning failed.
+      const planning = InvocationEvent.isInvocationEvent(event) ? InvocationEvent.toLifecycleEvent(event) : event
+      return ended(endedFrom(state), latestFirst(running), exitOfThrow(error), { ...nothing, event: planning })
     }
     if (planned.microsteps.length === 0) {
       const kept = running === state.running

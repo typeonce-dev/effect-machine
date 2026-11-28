@@ -18,7 +18,6 @@ import type {
   CheckOptions,
   CheckReplay,
   CheckReport,
-  EventPlan,
   ExplorationEdge,
   ExplorationNode,
   ExplorationStateContext,
@@ -30,11 +29,14 @@ import type {
   TraceStep,
   WorkOutcome
 } from "../../../testing/MachineTest.js"
+import * as CapturedInvocation from "../../machine/capturedInvocation.js"
+import * as Configuration from "../../machine/configuration.js"
 import * as Protocol from "../../machine/protocol.js"
 import type { EnsureExecutable } from "../../machine/readiness.js"
 import { type ExploredMachineFailure, exploreWith } from "./exploration.js"
 import { formatValue } from "./format.js"
 import { InvariantError } from "./invariant.js"
+import { planEntry } from "./trace.js"
 import { VerificationError, verify } from "./verification.js"
 import * as Work from "./work.js"
 
@@ -216,6 +218,17 @@ interface SuppliedOutcomes {
   readonly failure: ReadonlyArray<unknown>
 }
 
+/** The names of the Effect sources that some state of `machine` invokes. */
+const effectSources = (machine: AnyMachine): ReadonlySet<string> => {
+  const names = new Set<string>()
+  for (const path of machine.stateNodes.byPath.keys()) {
+    for (const definition of CapturedInvocation.list(Configuration.getStateConfigByPath(machine, path)?.invoke)) {
+      if ("effect" in definition && definition.sourceName !== undefined) names.add(definition.sourceName)
+    }
+  }
+  return names
+}
+
 /**
  * Validates the caller's outcomes against the Effect sources the machine
  * invokes. A name that matches none is a finding: its values would never be
@@ -237,7 +250,7 @@ const suppliedOutcomes = (
     })
     return supplied
   }
-  const invoked = Work.effectSources(machine)
+  const invoked = effectSources(machine)
   for (const [source, entry] of Object.entries(outcomes)) {
     if (entry === undefined) continue
     if (!invoked.has(source)) {
@@ -527,17 +540,11 @@ export const check = <M extends AnyMachine>(
         }
       }
 
-      const message = Work.isWorkOutcome(step.event) ? Work.message(source.trace.work, step.event) : step.event
-      const again = yield* Effect.exit(
-        ((Machine.plan as any)(machine, step.before, message)) as Effect.Effect<
-          EventPlan<M>,
-          unknown,
-          RunServices<M>
-        >
-      )
+      // The same entry after the same trace, through the same step.
+      const again = yield* Effect.exit(planEntry(machine, source.trace, step.event))
       if (
-        Exit.isSuccess(again) &&
-        planEvidence(again.value, again.value.next) !== planEvidence(step.plan, step.after) &&
+        Exit.isSuccess(again) && again.value._tag === "Planned" &&
+        planEvidence(again.value.plan, again.value.plan.next) !== planEvidence(step.plan, step.after) &&
         !seen.has(location)
       ) {
         seen.add(location)
