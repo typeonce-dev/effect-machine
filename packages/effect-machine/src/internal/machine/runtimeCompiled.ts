@@ -13,7 +13,7 @@ import * as Stream from "effect/Stream"
 import type * as Take from "effect/Take"
 import type { Inspection } from "../../LocalMachine.js"
 import { type ChildSelector } from "./childRegistry.js"
-import { type MachineSchemaDecodeError, StoppedError } from "./errors.js"
+import { MachineSchemaDecodeError, StoppedError } from "./errors.js"
 import * as InspectionRuntime from "./inspectionRuntime.js"
 import { classifyOutcome } from "./observation.js"
 import {
@@ -56,6 +56,7 @@ import {
   type ProcessRunContext,
   type ProcessRuntime,
   publishInspectedSent,
+  RefusedEvent,
   type RuntimeSnapshot,
   sendEndpoint,
   sendMachineTarget,
@@ -202,7 +203,9 @@ class CompiledProcess implements MachineRef<any, any, any, any> {
       if (options.programInvocation !== undefined) this.programInvocation = { ...options.programInvocation, sessionId }
     }
     this.externalEmissions = options.emissions
-    this.send = (event) => this.sendPublic(event)
+    this.send = inspector === undefined
+      ? (event) => this.offerMessage(event, "Sent")
+      : (event) => this.sendPublic(event)
     this.address = new CompiledAddress(this, Effect.suspend(() => this.stopFromProcess()))
   }
 
@@ -653,12 +656,15 @@ class CompiledProcess implements MachineRef<any, any, any, any> {
           return Effect.fail(new StoppedError())
         }
         let message = offered
-        if (decoding === "Sent") {
-          const decoded = decodeSent(this.execution.decodeEvent, offered)
-          if (decoded._tag === "Rejected") return Effect.fail(decoded.error)
-          message = decoded.event
-        } else if (decoding === "Delivered") {
-          message = decodeDelivered(this.execution.decodeEvent, offered)
+        const decode = this.execution.decodeEvent
+        if (decoding !== "Decoded" && decode !== undefined) {
+          // Decoded inline, so a send allocates nothing more than before.
+          try {
+            message = decode(offered)
+          } catch (error) {
+            if (decoding === "Sent" && error instanceof MachineSchemaDecodeError) return Effect.fail(error)
+            message = new RefusedEvent(error)
+          }
         }
         const inspector = this.inspector
         const subject = this.inspectionSubject
