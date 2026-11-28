@@ -251,7 +251,8 @@ export const checkArchitecture = ({
     "src/internal/machine/invocationChanges.ts",
     "src/internal/machine/invocationGeneration.ts",
     "src/internal/machine/invocationOutcome.ts",
-    "src/internal/machine/invocationResolution.ts"
+    "src/internal/machine/invocationResolution.ts",
+    "src/internal/machine/step.ts"
   ])
   const localRuntimeModules = new Set([
     ...runtimeModules,

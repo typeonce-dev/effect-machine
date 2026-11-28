@@ -1,172 +1,48 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Duration, Effect, Exit, Schema, Stream } from "effect"
 import { Machine } from "../../../src/index.js"
+import * as Configuration from "../../../src/internal/machine/configuration.js"
 import * as InvocationChanges from "../../../src/internal/machine/invocationChanges.js"
-import * as InvocationOutcome from "../../../src/internal/machine/invocationOutcome.js"
-import type * as InvocationResolution from "../../../src/internal/machine/invocationResolution.js"
-import { decide, PlannedHost, type Started } from "./support/plannedHost.js"
+import * as InvocationResolution from "../../../src/internal/machine/invocationResolution.js"
+import * as Planner from "../../../src/internal/machine/planner.js"
 
-const only = (started: ReadonlyArray<Started>): Started => {
-  assert.strictEqual(started.length, 1)
-  return started[0]!
+const refused = new Error("This host owns no children")
+
+/** Capabilities of a host that owns no children. */
+const capabilities = {
+  self: { id: "resolution", sessionId: "resolution:1", send: () => Effect.void },
+  parent: undefined,
+  children: {
+    spawn: () => Effect.die(refused),
+    sendTo: () => Effect.die(refused),
+    stop: () => Effect.die(refused)
+  }
+} satisfies InvocationResolution.InvocationCapabilities
+
+/**
+ * Plans one event from the initial state, and resolves the work of the states
+ * it entered as a host does, one path at a time, without constructing a source.
+ */
+const enter = (machine: Machine.Machine.Any, event: Machine.Machine.EventOf<any>) => {
+  const initial = Planner.planInitialSync(machine)
+  const planned = Planner.planConfiguration(
+    machine,
+    Configuration.normalizeConfigurationSync(machine, initial.state),
+    event
+  )
+  const changes = InvocationChanges.fromMicrosteps(planned.microsteps)
+  const groups = Array.from(changes?.entered ?? []).flatMap(([path, entered]) =>
+    InvocationResolution.resolve(machine, planned.next, [path], entered, capabilities)
+  )
+  return {
+    configuration: planned.next,
+    groups,
+    invocations: groups.flatMap(({ invocations }) => invocations),
+    value: (path: string) => planned.next.values.get(path)
+  }
 }
 
-/** Runs the effect of one started invocation. */
-const runEffect = (started: Started): Effect.Effect<InvocationOutcome.Outcome> =>
-  Effect.suspend(() => {
-    if (started.invocation._tag !== "Effect") return Effect.die(new Error(`Unexpected ${started.invocation._tag}`))
-    return (started.invocation.effect() as Effect.Effect<unknown, unknown>).pipe(
-      Effect.exit,
-      Effect.map(InvocationOutcome.fromExit)
-    )
-  })
-
-const Events = Machine.events({ Load: { id: Schema.String }, Cancel: {}, Wait: {} })
-
-const loader = Machine.make({
-  id: "loader",
-  root: Machine.state({
-    states: {
-      Idle: {},
-      Loading: { fields: { id: Schema.String } },
-      Waiting: {},
-      Loaded: { fields: { result: Schema.String } },
-      Failed: { fields: { reason: Schema.String } },
-      TimedOut: {}
-    }
-  }),
-  events: Events,
-  effects: {
-    load: (id: string) => id === "missing" ? Effect.fail({ reason: "not found" }) : Effect.succeed(`document ${id}`)
-  },
-  timers: { wait: (seconds: number) => Duration.seconds(seconds) }
-}).handle({
-  initial: { target: "Idle" },
-  states: {
-    Idle: {
-      on: {
-        Load: { target: "Loading", data: ({ event }) => ({ id: event.id }) },
-        Wait: { target: "Waiting" }
-      }
-    },
-    Loading: {
-      invoke: {
-        src: "load",
-        input: ({ state }) => state.id,
-        onDone: { target: "Loaded", data: ({ output }) => ({ result: output }) },
-        onFailure: { target: "Failed", data: ({ error }) => ({ reason: error.reason }) }
-      },
-      on: { Cancel: { target: "Idle" } }
-    },
-    Waiting: { invoke: { src: "wait", input: () => 90, onDone: { target: "TimedOut" } } },
-    Loaded: {},
-    Failed: {},
-    TimedOut: {}
-  }
-})
-
-describe("a host that is not the local runtime", () => {
-  it.effect("runs an effect and routes its output through onDone", () =>
-    Effect.gen(function*() {
-      const host = new PlannedHost(loader)
-      assert.deepStrictEqual(host.leaves, ["Idle"])
-      assert.deepStrictEqual(host.started, [])
-
-      const loading = only(host.send(Events.Load({ id: "a" })))
-      assert.deepStrictEqual(host.leaves, ["Loading"])
-      if (loading.invocation._tag !== "Effect") throw new Error(`Unexpected ${loading.invocation._tag}`)
-      assert.strictEqual(loading.invocation.path, "Loading")
-      assert.strictEqual(loading.invocation.id, "load")
-      assert.strictEqual(loading.invocation.sourceName, "load")
-      assert.deepStrictEqual(loading.invocation.channels, {
-        done: true,
-        failure: true,
-        element: false,
-        snapshot: false
-      })
-
-      const outcome = yield* runEffect(loading)
-      assert.deepStrictEqual(host.perform(decide(loading, outcome)), [])
-      assert.deepStrictEqual(host.leaves, ["Loaded"])
-      assert.deepStrictEqual(host.value("Loaded"), { _tag: "Loaded", result: "document a" })
-      assert.isFalse(loading.generation.current)
-    }))
-
-  it("reads a timer's duration as data and completes it without sleeping", () => {
-    const host = new PlannedHost(loader)
-    const waiting = only(host.send(Events.Wait()))
-    if (waiting.invocation._tag !== "Timer") throw new Error(`Unexpected ${waiting.invocation._tag}`)
-    assert.deepStrictEqual(waiting.invocation.duration(), Exit.succeed(Duration.seconds(90)))
-    host.perform(decide(waiting, { _tag: "Done", output: undefined }))
-    assert.deepStrictEqual(host.leaves, ["TimedOut"])
-  })
-
-  it("ignores the outcome of an exited state", () => {
-    const host = new PlannedHost(loader)
-    const loading = only(host.send(Events.Load({ id: "a" })))
-    // Decided while its state was active, then queued behind the exit.
-    const queued = decide(loading, { _tag: "Done", output: "document a" })
-    assert.strictEqual(queued._tag, "Deliver")
-
-    host.send(Events.Cancel())
-    assert.deepStrictEqual(host.leaves, ["Idle"])
-    assert.isFalse(loading.generation.current)
-    assert.deepStrictEqual(host.perform(queued), [])
-    assert.deepStrictEqual(host.leaves, ["Idle"])
-
-    // Decided after the exit.
-    assert.deepStrictEqual(decide(loading, { _tag: "Done", output: "document a" }), { _tag: "Ignore" })
-  })
-
-  it.effect("ignores a stale outcome after the same path and id are entered again", () =>
-    Effect.gen(function*() {
-      const host = new PlannedHost(loader)
-      const first = only(host.send(Events.Load({ id: "first" })))
-      const queued = decide(first, yield* runEffect(first))
-      host.send(Events.Cancel())
-      const second = only(host.send(Events.Load({ id: "second" })))
-      assert.strictEqual(second.invocation.path, first.invocation.path)
-      assert.strictEqual(second.invocation.id, first.invocation.id)
-
-      host.perform(queued)
-      assert.deepStrictEqual(host.leaves, ["Loading"])
-      assert.isTrue(second.generation.current)
-
-      host.perform(decide(second, yield* runEffect(second)))
-      assert.deepStrictEqual(host.value("Loaded"), { _tag: "Loaded", result: "document second" })
-    }))
-
-  it("starts the invocations of one state in declaration order within one generation", () => {
-    const States = Machine.state({ states: { Working: {}, Done: {} } })
-    const machine = Machine.make({
-      root: States,
-      events: Machine.events({}),
-      effects: { zeta: Effect.void, alpha: Effect.void }
-    }).handle({
-      initial: { target: "Working" },
-      states: {
-        Working: {
-          invoke: [
-            { src: "zeta", onDone: { stay: true } },
-            { src: "alpha", onDone: { target: "Done" } }
-          ]
-        },
-        Done: {}
-      }
-    })
-    const host = new PlannedHost(machine)
-    const [zeta, alpha] = host.started
-    assert.deepStrictEqual(host.started.map(({ invocation }) => invocation.id), ["zeta", "alpha"])
-    assert.strictEqual(zeta!.generation, alpha!.generation)
-
-    // The generation outlives the first outcome and ends with the state.
-    host.perform(decide(zeta!, { _tag: "Done", output: undefined }))
-    assert.isTrue(alpha!.generation.current)
-    host.perform(decide(alpha!, { _tag: "Done", output: undefined }))
-    assert.deepStrictEqual(host.leaves, ["Done"])
-    assert.isFalse(alpha!.generation.current)
-  })
-
+describe("invocation resolution of a step", () => {
   it("groups a parallel step by entered state in entry order", () => {
     const States = Machine.state({
       states: {
@@ -205,29 +81,27 @@ describe("a host that is not the local runtime", () => {
         }
       }
     })
-    const host = new PlannedHost(machine)
-    const started = host.send(ParallelEvents.Go())
-    // Shallower states start first, then document order.
-    assert.deepStrictEqual(started.map(({ invocation }) => [invocation.path, invocation.id]), [
-      ["Active.right", "regionWork"],
-      ["Active.left.Busy", "leftWork"],
-      ["Active.right.Busy", "rightWork"]
+    const entered = enter(machine, ParallelEvents.Go())
+    // Shallower states start first, then document order, one group per state.
+    assert.deepStrictEqual(entered.groups.map(({ invocations, path }) => [path, invocations.map(({ id }) => id)]), [
+      ["Active.right", ["regionWork"]],
+      ["Active.left.Busy", ["leftWork"]],
+      ["Active.right.Busy", ["rightWork"]]
     ])
-    assert.strictEqual(new Set(started.map(({ generation }) => generation)).size, 3)
 
     // Order, filtering, and grouping do not depend on the paths a host passes.
-    const groups = host.resolve(
+    const groups = InvocationResolution.resolve(
+      machine,
+      entered.configuration,
       ["Idle", "Active.right.Busy", "Active.left.Busy", "Active.right.Busy", "Active.left", "Active.right"],
-      ParallelEvents.Go()
+      ParallelEvents.Go(),
+      capabilities
     )
     assert.deepStrictEqual(groups.map(({ invocations, path }) => [path, invocations.map(({ id }) => id)]), [
       ["Active.right", ["regionWork"]],
       ["Active.left.Busy", ["leftWork"]],
       ["Active.right.Busy", ["rightWork"]]
     ])
-
-    host.send(ParallelEvents.Stop())
-    assert.deepStrictEqual(started.map(({ generation }) => generation.current), [false, false, false])
   })
 })
 
@@ -339,23 +213,22 @@ describe("resolved invocations", () => {
         }
       }
     })
-    const host = new PlannedHost(machine)
-    return { host, calls, contexts, started: host.send(SourceEvents.Go({ value: 5 })) }
+    return { calls, contexts, ...enter(machine, SourceEvents.Go({ value: 5 })) }
   }
 
   const find = <Tag extends InvocationResolution.ResolvedInvocation["_tag"]>(
-    started: ReadonlyArray<Started>,
+    started: ReadonlyArray<InvocationResolution.ResolvedInvocation>,
     tag: Tag,
     id: string
   ): Extract<InvocationResolution.ResolvedInvocation, { readonly _tag: Tag }> => {
-    const found = started.find(({ invocation }) => invocation.id === id)?.invocation
+    const found = started.find((invocation) => invocation.id === id)
     if (found?._tag !== tag) throw new Error(`Expected ${tag} "${id}", received ${String(found?._tag)}`)
     return found as Extract<InvocationResolution.ResolvedInvocation, { readonly _tag: Tag }>
   }
 
   it("describes every source kind in declaration order without constructing a source", () => {
-    const { calls, started } = makeHost()
-    assert.deepStrictEqual(started.map(({ invocation }) => [invocation._tag, invocation.id]), [
+    const { calls, invocations: started } = makeHost()
+    assert.deepStrictEqual(started.map((invocation) => [invocation._tag, invocation.id]), [
       ["Effect", "effect"],
       ["Stream", "stream"],
       ["Timer", "fixed"],
@@ -367,7 +240,7 @@ describe("resolved invocations", () => {
       ["Child", "plain-child"]
     ])
     assert.deepStrictEqual(calls, [])
-    assert.deepStrictEqual(started.map(({ invocation }) => invocation.channels.element), [
+    assert.deepStrictEqual(started.map((invocation) => invocation.channels.element), [
       false,
       true,
       ...Array.from({ length: 7 }, () => false)
@@ -378,18 +251,18 @@ describe("resolved invocations", () => {
 
   it.effect("constructs sources with the entry context and the host's capabilities", () =>
     Effect.gen(function*() {
-      const { calls, contexts, host, started } = makeHost()
+      const { calls, contexts, invocations: started, value } = makeHost()
       const effect = find(started, "Effect", "effect").effect()
       assert.deepStrictEqual(calls, ["effect input", "effect source"])
       assert.strictEqual(yield* (effect as Effect.Effect<unknown>), 5)
       const context = contexts[0]!
-      assert.strictEqual(context.self, host.self)
+      assert.strictEqual(context.self, capabilities.self)
       assert.strictEqual(context.parent, undefined)
-      assert.strictEqual(context.children, host.children)
-      assert.strictEqual(context.state, host.value("Busy"))
-      assert.strictEqual(context.root, host.value(""))
-      assert.strictEqual(context.containingState, host.value(""))
-      assert.deepStrictEqual(context.ancestors, { "": host.value("") })
+      assert.strictEqual(context.children, capabilities.children)
+      assert.strictEqual(context.state, value("Busy"))
+      assert.strictEqual(context.root, value(""))
+      assert.strictEqual(context.containingState, value(""))
+      assert.deepStrictEqual(context.ancestors, { "": value("") })
       assert.strictEqual((context.event as { readonly _tag: string })._tag, "Go")
 
       const stream = find(started, "Stream", "stream").stream()
@@ -400,7 +273,7 @@ describe("resolved invocations", () => {
     }))
 
   it("describes a child by its descriptor and declared input", () => {
-    const { started } = makeHost()
+    const { invocations: started } = makeHost()
     const withInput = find(started, "Child", "input-child")
     assert.strictEqual(withInput.child, InputChild)
     assert.strictEqual(withInput.input?.(), 6)
@@ -410,7 +283,7 @@ describe("resolved invocations", () => {
   })
 
   it("separates a throwing timer source from an input that names no duration", () => {
-    const { calls, started } = makeHost()
+    const { calls, invocations: started } = makeHost()
     assert.deepStrictEqual(find(started, "Timer", "fixed").duration(), Exit.succeed(Duration.seconds(2)))
     assert.deepStrictEqual(find(started, "Timer", "mapped").duration(), Exit.succeed(Duration.millis(5)))
     assert.deepStrictEqual(calls, ["timer input", "timer source"])

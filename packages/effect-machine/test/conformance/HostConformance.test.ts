@@ -1,6 +1,6 @@
 import { assert, describe, expect, it } from "@effect/vitest"
 import { Effect } from "effect"
-import { compiledHost, genericHost, plannedHost } from "../internal/machine/support/conformanceHosts.js"
+import { compiledHost, genericHost } from "../internal/machine/support/conformanceHosts.js"
 import { differences } from "./differences.js"
 import { children } from "./scenarios/children.js"
 import { invocations } from "./scenarios/invocations.js"
@@ -10,9 +10,10 @@ import { transitions } from "./scenarios/transitions.js"
 import type { Difference } from "./support/difference.js"
 import { atomHost } from "./support/hosts/atom.js"
 import { clusterHost } from "./support/hosts/cluster.js"
+import { stepHost } from "./support/hosts/step.js"
 import { cellOf, check, checkEntry, renderMatrix } from "./support/suite.js"
 
-const hosts = [genericHost, compiledHost, atomHost, clusterHost, plannedHost]
+const hosts = [genericHost, compiledHost, atomHost, clusterHost, stepHost]
 const scenarios = [...transitions, ...invocations, ...timers, ...restarts, ...children]
 
 describe("conformance of hosts", () => {

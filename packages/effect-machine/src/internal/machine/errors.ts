@@ -74,7 +74,9 @@ export class ChildAlreadyExistsError extends Data.TaggedError("ChildAlreadyExist
  * **Details**
  *
  * `ClusterMachine` raises it when work reads `self.sessionId`, calls
- * `self.send`, or calls an operation of `children`. It is a defect rather than a
+ * `self.send`, or calls an operation of `children`. `Machine.toStep` raises it
+ * when work calls an operation of `children`, and when a transition addresses a
+ * child with `enqueue.sendTo` or `enqueue.stop`. It is a defect rather than a
  * typed failure, because the same work runs correctly on a local machine.
  * `operation` names the refused operation.
  *
