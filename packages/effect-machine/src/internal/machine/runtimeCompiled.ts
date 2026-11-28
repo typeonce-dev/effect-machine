@@ -60,6 +60,7 @@ import {
   type RuntimeSnapshot,
   sendEndpoint,
   sendMachineTarget,
+  sentOf,
   snapshotObserver,
   type StartInternalOptions,
   type StartProcess,
@@ -281,7 +282,7 @@ class CompiledProcess implements MachineRef<any, any, any, any> {
         this.address,
         this.options.runtime,
         this.services,
-        (event) => this.sendAcknowledgedEffect(decodeDelivered(this.execution.decodeEvent, event), event)
+        (event) => this.sendAcknowledgedEffect(decodeDelivered(this.execution.decodeEvent, event), sentOf(event))
       )
     }
     const parent = this.options.parent
@@ -363,7 +364,7 @@ class CompiledProcess implements MachineRef<any, any, any, any> {
           self.address,
           self.options.runtime,
           self.services,
-          (event) => self.sendAcknowledgedEffect(decodeDelivered(self.execution.decodeEvent, event), event)
+          (event) => self.sendAcknowledgedEffect(decodeDelivered(self.execution.decodeEvent, event), sentOf(event))
         )
       }
       const parent = self.options.parent
@@ -594,7 +595,7 @@ class CompiledProcess implements MachineRef<any, any, any, any> {
       return this.offerMessage(event, "Delivered") as Effect.Effect<void, StoppedError>
     }
     return Effect.suspend(() =>
-      this.offerEvent(decodeDelivered(this.execution.decodeEvent, event), source, causedBy, undefined, event)
+      this.offerEvent(decodeDelivered(this.execution.decodeEvent, event), source, causedBy, undefined, sentOf(event))
     )
   }
 

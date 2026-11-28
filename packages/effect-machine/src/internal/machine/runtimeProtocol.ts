@@ -95,6 +95,27 @@ export class RefusedEvent {
 }
 
 /**
+ * What running work reports to the machine that owns it, as a message of the
+ * machine's mailbox, so its step takes the report in the machine's own turn:
+ * `Settle` ends the work with the `Exit` in `value`, `Element` delivers an
+ * element of a stream, and `Report` a snapshot of a child. It is never decoded.
+ * `sent` is the event that inspection reports for it.
+ *
+ * @internal
+ */
+export class WorkMessage {
+  constructor(
+    readonly _tag: "Settle" | "Element" | "Report",
+    readonly work: unknown,
+    readonly value: unknown,
+    readonly sent: unknown
+  ) {}
+}
+
+/** The event that inspection reports for a message: what a report of work stands for, or the event. */
+export const sentOf = (event: unknown): unknown => event instanceof WorkMessage ? event.sent : event
+
+/**
  * Decodes an event that enters a mailbox. An invocation event is the host's
  * own and is not decoded.
  *
@@ -864,6 +885,8 @@ export interface OwnedChildRuntime {
   readonly beginGeneration: (path: string) => InvocationEvent.Generation
   readonly stopAll: () => Effect.Effect<void>
   readonly stopPaths: (paths: ReadonlyArray<string>) => Effect.Effect<void> | undefined
+  /** Stops the child that was spawned with `key`, while its owner holds it. */
+  readonly stopKey: (key: string) => Effect.Effect<void>
 }
 
 export interface ChildRuntime {
@@ -1031,6 +1054,15 @@ class OwnedChildRuntimeImpl extends InvocationGenerations implements OwnedChildR
     })
   }
 
+  stopKey(key: string): Effect.Effect<void> {
+    return Effect.suspend(() => {
+      for (const entry of this.registry.children.values()) {
+        if (entry.ownerActive && entry.ownerKey === key) return this.stopEntry(entry)
+      }
+      return Effect.void
+    })
+  }
+
   stopPaths(paths: ReadonlyArray<string>): Effect.Effect<void> | undefined {
     if (paths.length === 0) return undefined
     this.retireGenerations(paths)
@@ -1117,7 +1149,8 @@ export const childlessRuntime: ChildRuntime = {
     // Unreachable for childless logic; `spawn` reports the defect as a failure.
     beginGeneration: () => ({ current: true }),
     stopAll: () => Effect.void,
-    stopPaths: () => undefined
+    stopPaths: () => undefined,
+    stopKey: () => Effect.void
   }
 }
 
