@@ -1,5 +1,49 @@
 # @typeonce/effect-machine-react
 
+## 0.48.0
+
+### Minor Changes
+
+- 0a4ba8b: The keep-alive request of a `ClusterMachine` is now held for as long as its work runs or its timers wait. It is not replaced periodically, so no crash can fall into the gap of a replacement.
+  
+  `ClusterMachine` needs `effect` 4.1.5 or later for this. Earlier versions answer the keep-alive request of a Cluster entity after about ten minutes, and a machine whose work runs longer would not come up again after a crash. The packages still accept every stable `effect` 4.x, so a project that uses `ClusterMachine` has to install 4.1.5 or later itself, together with matching `@effect/*` packages.
+
+### Patch Changes
+
+- Updated dependencies [c2fb21b]
+- Updated dependencies [7f42114]
+- Updated dependencies [d3cfffd]
+- Updated dependencies [0879f49]
+- Updated dependencies [7011422]
+- Updated dependencies [61f50c9]
+- Updated dependencies [06cbe55]
+- Updated dependencies [b62ceaa]
+- Updated dependencies [0cb797e]
+- Updated dependencies [0a4ba8b]
+- Updated dependencies [0dd0880]
+- Updated dependencies [8765c7b]
+- Updated dependencies [5867725]
+- Updated dependencies [16005a7]
+- Updated dependencies [52bb1cd]
+- Updated dependencies [587a086]
+- Updated dependencies [68ade7e]
+- Updated dependencies [500fefd]
+- Updated dependencies [2f691d4]
+- Updated dependencies [a60b960]
+- Updated dependencies [17fb064]
+- Updated dependencies [3bc5fa1]
+- Updated dependencies [3f8a5bb]
+- Updated dependencies [d47f8be]
+- Updated dependencies [4154f9e]
+- Updated dependencies [65d7834]
+- Updated dependencies [1f967e4]
+- Updated dependencies [937a477]
+- Updated dependencies [ed66256]
+- Updated dependencies [bc46912]
+- Updated dependencies [ec20412]
+- Updated dependencies [1935ee9]
+  - @typeonce/effect-machine@0.48.0
+
 ## 0.47.1
 
 ### Patch Changes

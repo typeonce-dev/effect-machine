@@ -1,5 +1,339 @@
 # @typeonce/effect-machine
 
+## 0.48.0
+
+### Minor Changes
+
+- c2fb21b: Three names now say the same thing on every host. Behavior does not change.
+  
+  | Before                                                          | After              |
+  | --------------------------------------------------------------- | ------------------ |
+  | `Machine.Enqueue`                                               | `Machine.Commands` |
+  | `RuntimeSnapshot` status `"error"`                              | `"failed"`         |
+  | Invocation `type: "process"` of `Machine.invocationDefinitions` | `type: "logic"`    |
+  | `MachineDocument.Invocation` `type: "process"`                  | `type: "logic"`    |
+  
+  `Machine.Commands` is the type of the `commands` argument of a transition, so the type now has the name of the value. A failed machine reads `"failed"` on `LocalMachine`, `AtomMachine`, and `ClusterMachine`, as `MachineFailedError` and the rejection reason `"MachineFailed"` already did. Replace `snapshot.status === "error"` with `snapshot.status === "failed"`. A local snapshot still carries the `Cause`, and a Cluster snapshot the failure as text. A state that invokes a `Logic` is now listed as `"logic"`, the name of the module, instead of `"process"`. Export saved machine documents and static sites again.
+- 7f42114: `MachineTest.check` now explores the results of invoked work. A running timer elapses as one more branch with no option, so states behind timers are now visited and checked. An Effect's results are only a type, so you supply the values to try in `outcomes`. Each value is a separate branch. An unknown source name or a value of the wrong type does not compile:
+  
+  ```ts
+  const report = yield * MachineTest.check(LoadMachine, {
+    outcomes: { loadDocument: { done: ["# Title"], failure: [new LoadError()] } }
+  })
+  ```
+  
+  A result is tried only while its work runs, once per entry of the state that invoked it. Findings behind a result carry it in their replay, which `MachineTest.run` plans again. A scenario's `events` can now contain `MachineTest.WorkOutcome` results, and a trace lists the work that runs in `trace.work`. A supplied result that fails the machine, which only a machine with erased types allows, is reported as an `"outcome.failsMachine"` error. A name in `outcomes` that no state invokes as an Effect is reported as an `"outcomes.invalid"` error.
+  
+  The `"invocations"` limit is replaced by limits that say what was not explored: `"customOutcomes"`, `"effectsWithoutOutcomes"`, `"streams"`, `"logic"`, and `"children"`. A machine that invokes only timers can now get an `"exhaustive"` report. Step invariants now also run on result steps, so narrow `event` with `MachineTest.isWorkOutcome` before you read event fields. `transition.notCovered` now warns about an `onDone` or `onFailure` branch that the supplied values could have taken and did not.
+- d3cfffd: Let work act on the child machines of its state on Cluster.
+  
+  `Machine.sendTo` and `Machine.stopChild` with the descriptor of a child machine now require a new capability, `Machine.ChildMachineRuntime`, instead of `Machine.MachineRuntime`. `LocalMachine`, `AtomMachine`, and `ClusterMachine` provide it, so a Cluster machine whose invoked work sends to the child of its state, or stops it, now compiles and runs.
+  
+  ```ts
+  effects: {
+    drive: Machine.sendTo(Counter, { _tag: "Add", by: 5 })
+  }
+  // Effect<void, StoppedError, Machine.ChildMachineRuntime>
+  ```
+  
+  On Cluster, the work acts on the child that runs when it acts, through a persisted request saved outside the transaction of a step, and ignores a child that does not run, as a local host does.
+  
+  `Machine.spawn`, and `Machine.sendTo` and `Machine.stopChild` with a child address, still require `Machine.MachineRuntime`, which only a local host provides.
+  
+  Migration: a helper typed as requiring `Machine.MachineRuntime` that calls `Machine.sendTo` or `Machine.stopChild` with a child descriptor still compiles, but a type that expects the result of such a call to require exactly `Machine.MachineRuntime` now sees `Machine.ChildMachineRuntime`. `LocalMachine.RequiredServices` removes both.
+- 0879f49: Run child machines on Cluster.
+  
+  `ClusterMachine.make` now accepts a machine whose states invoke a child machine. Each child runs as an entity of its own, of type `Type/childId`, which the layer of the parent registers with the same version. Each activation of the state starts a new child, `entityId/childId/revision`. The step that enters the state saves the start of the child with its input, and the step that exits it saves its stop, both in the transaction of the step's checkpoint, so a child runs exactly while its state is stored.
+  
+  ```ts
+  const Counter = Machine.child("counter", counter)
+  
+  Hosting: {
+    invoke: { src: "counter", input: ({ event }) => event.name, onDone: { target: "Ready" } },
+    on: { Add: { stay: true, commands: ({ event }, enqueue) => enqueue.sendTo(Counter, event) } }
+  }
+  ```
+  
+  `enqueue.sendTo` with the descriptor of a child sends to the child that runs, and drops the event when none does. A child's `parent` is the target of its parent. A child that ends tells its parent, which applies its output as the end of the invocation. A child that fails fails its parent, also when the parent declares `onFailure`. A machine that fails or ends stops its children.
+  
+  A child is type checked as its own Cluster machine: a child that invokes a Stream or a `Logic`, or requires `Machine.MachineRuntime`, still makes its parent refused, and the error names what the child uses.
+  
+  New public types: `ClusterMachine.Checkpoint.Progress.Child`, `ClusterMachine.Checkpoint.Status.Stopped`, and the `"stopped"` status of a read snapshot. `join` of a stopped machine fails with `MachineFailedError`.
+  
+  Migration: machines now send to each other through a new `deliver` request instead of `send`. Nobody waits for its answer, so the target treats it as a local machine treats an event sent to it: an event that the target cannot apply, such as one whose transition throws, now fails the target, where before it was rejected and dropped. Code that matches on `Checkpoint.Status` or the read status must handle `Stopped` and `"stopped"`.
+- 7011422: Give a Cluster parent the snapshots of its child machines.
+  
+  A state that invokes a child machine with `onSnapshot` now runs on Cluster instead of being rejected as `UnsupportedProcessLocal`. Each step of the child that plans its initial state or takes a transition, and leaves it active, saves its encoded snapshot as a persisted request to its parent in the transaction of its checkpoint. The parent applies it once, as a snapshot of the invocation, while it runs that child. A transition on a snapshot that cannot be applied fails the parent. A child whose parent declares no `onSnapshot` for it sends no snapshot.
+- 61f50c9: `ClusterMachine.make` no longer compiles for a machine that Cluster cannot run: one whose states invoke a Stream, a `Logic`, or a child machine, or whose work requires `Machine.MachineRuntime`. These machines compiled before, and then rejected every request or failed while running. The error lists everything to replace:
+  
+  ```ts
+  // "~effect/cluster/ClusterMachine/UnsupportedProcessLocal": {
+  //   readonly invocations: "Stream" | "Child"
+  //   readonly capabilities: "MachineRuntime"
+  // }
+  ClusterMachine.make("Sensor", machine, { version: "1" })
+  ```
+  
+  When the compiler refuses a machine, replace the listed work with an Effect or a timer, or run the machine with `LocalMachine` or `AtomMachine`. A source that is registered and never invoked is accepted. Machines whose requirements are `any` are still checked at run time only.
+  
+  The requirements of a machine, `Machine.Machine.Services`, now say what its host must support. How a machine is written does not change, and neither does what `LocalMachine` and `AtomMachine` require.
+  
+  - The new `Machine.InvocationSupport<"Stream" | "Logic" | "Child">` is required once for each of these kinds that a state, or a child machine it invokes, invokes.
+  - `Machine.MachineRuntime` is required only when the invoked work uses it, instead of by every machine that invokes work.
+  
+  Update a machine type that names `Machine.MachineRuntime` in its requirements to match. `LocalMachine.RequiredServices` removes all of these requirements, so use it instead of `Exclude<R, Machine.MachineRuntime>`.
+- 06cbe55: Expose Cluster `Entity` tuning options, `shardGroup` routing, and a transactional `onCommit` hook on `ClusterMachine`.
+  
+  - `ClusterMachine.make` now accepts an optional `shardGroup?: (entityId: EntityId) => string` option, annotating both the entity and any invoked child entities with `ClusterSchema.ShardGroup`.
+  - `ClusterMachine.toLayer` now accepts `LayerOptions<M, RE, RC>`, forwarding Effect Cluster's `Entity.toLayer` options (`maxIdleTime`, `concurrency`, `mailboxCapacity`, `mailboxMetrics`, `disableFatalDefects`, `defectRetryPolicy`, `spanAttributes`) to the entity and its children.
+  - Added `LayerOptions.onCommit` and `CommitEvent<M>`, which run inside the same `MessageStorage` transaction immediately after each checkpoint commit (active, done, or failed) so SQL read-model projections and audit tables commit or roll back atomically with the checkpoint.
+- 0cb797e: `ClusterMachine` runs the effects invoked by active states. An entity starts the work once the state that owns it is stored, applies the result as a step of its own, and is kept alive while work should run. After a crash, Cluster brings the entity up on another runner without a request, and the work of the stored state starts again.
+  
+  Work runs at least once and must be safe to repeat. Input mappers run again on recovery, with `Machine.InitialEvent`, and results are never stored: only the state they lead to is. Work that ends in a way the model does not handle fails the machine. The failure is stored with the last state, and later requests are rejected with the new reason `"MachineFailed"`. Streams, process logic, and child machines are still rejected.
+  
+  To migrate a `Storage` implementation, rename `load` to `loadForRequest`, add a `load(address)` that returns only the checkpoint, and deduplicate only requests in `commit`:
+  
+  ```ts
+  const { origin, revision } = checkpoint
+  if (origin._tag === "Request" && requestIds.has(origin.requestId)) return CommitResult.Duplicate()
+  if (revision !== (stored?.revision ?? 0) + 1) return CommitResult.RevisionConflict()
+  return CommitResult.Committed() // after storing the checkpoint, and the request id when there is one
+  ```
+  
+  `Checkpoint.requestId` is now `Checkpoint.origin`, and `Checkpoint.status` is new. Give checkpoints stored before this change `origin: { _tag: "Request", requestId }` and `status: { _tag: "Active", invocations: {} }`. A checkpoint loaded without a status is rejected as `"InvalidCheckpoint"`.
+- 0a4ba8b: The keep-alive request of a `ClusterMachine` is now held for as long as its work runs or its timers wait. It is not replaced periodically, so no crash can fall into the gap of a replacement.
+  
+  `ClusterMachine` needs `effect` 4.1.5 or later for this. Earlier versions answer the keep-alive request of a Cluster entity after about ten minutes, and a machine whose work runs longer would not come up again after a crash. The packages still accept every stable `effect` 4.x, so a project that uses `ClusterMachine` has to install 4.1.5 or later itself, together with matching `@effect/*` packages.
+- 0dd0880: `ClusterMachine` keeps one live machine instance in memory per active entity. The checkpoint is loaded and decoded once, not for every request, and storage remains the truth: memory is loaded again after a failure, a passivation, or a conflict. A request redelivered to a live entity can run its resolvers again before storage recognizes it, so resolvers must stay free of effects.
+  
+  `ClusterMachine.Checkpoint` has a new `revision`, and `Storage.commit` must refuse a stale write with the new `CommitResult.RevisionConflict`. This stops an entity that lost its shard from overwriting a newer checkpoint. A conflicted request is applied once more to the stored state, and then rejected with the new reason `"RevisionConflict"`.
+  
+  To migrate a `Storage` implementation, persist `checkpoint.revision`, and let `commit` return `Duplicate` first, then `RevisionConflict` unless the revision is exactly one more than the stored one, where no stored checkpoint counts as `0`.
+  
+  Give checkpoints stored before this change revision `1`. A checkpoint loaded without a positive integer revision is rejected as `"InvalidCheckpoint"`. Stop instances of the previous version before migrating, because they neither assign nor check revisions.
+- 8765c7b: Add `ClusterMachine.Client`, a client for one Cluster machine that takes what `send` of a local reference takes. Create it from the adapter, as `Entity.client` does:
+  
+  ```ts
+  const client = (yield * adapter.client)("document-1")
+  yield * client.send(Events.Rename({ name: "report" }))
+  ```
+  
+  It accepts events built by the constructors of `Machine.events`, which the raw entity client refused. An event that its schema refuses is rejected as `"InvalidEvent"` before it is sent, and the machine goes on, instead of a defect in the caller. Rejections, including those of the machine, fail the effect with `ClusterMachine.Rejected`, now a yieldable error; Cluster failures such as a full mailbox are `ClusterMachine.ClientError`s.
+  
+  `ClusterMachine.RejectionReason` gains `"InvalidEvent"`.
+- 5867725: Add `ClusterMachineProxy` to `@typeonce/effect-machine/cluster` to expose `ClusterMachine` adapters over any `effect/rpc` transport, including Web Workers, `SharedWorker`, Node worker threads, WebSockets, and HTTP.
+  
+  When a Cluster runner and its SQL database live in another thread or process — such as a browser Web Worker running `SingleRunner` with `SqlMachineStorage` — callers on the main thread have neither `Sharding` nor `ClusterMachine.Storage`. `ClusterMachineProxy` derives prefixed `send`, `snapshot`, and `changes` RPCs and gives callers a typed `ClusterMachineProxy.Client` with `send`, `snapshot`, `changes`, and `join`:
+  
+  ```ts
+  import { ClusterMachineProxy } from "@typeonce/effect-machine/cluster"
+  import { Effect, Layer } from "effect"
+  import { RpcServer } from "effect/rpc"
+  
+  // Inside the worker or RPC server:
+  const ServerLive = ClusterMachineProxy.toLayer(Order).pipe(
+    Layer.provide(Order.toLayer()),
+    Layer.provide(ClusterLive),
+    Layer.provide(RpcServer.layerProtocolWorkerRunner)
+  )
+  
+  // On the main thread or remote client (requires only RpcClient.Protocol and Scope):
+  const program = Effect.gen(function*() {
+    const client = (yield* ClusterMachineProxy.client(Order))("order-1")
+    yield* client.send(Events.Pay({ amount: 50 }))
+    const snapshot = yield* client.snapshot
+  })
+  ```
+  
+  Compose multiple Cluster machines onto one worker or server with `ClusterMachineProxy.toRpcGroup(A).merge(ClusterMachineProxy.toRpcGroup(B))` and `ClusterMachineProxy.layerHandlers`.
+- 16005a7: `ClusterMachine` now runs on `Machine.toStep`, so a Cluster entity decides which work stops and starts, and whether a result still applies, exactly as the step does. Stored checkpoints keep their format.
+  
+  Three behaviours change on Cluster:
+  
+  - Work that uses `Machine.MachineRuntime` fails the machine with `ProcessLocalError`, instead of a missing service.
+  - `children.sendTo` and `children.stop` in an input mapper reach the running child entity, as `Machine.sendTo` and `Machine.stopChild` already do. `children.spawn` is still refused.
+  - A send to a child that the same step enters is dropped, as it is on `LocalMachine`.
+  
+  Each `Machine.MachineStep.Step` now lists the paths of the states it `exited` and `entered`, in order and each once, so a durable host can forget what it stored about exited states without building snapshots.
+- 52bb1cd: Support `enqueue.stop(Child)` in synchronous transitions and per-entity startup input via `client.start(...input)` on `ClusterMachine` and `ClusterMachineProxy`.
+  
+  - `enqueue.stop(Child)` with a `ChildMachine` descriptor now stops the running child entity in the same transaction as the parent checkpoint, settles its invocation progress so it does not restart while its state remains active, and ignores a child that is not running. Passing a local `ChildAddress` still rejects as `UnsupportedProcessLocal`.
+  - `ClusterMachine.Client` and `ClusterMachineProxy.Client` now expose `start(...input)` (and `ClusterMachineProxy.toRpcGroup` adds `${Type}.start`), allowing each entity instance to be initialized with its own schema-validated input or to commit its initial state before receiving an event.
+  - `ClusterMachine.make` now accepts omitting the static default `input` for machines that declare `input`, requiring `client.start(input)` before sending events (or continuing to auto-start on `send` when a default input is supplied), and enforces that declared `input` schemas have JSON-compatible encoded representations.
+- 587a086: `ClusterMachine` runs the timers invoked by active states. The step that enters a state stores when its timers are due, and the entity is kept alive until they fire. An entity that comes up again, on any runner, waits only for the time that remains, and fires a timer whose time has passed at once. `LocalMachine.resume` still starts the full duration again.
+  
+  The duration of a timer is evaluated after its step is planned and before the step is stored. A redelivered request can evaluate it again, so input mappers and timer sources must stay free of effects. An entity stays in memory while a timer waits, however long that is. Streams, process logic, and child machines are still rejected.
+  
+  A `Storage` implementation needs no change as long as it stores `Checkpoint` whole: due times are in `status.invocations`, and `origin` can be the new `{ _tag: "Timers" }`, which `commit` treats as any origin that is not a request. Checkpoints stored before this change need nothing beyond `status: { _tag: "Active", invocations: {} }`. A state that was stored before the machine declared one of its timers is given a due time when its entity comes up. A state stored with a timer the machine no longer declares is rejected as `"InvalidCheckpoint"`, so migrate it.
+- 500fefd: Let Cluster machines send to each other.
+  
+  `ClusterMachine.make` returns an adapter with `target(entityId)`, a `ClusterMachine.Target` that names the entity of that machine by its type and id, as Cluster addresses it. On Cluster, `self` is the target of the machine's own entity.
+  
+  ```ts
+  Pay: {
+    target: "Paid",
+    commands: ({ event, state }, enqueue) =>
+      enqueue.sendTo(Ledger.target(state.ledger), { _tag: "Add", amount: event.amount })
+  }
+  ```
+  
+  An event that a step sends with `enqueue.sendTo` is saved as a persisted request to the target in the `MessageStorage` transaction of the step's checkpoint, so it is sent only when the step is stored, and the target applies it once. Work sends with `send` of a target, through the client of the target. The event is checked against the input events of the target at compile time.
+  
+  Migration: work that read `self.sessionId` or called `self.send` failed the machine before. It now reads the address of the entity, `Type/entityId`, and sends to the entity. A step that sends to a target that is not a `ClusterMachine.Target`, such as a child, and `enqueue.stop`, are still rejected as `UnsupportedProcessLocal`.
+- 2f691d4: Store Cluster machines durably in SQL with `SqlMachineStorage`, from `@typeonce/effect-machine/cluster`.
+  
+  It provides `ClusterMachine.Storage` over the `SqlClient` that `SqlMessageStorage` uses. A step of a machine runs in the transaction of `MessageStorage`, and its commit joins it, so the checkpoint, the events the step emits, and the reply are stored together or not at all.
+  
+  ```ts
+  import { SqlMachineStorage } from "@typeonce/effect-machine/cluster"
+  import { Layer } from "effect"
+  import { SqlMessageStorage } from "effect/cluster"
+  
+  const storage = Layer.mergeAll(SqlMessageStorage.layer, SqlMachineStorage.layer)
+  ```
+  
+  `layer`, `layerWith`, and `make` run the migrations, which create `<prefix>_checkpoints` and `<prefix>_requests` (prefix `cluster_machine` by default). `layerMigrations` and `layerStorage` separate migrating from running. PostgreSQL and SQLite are supported.
+  
+  `ClusterMachine.checkStorage` checks that a `Storage` of your own keeps the contract machines rely on: fields stored unchanged, `Duplicate` before `RevisionConflict` before `Committed`, nothing written by a rejected commit, commits without a request never duplicates, entities kept apart, one winner between concurrent commits, and, given the `withTransaction` of `MessageStorage`, rollback with it. It fails with `ClusterMachine.StorageCheckFailure`, naming the scenario.
+- 17fb064: A state that picks its work by a condition, such as `invoke: { src: ready ? "load" : "wait" }`, now carries the requirements of every source it can pick. Before, the choice resolved to nothing, so its services and the kinds of work that not every host runs were dropped from the machine's type.
+  
+  Some machines now require a service they were silently missing, and `ClusterMachine.make` now refuses at compile time a machine whose state can pick a Stream, logic, or a child machine by a condition, instead of failing when that work starts.
+- 3bc5fa1: The machine model and its in-memory host are now separate modules. `Machine` declares, plans, and encodes a machine, and depends on no host. The new `LocalMachine` runs it in memory, next to `AtomMachine` and `ClusterMachine`. How a machine is written and how it runs do not change.
+  
+  Import `LocalMachine` from `@typeonce/effect-machine` and replace the moved names:
+  
+  ```ts
+  // before
+  const started = Machine.start(machine)
+  // after
+  const started = LocalMachine.start(machine)
+  ```
+  
+  - `Machine.start`, `Machine.prepare`, and `Machine.resume` are `LocalMachine.start`, `LocalMachine.prepare`, and `LocalMachine.resume`.
+  - `Machine.Prepared` and `Machine.Inspection` are `LocalMachine.Prepared` and `LocalMachine.Inspection`.
+  - `Machine.ExecutionServices` is `LocalMachine.RequiredServices`.
+  
+  `Machine.MachineRef` now promises only what every host's reference provides. Processing an event in the sender's turn is documented as a guarantee of `LocalMachine.start`. The service behind `Machine.MachineRuntime` contains only `spawn`, `sendTo`, and `stopChild`, and child descriptors hold only an id and a machine.
+- 3f8a5bb: Let a Cluster machine leave memory while a long timer waits.
+  
+  A timer that waits longer than `DurableClock.InMemoryThreshold` (one minute by default, as for workflow sleeps) no longer keeps its entity alive. The step that stores its due time also saves, in the same `MessageStorage` transaction, a message to the entity that Cluster delivers at that time through `DeliverAt`. The entity may be passivated, and the message brings it back when the timer is due, on whichever runner owns it then. The path, id, and due time of the timer name the message, so the message of a wait that ended is ignored, and saving it twice is a duplicate. A timer that never ends saves no message and keeps nothing alive. A long wait stored by an earlier version gets its message the next time its entity comes up. Shorter timers stay in memory as before. The checkpoint format is unchanged.
+  
+  A long timer of an entity that left memory fires up to one `entityMessagePollInterval` after it is due.
+- d47f8be: Add `Machine.toStep`, the pure form of a machine, for writing a host for a new runtime. Applications keep using `LocalMachine`, `AtomMachine`, or `ClusterMachine`.
+  
+  `Machine.toStep(machine, { self, parent, children })` returns synchronous functions that run nothing and call no user code. `start`, `send`, `settle`, `element`, `report`, `stop`, and `resume` each return the next state as an immutable value, together with the commands to carry out, the work to stop, the snapshot to publish, the emitted events, and the work to start, in that order. Work is an Effect, a timer, a Stream, a `Logic`, or a child machine, described as data that the host evaluates when it starts it. A result of work whose state was exited is ignored, so a host never compares generations, and a kept state can be stepped from again.
+  
+  ```ts
+  const step = Machine.toStep(machine, { self })
+  const loading = yield * step.send(started.state, Events.Load({ id: "a" }))
+  const effect = work.effect() // the source runs here, at most once
+  const loaded = step.settle(loading.state, work, Exit.isFailure(effect) ? effect : yield * Effect.exit(effect.value))
+  ```
+  
+  A step plans with the same compiled planner as `LocalMachine`, so a host built on `Machine.toStep` takes events about as fast as `LocalMachine` plans them.
+  
+  `parent` is required for a machine that requires one, and `children` when its work acts on children. `resume` takes the progress of a durable host, so that work which ended does not run again. `Machine.MachineStep.Supported` lets a host refuse at compile time the kinds of work it does not run. `send` rejects an event that its schema refuses and keeps the machine.
+- 4154f9e: Read a Cluster machine from outside its entity.
+  
+  A `ClusterMachine.Client` now has `snapshot`, `changes`, and `join`, as a local reference does. They read the machine from `ClusterMachine.Storage` and never ask the entity, so a read works from any process that reaches the store, whichever runner owns the entity, and whether or not it is in memory. Reading does not wake the entity or keep it alive.
+  
+  ```ts
+  const program = Effect.gen(function*() {
+    const client = (yield* adapter.client)("order-1")
+    const snapshot = yield* client.snapshot // Option<ClusterMachine.Snapshot<M>>
+    const output = yield* client.join.pipe(
+      Effect.catchTag("MachineFailedError", (failed) => Effect.die(failed.failure))
+    )
+  })
+  ```
+  
+  `ClusterMachine.Snapshot` is `active`, `done` with the output, or `failed` with the text of the failure, each with its revision. The view is narrower than a local `MachineRef`: reads see committed checkpoints only, `changes` reads again after each `readInterval` (a new option of `ClusterMachine.make`, one second by default) and may skip checkpoints committed between two reads, a failure is text rather than a `Cause`, and there is no `stopped` status.
+  
+  Reads require `ClusterMachine.Storage`. A checkpoint of another definition or version, or one the machine cannot hold, fails the read with `ClusterMachine.ReadError`.
+- 1f967e4: The types of `LocalMachine`, `AtomMachine`, and `ClusterMachine` now say only what can happen. Transitions, actions, and initial states are synchronous, so the types that described effects inside them are removed. Runtime behavior does not change.
+  
+  Most were always `never`, so delete the mention:
+  
+  - `Machine.ActionError`, `Machine.ActionServices`, and `Machine.ActionRequirement`. Replace `Machine.PlanningServices<R>` with `R`.
+  - `Machine.Machine.InitialError` and `Machine.Machine.InitialServices`, with the `InitialE` and `InitialR` type parameters of `Machine.Machine`, `Machine.Definition`, `Machine.make`, and every API generic over a machine. Delete the seventh and eighth type arguments of a written-out `Machine.Machine<...>`, and the fourth and fifth of `Machine.Definition<...>`.
+  - The `E` and `R` type parameters of `Machine.Machine.HandlerContext`, `HandlerResult`, `InitialResult`, and `StateActionResult`, and the `Requirements` type parameter of `MachineTest.Microstep`. Delete these arguments. A `HandlerContext` that still passes `never, never` compiles with another meaning.
+  
+  The others described values that no API produces or accepts:
+  
+  - `Machine.Runtime` and `Machine.Runtime.Requirement`. Handlers raise and emit events with `Machine.Commands`.
+  - `Machine.Machine.AnyStateConfig`, `StateConfig`, `ChoiceStateConfig`, and `EventHandlerMap`. Use `Machine.Machine.StateHandler`.
+  - `Machine.Machine.InvokeOwned` and `InvokeSource`. Use `Machine.Machine.Invocation`.
+  - `Machine.Machine.EventTransitionReturn`, `EventHandlerReturn`, `AlwaysReturn`, `DoneReturn`, `ChoiceReturn`, and `InvokeOutcomeReturn`. They have no replacement.
+  
+  `LocalMachine.RequiredServices<R>`, which replaces `Machine.ExecutionServices<R>`, only removes the requirements that a local machine provides. The errors of a machine whose requirements are `any` are listed exactly instead of as `unknown`.
+- 937a477: Names that mean something else in Effect Workflow or Effect Cluster are renamed. Behavior does not change, but stored Cluster checkpoints need a migration.
+  
+  An `Activity` of Effect Workflow runs once and its result is recorded. The work a state invokes is not recorded, so it is now called an invocation everywhere:
+  
+  | Before                                                            | After                                                |
+  | ----------------------------------------------------------------- | ---------------------------------------------------- |
+  | `Machine.activityDefinitions`                                     | `Machine.invocationDefinitions`                      |
+  | `Machine.Machine.ActivityDefinition`                              | `Machine.Machine.InvocationDefinition`               |
+  | `Inspection.Activity`                                             | `Inspection.ProgramInvocation`                       |
+  | `Inspection.ActivityStarted` and its `_tag`                       | `Inspection.ProgramInvocationStarted`                |
+  | `Inspection.ActivityStopped` and its `_tag`                       | `Inspection.ProgramInvocationStopped`                |
+  | `activity` of both records                                        | `invocation`                                         |
+  | `Inspection.Causation`: `{ _tag: "Activity", activitySessionId }` | `{ _tag: "ProgramInvocation", invocationSessionId }` |
+  | `MachineDocument.Activity`                                        | `MachineDocument.Invocation`                         |
+  | `MachineDocument.State`: `activityIds`                            | `invocationIds`                                      |
+  | `MachineDocument.MachineDocument`: `activities`                   | `invocations`                                        |
+  | Ids `"<state>:activity:<n>"` in a machine document                | `"<state>:invocation:<n>"`                           |
+  
+  `MachineDocument.schemaVersion` is now `4`. Export saved documents and static sites again.
+  
+  A `MachineId` of Effect Cluster names the runner that generates an id. A checkpoint stores the id of a machine definition, and now says so:
+  
+  | Before                                                  | After                    |
+  | ------------------------------------------------------- | ------------------------ |
+  | `ClusterMachine.Checkpoint`: `machineId`                | `definitionId`           |
+  | `ClusterMachine.RejectionReason`: `"MachineIdMismatch"` | `"DefinitionIdMismatch"` |
+  | Log annotation `machineId` of `ClusterMachine`          | `definitionId`           |
+  
+  Stop the instances of the previous version, then rename `machineId` to `definitionId` in every stored checkpoint and keep its value. A checkpoint that still has `machineId` is rejected as `"DefinitionIdMismatch"`. Deploy clients together with runners: neither version decodes a `Rejected` reply, stored or sent, that has the other version's reason.
+  
+  `Logic.Scope` sat next to Effect's `Scope` in the same signatures and meant something else. The capabilities given to `Logic` are renamed:
+  
+  | Before          | After                  |
+  | --------------- | ---------------------- |
+  | `Logic.Scope`   | `Logic.InitialContext` |
+  | `Logic.Context` | `Logic.RunContext`     |
+  | `Logic.Address` | `Logic.Endpoint`       |
+  
+  `ChildAddress` keeps its name: it is the typed id a parent uses to reach a child, which is what an address is in Effect Cluster. `Logic.Endpoint` is the object that sends to and stops a process.
+- ed66256: Each run of invoked work now owns its own `Scope` on `LocalMachine` and `AtomMachine`, as it already did on `ClusterMachine`. The scope closes when the work ends or its state is left, so resources acquired with `Effect.acquireRelease` or `Effect.addFinalizer` are released with the run instead of piling up until the machine stops.
+  
+  An Effect and a Stream get a new scope for every run. Logic gets one from its `initial` through the end of its `run`. A timer acquires nothing, and a child machine's own work follows the same rule.
+- 1935ee9: Add `Machine.InvocationEvent`, the lifecycle event of a step caused by invoked work. When the output, typed failure, stream element, or child snapshot of an invocation leads to a transition, the `entry`, `exit`, `always`, and input-mapper callbacks of that step receive it as their `event`. It names the invoking state and invocation and what was reported:
+  
+  ```ts
+  entry: ;
+  ;(({ event }) => {
+    if (Machine.isInvocationEvent(event)) {
+      event.path // "Loading"
+      event.id // "load"
+      event.kind // "Done" | "Failure" | "Element" | "Snapshot"
+    }
+  })
+  ```
+  
+  `Machine.Machine.LifecycleEvent` now includes `Machine.InvocationEvent`, so code that treated every event other than `InitialEvent` as a declared event must also handle it. Before, such callbacks received an undocumented internal object. A machine restarted by `ClusterMachine` passes `InitialEvent` to the input mapper of restarted work.
+
+### Patch Changes
+
+- b62ceaa: Name the compile errors of `ClusterMachine.make` under the module's path, as its other identifiers are: `~effect/cluster/ClusterMachine/UnsupportedProcessLocal` and `~effect/cluster/ClusterMachine/NonJsonEncoded`, instead of `~effect/ClusterMachine/...`.
+- 68ade7e: Document the Cluster host: when to choose it, what runs and how often, the failed status, timers, children, what is refused and why, the client, and the Storage contract with its SQL implementation.
+- a60b960: Separate deciding which invoked work a state starts from running it. This internal change does not affect the public API or runtime behavior.
+- 65d7834: Document why `ClusterMachine` refuses Streams and `Logic`: their progress lives only in memory, so work that Cluster runs again after a crash or a move would apply elements twice or lose a process's state. The docs of `Machine.InvocationSupport` now say that Cluster runs child machines, and the modeling guide names `Machine.ChildMachineRuntime`.
+- bc46912: Keep a Cluster machine alive on hosts that provide an `Entity.KeepAliveHandler`. A machine whose work runs or whose timer waits now calls `Entity.keepAlive` whenever the host supports it through a handler or through the latch of a `Sharding` runner, instead of only through the latch. Before, such a host logged that it could not keep the machine alive, and its work was not recovered after a crash.
+- ec20412: `MachineTest.run`, `MachineTest.explore`, and `MachineTest.check` now follow which work runs with the same rules as every host. Work invoked as `Logic` or as a child machine ends when a transition stops it with `enqueue.stop`, so `trace.work` no longer lists it, and `MachineTest.check` tells the state after the stop apart from the state before it.
+  
+  A `Machine.toStep` step whose planning fails the machine now names the event it planned in `event`. A result of work that fails the machine without a transition still plans no event, so a host can tell the two apart.
+
 ## 0.47.1
 
 ### Patch Changes
