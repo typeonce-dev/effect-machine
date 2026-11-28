@@ -422,6 +422,39 @@ const unevaluable = (name: string, duration: () => Duration.Input, failure: stri
   ]
 })
 
+const unnamed: Scenario = {
+  name: "fails when the input of a timer names no duration, as the end of the timer",
+  machine: (fixture) =>
+    Machine.make({
+      root,
+      events: Events,
+      effects: { first: fixture.work("first"), last: fixture.work("last") },
+      // A string that names no duration, which only the timer itself reads.
+      timers: { wait: (input: string) => input as Duration.Input }
+    }).handle({
+      initial: { target: "Idle" },
+      states: {
+        Idle: { on: { Wait: { target: "Waiting", data: { seconds: 10, notes: 0 } } } },
+        Waiting: {
+          invoke: [
+            { src: "first", onDone: { stay: true }, onFailure: { stay: true } },
+            { src: "wait", input: () => "soon", onDone: { target: "Expired" } },
+            { src: "last", onDone: { stay: true }, onFailure: { stay: true } }
+          ]
+        }
+      }
+    }),
+  start,
+  steps: [
+    send(wait(10), {
+      happens: [waiting(10), started("first"), started("last")],
+      stopped: ["first", "last"],
+      outcome: failed("Error: Invalid Input: soon")
+    }),
+    send({ _tag: "Note" }, { answers: ["Ended"] })
+  ]
+}
+
 const evaluation: Scenario = {
   name: "evaluates a duration in order with the other invocations of its state",
   machine: (fixture) =>
@@ -520,6 +553,7 @@ export const timers: ReadonlyArray<Scenario> = [
   unevaluable("throws", () => {
     throw new Error("no duration")
   }, "Error: no duration"),
+  unnamed,
   evaluation,
   infinite,
   initialTimer
