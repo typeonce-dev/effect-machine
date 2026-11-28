@@ -393,6 +393,55 @@ describe("ClusterMachine", () => {
   })
 })
 
+describe("Machine.toStep", () => {
+  const self = null! as Machine.MachineTarget<Machine.Machine.EventInputOf<Machine.Machine.InputEvents<typeof handled>>>
+
+  it("accepts a machine of effects, timers, and streams, and requires their services of its work", () => {
+    expect(Machine.toStep).type.toBeCallableWith(handled, { self })
+    expect(Machine.toStep).type.toBeCallableWith(timed, { self })
+    const hostedStep = Machine.toStep(hosted, { self })
+    expect<Machine.MachineStep.Requirements<typeof hosted>>().type.toBe<Database>()
+    const streamingStep = Machine.toStep(streaming, { self })
+    expect<Machine.MachineStep.Requirements<typeof streaming>>().type.toBe<Feed>()
+    expect(hostedStep).type.toBe<Machine.MachineStep<typeof hosted>>()
+    expect(streamingStep).type.toBe<Machine.MachineStep<typeof streaming>>()
+  })
+
+  it("refuses a machine that invokes a Logic or a child machine, which need a host that owns children", () => {
+    // @ts-expect-error { readonly invocations: "Logic"; readonly capabilities: never; }
+    Machine.toStep(working, { self })
+    // @ts-expect-error { readonly invocations: "Child"; readonly capabilities: never; }
+    Machine.toStep(owning, { self })
+    // @ts-expect-error { readonly invocations: "Child"; readonly capabilities: never; }
+    Machine.toStep(owningStreaming, { self })
+  })
+
+  it("refuses a machine whose work acts on children", () => {
+    // @ts-expect-error { readonly invocations: never; readonly capabilities: "MachineRuntime"; }
+    Machine.toStep(stopping, { self })
+    // @ts-expect-error { readonly invocations: never; readonly capabilities: "MachineRuntime"; }
+    Machine.toStep(stoppingStream, { self })
+    // @ts-expect-error { readonly invocations: "Logic"; readonly capabilities: "MachineRuntime"; }
+    Machine.toStep(spawning, { self })
+    // @ts-expect-error { readonly invocations: "Logic"; readonly capabilities: "MachineRuntime"; }
+    Machine.toStep(several, { self })
+    // @ts-expect-error { readonly invocations: never; readonly capabilities: "MachineRuntime"; }
+    Machine.toStep(choosingInList, { self })
+  })
+
+  it("refuses work that acts on the child machine of a state", () => {
+    const Quiet = Machine.child("quiet", quiet)
+    const driving = Machine.make({ root, events, effects: { drive: Machine.sendTo(Quiet, { _tag: "Start" }) } })
+      .handle({
+        initial,
+        states: { Busy: { invoke: { src: "drive", onDone: { stay: true }, onFailure: { stay: true } } } }
+      })
+    expect<Services<typeof driving>>().type.toBe<Machine.ChildMachineRuntime>()
+    // @ts-expect-error { readonly invocations: never; readonly capabilities: "ChildMachineRuntime"; }
+    Machine.toStep(driving, { self })
+  })
+})
+
 describe("erased machines", () => {
   const anyRequirements = Machine.make({
     root,

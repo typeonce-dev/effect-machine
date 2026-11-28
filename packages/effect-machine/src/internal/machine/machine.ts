@@ -12,6 +12,7 @@ import type {
   Machine,
   MachineSchemaDecodeError,
   MachineSchemaEncodeError,
+  MachineTarget,
   Parent,
   ParentMode,
   SpawnOptions,
@@ -33,6 +34,7 @@ import * as internalPlanner from "./planner.js"
 import * as Protocol from "./protocol.js"
 import * as Serialization from "./serialization.js"
 import * as StateDefinition from "./stateDefinition.js"
+import * as Step from "./step.js"
 import * as Topology from "./topology.js"
 
 export { child, childAddress, childFamily } from "./child.js"
@@ -1057,6 +1059,11 @@ export const plan: (
   state: any,
   event: any
 ) => Effect.Effect<any, PlanningError> = internalPlanner.plan
+
+export const toStep: (
+  machine: Machine.Any,
+  options: { readonly self: MachineTarget<any> }
+) => Step.MachineStep = Step.make
 
 export const logic = <
   State,

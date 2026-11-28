@@ -22,6 +22,9 @@
  *   group's generation, and plan a delivered event in a later turn than the one
  *   that started the work.
  *
+ * `step.ts` follows these rules for hosts outside this package, which use
+ * `Machine.toStep` instead.
+ *
  * @since 0.47.2
  */
 
