@@ -297,6 +297,43 @@ describe("Machine.toStep", () => {
       const failed = success(steps.send(started.state, { _tag: "Throw" }))
       assert.strictEqual(failed.snapshot, started.snapshot)
       assert.isTrue(failed.exit !== undefined && Exit.hasDies(failed.exit))
+      // The step planned the event, so it names it.
+      assert.deepStrictEqual(failed.event, { _tag: "Throw" })
+    })
+
+    it("names the result whose transition failed to plan, and no event for a result that fails the machine", () => {
+      const loading = success(step.send(success(step.start()).state, Events.Load({ id: "a" })))
+      const work = only(loading.start)
+      const unhandled = step.settle(loading.state, work, Exit.die(new Error("broken")))
+      assert.isTrue(unhandled.exit !== undefined && Exit.isFailure(unhandled.exit))
+      assert.isUndefined(unhandled.event)
+
+      const throwing = Machine.make({
+        root: Machine.state({ states: { Waiting: {}, Ready: {} } }),
+        events: Machine.events({}),
+        timers: { wait: "1 second" }
+      }).handle({
+        initial: { target: "Waiting" },
+        states: {
+          Waiting: {
+            invoke: {
+              src: "wait",
+              onDone: {
+                target: "Ready",
+                commands: () => {
+                  throw new Error("transition")
+                }
+              }
+            }
+          }
+        }
+      })
+      const steps = Machine.toStep(throwing, { self })
+      const started = success(steps.start())
+      const failed = steps.settle(started.state, only(started.start), Exit.void)
+      assert.isTrue(failed.exit !== undefined && Exit.hasDies(failed.exit))
+      assert.isTrue(Machine.isInvocationEvent(failed.event))
+      assert.deepInclude(failed.event, { path: "Waiting", id: "wait", kind: "Done" })
     })
   })
 
