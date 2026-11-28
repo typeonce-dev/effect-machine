@@ -282,6 +282,21 @@ export class State<O extends Ownership = "Persistent"> {
   }
 }
 
+/** The paths that a step exited and entered. */
+interface Paths {
+  readonly exited: ReadonlyArray<string>
+  readonly entered: ReadonlyArray<string>
+}
+
+const noPaths: Paths = { exited: empty, entered: empty }
+
+const pathsOf = (microsteps: ReadonlyArray<InvocationChanges.Microstep>): Paths => {
+  const changes = InvocationChanges.fromMicrosteps(microsteps)
+  return changes === undefined
+    ? noPaths
+    : { exited: Array.from(new Set(changes.exited)), entered: Array.from(changes.entered.keys()) }
+}
+
 /**
  * What one step did. Its microsteps are made public on first read.
  *
@@ -290,6 +305,7 @@ export class State<O extends Ownership = "Persistent"> {
 export class Step<O extends Ownership = "Persistent"> {
   #microsteps: ReadonlyArray<PlannedMicrostep> | undefined
   #published: ReadonlyArray<PublishedMicrostep> | undefined
+  #paths: Paths | undefined
 
   constructor(
     readonly state: State<O>,
@@ -298,9 +314,22 @@ export class Step<O extends Ownership = "Persistent"> {
     readonly emitted: ReadonlyArray<unknown>,
     readonly commands: ReadonlyArray<Command>,
     readonly stop: ReadonlyArray<Work>,
-    readonly start: ReadonlyArray<Work>
+    readonly start: ReadonlyArray<Work>,
+    /** The paths of an initial step, which its microsteps do not list. Read from the microsteps otherwise. */
+    paths?: Paths
   ) {
     this.#microsteps = microsteps
+    this.#paths = paths
+  }
+
+  /** Paths of the states the step exited, in exit order, each once. */
+  get exited(): ReadonlyArray<string> {
+    return (this.#paths ??= pathsOf(this.#microsteps ?? this.#published!)).exited
+  }
+
+  /** Paths of the states the step entered, in entry order, each once. */
+  get entered(): ReadonlyArray<string> {
+    return (this.#paths ??= pathsOf(this.#microsteps ?? this.#published!)).entered
   }
 
   get snapshot(): Machine.Snapshot<any> {
@@ -589,6 +618,8 @@ const build = <O extends Ownership>(
     readonly microsteps: ReadonlyArray<PlannedMicrostep>
     readonly emitted: ReadonlyArray<unknown>
     readonly commands: ReadonlyArray<Command>
+    /** The paths of an initial step, which its microsteps do not list. */
+    readonly paths?: Paths
   }
 
   const nothing: Published = { event: undefined, microsteps: empty, emitted: empty, commands: empty }
@@ -625,7 +656,8 @@ const build = <O extends Ownership>(
       published.emitted,
       published.commands,
       stop,
-      empty
+      empty,
+      published.paths
     )
 
   // A plan that throws leaves the state it received as it was, so the state
@@ -675,7 +707,8 @@ const build = <O extends Ownership>(
       published.emitted,
       published.commands,
       stop,
-      start ?? empty
+      start ?? empty,
+      published.paths
     )
   }
 
@@ -728,6 +761,7 @@ const build = <O extends Ownership>(
           empty
         )
     }
+    const changes = InvocationChanges.fromMicrosteps(planned.microsteps)
     const published: Published = {
       event: planned.event,
       microsteps: planned.microsteps,
@@ -735,7 +769,6 @@ const build = <O extends Ownership>(
       commands
     }
     const next = reached(planned.next, undefined, undefined, state.runs)
-    const changes = InvocationChanges.fromMicrosteps(planned.microsteps)
     const { kept, stop } = InvocationChanges.partition(commanded === undefined ? running : commanded.running, changes)
     if (planned.done) {
       return ended(next, [...stop, ...latestFirst(kept)], Exit.succeed(planned.output), published)
@@ -776,7 +809,11 @@ const build = <O extends Ownership>(
       event: Planner.InitialEvent,
       microsteps: planned.microsteps,
       emitted: planned.emittedEvents,
-      commands: commandsOf(planned.commands, empty).commands
+      commands: commandsOf(planned.commands, empty).commands,
+      paths: {
+        exited: empty,
+        entered: Planner.sortEntryPaths(machine, Configuration.getInitialEntryPaths(machine, configuration))
+      }
     }
     const next = initial(configuration, planned.state)
     if (planned.done) {

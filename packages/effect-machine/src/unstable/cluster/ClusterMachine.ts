@@ -1031,21 +1031,15 @@ type EnsureJsonEncoded<
     }
   }
 
-// A child machine runs as an entity of its own.
-type UnsupportedInvocation<R> = R extends Machine.InvocationSupport<infer Kind> ? Exclude<Kind, "Child"> : never
-
-type UnsupportedCapability<R> = R extends Machine.MachineRuntime ? "MachineRuntime" : never
-
-// This host supports only the child kind that `InvocationSupport` names, so a
-// kind added to it is refused until this host states that it runs it.
-type EnsureSupported<R> = IsAny<R> extends true ? unknown
-  : [UnsupportedInvocation<R> | UnsupportedCapability<R>] extends [never] ? unknown
-  : {
-    readonly "~effect/cluster/ClusterMachine/UnsupportedProcessLocal": {
-      readonly invocations: UnsupportedInvocation<R>
-      readonly capabilities: UnsupportedCapability<R>
-    }
-  }
+// What `Machine.toStep` refuses for a host that runs effects, timers, and child
+// machines, and supplies the services of children, named as Cluster refuses
+// it. A child machine runs as an entity of its own, and a kind added to
+// `InvocationSupport` is refused until this host states that it runs it.
+type EnsureSupported<M extends Machine.Machine.Any> =
+  Machine.MachineStep.Supported<M, "Child", Machine.ChildMachineRuntime> extends {
+    readonly "~effect/Machine/MachineStep/Unsupported": infer Missing
+  } ? { readonly "~effect/cluster/ClusterMachine/UnsupportedProcessLocal": Missing }
+    : unknown
 
 /**
  * Creates an in-memory Cluster machine checkpoint store.
@@ -1276,7 +1270,11 @@ export { StorageCheckFailure }
  * event when none does. `enqueue.stop` with the descriptor of a child stops the
  * running child in the same transaction, settles its invocation progress so it
  * does not restart while the state stays active, and ignores a child that does
- * not run. The child's `parent` is the target of its parent. A
+ * not run. Commands are carried out before the work of the states a step enters
+ * starts, as they are locally, so both drop a child that the same step enters.
+ * Work acts on the child of its state with `Machine.sendTo` and
+ * `Machine.stopChild`, and its input mapper with `children.sendTo` and
+ * `children.stop`. The child's `parent` is the target of its parent. A
  * child that ends tells its parent, which reads its output or its failure from
  * `Storage` and applies it as the end of the invocation. A failure of a child
  * fails its parent, also when the parent declares `onFailure`, because the
@@ -1300,12 +1298,15 @@ export { StorageCheckFailure }
  *   request as `UnsupportedProcessLocal`, or fails the machine when the step
  *   applies an outcome. Planning-time raised events remain part of the current
  *   macrostep.
- * - Work that uses an operation of `children` from the context of its input
- *   mapper. It fails the machine.
+ * - Work that spawns a child with `children.spawn` from the context of its
+ *   input mapper, or that `children.sendTo` and `children.stop` give a child
+ *   address. It fails the machine.
  * - A machine whose requirements are `any`, such as an erased one. When any of its
  *   states declares an unsupported invocation, it rejects every request as
- *   `UnsupportedProcessLocal`. Work of such a machine that requires
- *   `Machine.MachineRuntime` fails the machine.
+ *   `UnsupportedProcessLocal`. Work of such a machine that uses
+ *   `Machine.MachineRuntime`, such as `Machine.spawn`, or `Machine.sendTo` and
+ *   `Machine.stopChild` with a child address, fails the machine with
+ *   `ProcessLocalError`.
  *
  * A deployment that adds an invocation to a state does not wake the entities
  * that are already in it. Their work starts when they come up.
@@ -1498,7 +1499,22 @@ export const make: <
     & EnsureExecutable<States, UnhandledStates, OutputStates>
     & Machine.Machine.RootCompatible<ParentEvents>
     & EnsureJsonEncoded<States, InputEvents, Input>
-    & EnsureSupported<R>,
+    & EnsureSupported<
+      Machine.Machine<
+        States,
+        Events,
+        Input,
+        UnhandledStates,
+        E,
+        R,
+        FinalStates,
+        Output,
+        Emits,
+        OutputStates,
+        InputEvents,
+        ParentEvents
+      >
+    >,
   options: {
     readonly version: string
     /**

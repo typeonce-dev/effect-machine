@@ -105,8 +105,12 @@ target or with the descriptor of an invoked child saves the event with the
 checkpoint of the step, so it is sent if and only if the step is stored, and
 applied once. `enqueue.stop` with the descriptor of an invoked child stops the
 running child in the same transaction and settles its progress so it does not
-restart while its state stays active. Work sends with `Machine.sendTo` and stops
-a child with `Machine.stopChild`, given the child's descriptor.
+restart while its state stays active. Commands run before the work of the states
+a step enters starts, as they do locally, so both drop a child that the same step
+enters. Work sends with `Machine.sendTo` and stops a child with
+`Machine.stopChild`, given the child's descriptor, and an input mapper does the
+same with `children.sendTo` and `children.stop`. `children.spawn` fails the
+machine.
 
 ### What is refused, and why
 
