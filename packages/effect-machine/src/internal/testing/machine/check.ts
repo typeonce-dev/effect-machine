@@ -21,18 +21,22 @@ import type {
   EventPlan,
   ExplorationEdge,
   ExplorationNode,
+  ExplorationStateContext,
   InitialPlan,
   RunFailure,
+  RunningWork,
   RunServices,
   Trace,
-  TraceStep
+  TraceStep,
+  WorkOutcome
 } from "../../../testing/MachineTest.js"
 import * as Protocol from "../../machine/protocol.js"
 import type { EnsureExecutable } from "../../machine/readiness.js"
-import { explore } from "./exploration.js"
+import { type ExploredMachineFailure, exploreWith } from "./exploration.js"
 import { formatValue } from "./format.js"
 import { InvariantError } from "./invariant.js"
 import { VerificationError, verify } from "./verification.js"
+import * as Work from "./work.js"
 
 type AnyMachine = Machine.Machine.Any
 
@@ -198,6 +202,104 @@ const planEvidence = (plan: {
 const statePaths = (step: { readonly afterConfiguration: ReadonlyArray<string> }): string =>
   step.afterConfiguration.filter((path) => path !== "").join(", ")
 
+const label = (event: unknown): string =>
+  Work.isWorkOutcome(event) ? `${event.kind} ${event.id}` : String((event as { readonly _tag: PropertyKey })._tag)
+
+const channelKey = (path: string, id: string, outcome: string): string => JSON.stringify([path, id, outcome])
+
+// Limits for work whose results exploration cannot take, and so for states
+// that only those results may lead to.
+const hidingLimits: ReadonlyArray<CheckExplorationLimit> = ["effectsWithoutOutcomes", "streams", "logic", "children"]
+
+interface SuppliedOutcomes {
+  readonly done: ReadonlyArray<unknown>
+  readonly failure: ReadonlyArray<unknown>
+}
+
+/**
+ * Validates the caller's outcomes against the Effect sources the machine
+ * invokes. A name that matches none is a finding: its values would never be
+ * tried. `undefined` means no outcomes were supplied.
+ */
+const suppliedOutcomes = (
+  machine: AnyMachine,
+  outcomes: unknown,
+  findings: Array<CheckFinding>
+): ReadonlyMap<string, SuppliedOutcomes> | undefined => {
+  if (outcomes === undefined) return undefined
+  const supplied = new Map<string, SuppliedOutcomes>()
+  if (typeof outcomes !== "object" || outcomes === null) {
+    findings.push({
+      law: "outcomes.invalid",
+      severity: "error",
+      source: "",
+      message: "Outcomes must be a record keyed by Effect source name."
+    })
+    return supplied
+  }
+  const invoked = Work.effectSources(machine)
+  for (const [source, entry] of Object.entries(outcomes)) {
+    if (entry === undefined) continue
+    if (!invoked.has(source)) {
+      findings.push({
+        law: "outcomes.invalid",
+        severity: "error",
+        source,
+        message: `Outcomes are supplied for "${source}", but no state invokes an Effect source with that name. ` +
+          `Fix the name, or remove the entry.`
+      })
+      continue
+    }
+    const done: unknown = (entry as { readonly done?: unknown }).done ?? []
+    const failure: unknown = (entry as { readonly failure?: unknown }).failure ?? []
+    if (!Array.isArray(done) || !Array.isArray(failure)) {
+      findings.push({
+        law: "outcomes.invalid",
+        severity: "error",
+        source,
+        message: `Outcomes for "${source}" must list values in "done" and "failure" arrays.`
+      })
+      continue
+    }
+    supplied.set(source, { done, failure })
+  }
+  return supplied
+}
+
+/**
+ * Reports each supplied result that failed the machine once, at the first
+ * place breadth-first exploration reached it, so its replay is the shortest.
+ */
+const reportMachineFailures = <M extends AnyMachine>(
+  failures: ReadonlyArray<ExploredMachineFailure<M>>,
+  findings: Array<CheckFinding>,
+  replay: (events: ReadonlyArray<unknown>) => CheckReplay
+): void => {
+  const seen = new Set<string>()
+  for (const failure of failures) {
+    const outcome = failure.event as WorkOutcome
+    const work = Work.find(failure.trace.work, outcome)
+    const key = channelKey(outcome.path, outcome.id, outcome.kind)
+    if (seen.has(key)) continue
+    seen.add(key)
+    const state = outcome.path === "" ? "root" : outcome.path
+    const typed = failure.cause.reasons.find(Cause.isFailReason)
+    findings.push({
+      law: "outcome.failsMachine",
+      severity: "error",
+      source: work?.source,
+      replay: replay([...failure.trace.scenario.events, outcome]),
+      message: outcome.kind === "Failure"
+        ? `A failure of "${outcome.id}" in "${state}" has no onFailure, so the machine fails with ${
+          causeMessage(typed === undefined ? Cause.pretty(failure.cause) : typed.error)
+        }. Handle it with onFailure.`
+        : `A result of "${outcome.id}" in "${state}" has no onDone, so the machine fails: ${
+          causeMessage(Cause.squash(failure.cause))
+        }.`
+    })
+  }
+}
+
 export const check = <M extends AnyMachine>(
   machine: ReadyMachine<M>,
   options: CheckOptions<M> = {}
@@ -243,21 +345,88 @@ export const check = <M extends AnyMachine>(
       events = derived.value.events
     }
     if (options.stateKey !== undefined) limits.add("customStateKey")
-    if (Machine.invocationDefinitions(machine).length > 0) limits.add("invocations")
 
+    const supplied = suppliedOutcomes(machine, (options as { readonly outcomes?: unknown }).outcomes, findings)
+    if (supplied !== undefined) limits.add("customOutcomes")
+
+    // Which results exploration offered, as `path`, `id`, and outcome channel.
+    const offered = new Set<string>()
+    let unofferedResults = false
+    const offers = (running: ReadonlyArray<RunningWork>): ReadonlyArray<WorkOutcome> => {
+      const results: Array<WorkOutcome> = []
+      for (const work of running) {
+        switch (work.kind) {
+          case "Timer":
+            results.push(Work.elapsed(work))
+            offered.add(channelKey(work.path, work.id, "done"))
+            break
+          case "Effect": {
+            const values = work.source === undefined ? undefined : supplied?.get(work.source)
+            if (values === undefined) {
+              limits.add("effectsWithoutOutcomes")
+              break
+            }
+            for (const output of values.done) results.push(Work.done(work, output))
+            for (const error of values.failure) results.push(Work.failure(work, error))
+            if (values.done.length > 0) offered.add(channelKey(work.path, work.id, "done"))
+            if (values.failure.length > 0) offered.add(channelKey(work.path, work.id, "failure"))
+            // A handled channel with no value supplied may hide the states it leads to.
+            const handled = Work.channels(work)
+            if ((handled.done && values.done.length === 0) || (handled.failure && values.failure.length === 0)) {
+              unofferedResults = true
+            }
+            break
+          }
+          case "Stream":
+            limits.add("streams")
+            break
+          case "Logic":
+            limits.add("logic")
+            break
+          case "Child":
+            limits.add("children")
+            break
+        }
+      }
+      return results
+    }
+
+    // A node is its logical state and the work still running in it: a state
+    // whose work has ended no longer offers that work's results.
+    const logicalKey = options.stateKey ?? (({ snapshot }: { readonly snapshot: unknown }) => formatValue(snapshot))
+    const keys = new Map<unknown, Map<string, number>>()
+    let nextKey = 0
+    const stateKey = (context: ExplorationStateContext<M>): number => {
+      const logical = logicalKey(context)
+      const running = formatValue(context.trace.work.map((work) => [work.path, work.id]))
+      let byWork = keys.get(logical)
+      if (byWork === undefined) keys.set(logical, byWork = new Map())
+      let key = byWork.get(running)
+      if (key === undefined) byWork.set(running, key = nextKey++)
+      return key
+    }
+
+    const machineFailures: Array<ExploredMachineFailure<M>> = []
+    // The scenario being planned, which a defect in a callback reproduces.
+    let planning: ReadonlyArray<unknown> = []
     const replay = (replayEvents: ReadonlyArray<unknown>) => replayOf(input, hasInput, replayEvents)
-    const stateKey = options.stateKey ?? (({ snapshot }: { readonly snapshot: unknown }) => formatValue(snapshot))
     const explored = yield* Effect.exit(
-      (explore as any)(machine, {
+      (exploreWith as any)(machine, {
         ...(hasInput ? { input } : {}),
         limits: { ...defaultLimits, ...options.limits },
         invariants: options.invariants,
         stateKey,
-        // A completed machine accepts no further events.
+        // A completed machine accepts no further events and runs no work.
         events: ({ trace }: { readonly trace: Trace<M> }) =>
-          (trace.steps.at(-1)?.plan ?? trace.initial.plan).done ? [] : events
+          (trace.steps.at(-1)?.plan ?? trace.initial.plan).done ? [] : [...events, ...offers(trace.work)]
+      }, {
+        onMachineFailure: (failure: ExploredMachineFailure<M>) => machineFailures.push(failure),
+        onPlan: (scenario: { readonly events: ReadonlyArray<unknown> }) => {
+          planning = scenario.events
+        }
       }) as Effect.Effect<any, RunFailure<unknown, M> | InvariantError<M>, RunServices<M>>
     )
+    reportMachineFailures(machineFailures, findings, replay)
 
     if (Exit.isFailure(explored)) {
       const failure = Cause.findErrorOption(explored.cause)
@@ -284,7 +453,7 @@ export const check = <M extends AnyMachine>(
         findings.push({
           law: "planning.failed",
           severity: "error",
-          replay: replay([]),
+          replay: replay(planning),
           message: `A planning callback threw: ${Cause.pretty(explored.cause)}`
         })
       }
@@ -331,9 +500,7 @@ export const check = <M extends AnyMachine>(
     ) {
       const source = graph.nodes.get(edge.source) as ExplorationNode<M>
       const step: TraceStep<M> = edge.data.step
-      const location = `${statePaths({ afterConfiguration: step.beforeConfiguration })}:${
-        String((step.event as { readonly _tag: PropertyKey })._tag)
-      }`
+      const location = `${statePaths({ afterConfiguration: step.beforeConfiguration })}:${label(step.event)}`
       const events = [...source.trace.scenario.events, step.event]
 
       const verified = yield* Effect.exit(
@@ -360,8 +527,9 @@ export const check = <M extends AnyMachine>(
         }
       }
 
+      const message = Work.isWorkOutcome(step.event) ? Work.message(source.trace.work, step.event) : step.event
       const again = yield* Effect.exit(
-        ((Machine.plan as any)(machine, step.before, step.event)) as Effect.Effect<
+        ((Machine.plan as any)(machine, step.before, message)) as Effect.Effect<
           EventPlan<M>,
           unknown,
           RunServices<M>
@@ -378,36 +546,45 @@ export const check = <M extends AnyMachine>(
           severity: "error",
           source: location,
           replay: replay(events),
-          message: `Planning "${location}" produced a different result from the same snapshot and event. ` +
+          message:
+            `Planning "${location}" produced a different result from the same snapshot and ${
+              Work.isWorkOutcome(step.event) ? "result" : "event"
+            }. ` +
             `Do not read the clock, randomness, or external state in planning callbacks.`
         })
       }
     }
 
-    // Exploration does not run invocations, so it cannot take their outcomes or
-    // enter a state only they lead to. `limits` already reports that gap, and a
-    // warning for each such transition would only tell the reader to remove live code.
+    // Exploration takes a result of work only when it has one: a timer always,
+    // an Effect when its results were supplied. A transition for a result it
+    // never offered is not reported, and neither is one from a state that only
+    // such a result leads to: `limits` already reports that gap, and a warning
+    // for each such transition would only tell the reader to remove live code.
     const visited = new Set<string>()
     for (const node of exploration.nodes as ReadonlyArray<ExplorationNode<M>>) {
       for (const path of node.configuration as ReadonlyArray<string>) visited.add(path)
     }
-    const invocationsHideStates = limits.has("invocations")
+    const workHidesStates = unofferedResults || hidingLimits.some((limit) => limits.has(limit))
     for (const miss of exploration.transitionCoverage.branches.misses) {
-      if (miss.trigger.type === "invoke") continue
-      if (invocationsHideStates && !visited.has(miss.source)) continue
+      const trigger = miss.trigger
+      if (trigger.type === "invoke") {
+        if (!offered.has(channelKey(miss.source, trigger.id, trigger.outcome))) continue
+      } else if (workHidesStates && !visited.has(miss.source)) continue
+      const target = miss.branch.target === undefined ? "" : ` to "${miss.branch.target}"`
       findings.push({
         law: "transition.notCovered",
         severity: "warning",
         source: miss.source,
-        trigger: miss.trigger,
+        trigger,
         target: miss.branch.target,
         ...(miss.branchKey === undefined ? {} : { branchKey: miss.branchKey }),
-        message:
-          `Exploration never took the ${
-            miss.trigger.type === "event" ? `"${String(miss.trigger.event)}"` : miss.trigger.type
-          } ` +
-          `transition from "${miss.source}"${miss.branch.target === undefined ? "" : ` to "${miss.branch.target}"`}. ` +
-          `Cover it with a scenario, or remove it if it cannot happen.`
+        message: trigger.type === "invoke"
+          ? `Exploration never took the ${trigger.outcome === "done" ? "onDone" : "onFailure"} transition of ` +
+            `"${trigger.id}" from "${miss.source}"${target}. ` +
+            `Supply a result that takes it, or remove it if it cannot happen.`
+          : `Exploration never took the ${trigger.type === "event" ? `"${String(trigger.event)}"` : trigger.type} ` +
+            `transition from "${miss.source}"${target}. ` +
+            `Cover it with a scenario, or remove it if it cannot happen.`
       })
     }
 
@@ -447,9 +624,29 @@ const finish = (
   findings
 })
 
+const formatReplayEvent = (event: unknown): string => {
+  if (!Work.isWorkOutcome(event)) return formatValue(event)
+  const work = `${event.path === "" ? "root" : event.path}#${event.id}`
+  switch (event.kind) {
+    case "Done":
+      return `done ${work} ${formatValue(event.output)}`
+    case "Failure":
+      return `failure ${work} ${formatValue(event.error)}`
+    case "Elapsed":
+      return `elapsed ${work}`
+  }
+}
+
+// One step per item, in order, so a result of work reads apart from the events.
+const formatReplay = (replay: CheckReplay): string =>
+  [
+    ...("input" in replay ? [`input ${formatValue(replay.input)}`] : []),
+    ...replay.events.map(formatReplayEvent)
+  ].join(" -> ") || "startup"
+
 const formatFinding = (finding: CheckFinding): string =>
   `  ${finding.severity === "error" ? "error" : "warn "} ${finding.law}: ${finding.message}` +
-  ("replay" in finding ? `\n        replay: ${formatValue(finding.replay)}` : "")
+  ("replay" in finding ? `\n        replay: ${formatReplay(finding.replay)}` : "")
 
 export const formatReport = (report: CheckReport): string =>
   [

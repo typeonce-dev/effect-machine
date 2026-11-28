@@ -4,6 +4,7 @@
  * @since 0.4.0
  */
 
+import type * as Cause from "effect/Cause"
 import * as Data from "effect/Data"
 import * as Effect from "effect/Effect"
 import * as Graph from "effect/Graph"
@@ -25,11 +26,12 @@ import type {
   RunFailure,
   RunServices,
   Scenario,
+  ScenarioEvent,
   Trace
 } from "../../../testing/MachineTest.js"
 import type { EnsureExecutable } from "../../machine/readiness.js"
 import { assertInvariants, type InvariantError } from "./invariant.js"
-import { appendTrace, run } from "./trace.js"
+import { failMachine, isMachineFailure, run, stepTrace } from "./trace.js"
 import { makeTransitionCoverageCollector } from "./transitionCoverage.js"
 
 type AnyMachine = Machine.Machine.Any
@@ -85,7 +87,7 @@ const stateContext = <M extends AnyMachine>(machine: M, trace: Trace<M>): Explor
 
 const scenarioWithEvent = <M extends AnyMachine>(
   trace: Trace<M>,
-  event: Machine.Machine.InputEvent<M>
+  event: ScenarioEvent<M>
 ): Scenario<M> => ({
   ...trace.scenario,
   events: [...trace.scenario.events, event]
@@ -97,9 +99,36 @@ interface ExplorationEdgeDraft<M extends AnyMachine> {
   readonly edge: ExplorationEdge<M>
 }
 
+/**
+ * A result of work that failed the machine during exploration. The public
+ * `explore` fails with it, and `check` reports it instead.
+ */
+export interface ExploredMachineFailure<M extends AnyMachine> {
+  readonly trace: Trace<M>
+  readonly event: ScenarioEvent<M>
+  readonly cause: Cause.Cause<unknown>
+}
+
+/** Hooks that `check` passes to exploration. */
+export interface ExplorationHooks<M extends AnyMachine> {
+  readonly onMachineFailure?: ((failure: ExploredMachineFailure<M>) => void) | undefined
+  /** Called with each scenario before its last entry is planned, so a defect can name it. */
+  readonly onPlan?: ((scenario: Scenario<M>) => void) | undefined
+}
+
 export const explore = <M extends AnyMachine, Key extends ExplorationKey>(
   machine: ReadyMachine<M>,
   options: ExploreOptions<M, Key>
+): Effect.Effect<
+  Exploration<M, Key>,
+  RunFailure<RunError<M>, M> | InvariantError<M>,
+  RunServices<M>
+> => exploreWith(machine, options, {})
+
+export const exploreWith = <M extends AnyMachine, Key extends ExplorationKey>(
+  machine: ReadyMachine<M>,
+  options: ExploreOptions<M, Key>,
+  hooks: ExplorationHooks<M>
 ): Effect.Effect<
   Exploration<M, Key>,
   RunFailure<RunError<M>, M> | InvariantError<M>,
@@ -167,8 +196,18 @@ export const explore = <M extends AnyMachine, Key extends ExplorationKey>(
         }
 
         const scenario = scenarioWithEvent(source.trace, event)
-        const targetTrace = yield* appendTrace(machine, source.trace, event, scenario)
+        hooks.onPlan?.(scenario)
+        const stepped = yield* stepTrace(machine, source.trace, event, scenario)
         plannedTransitions += 1
+        if (isMachineFailure(stepped)) {
+          // The machine ended here, so the branch has no state to explore.
+          if (hooks.onMachineFailure === undefined) {
+            return yield* failMachine(source.trace, event, scenario, stepped)
+          }
+          hooks.onMachineFailure({ trace: source.trace, event, cause: stepped.cause })
+          continue
+        }
+        const targetTrace = stepped
         const step = targetTrace.steps[targetTrace.steps.length - 1]!
         for (const microstep of step.plan.microsteps) transitionCoverage.observeMicrostep(microstep)
         if (invariants.length > 0) {

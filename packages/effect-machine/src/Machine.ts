@@ -60,6 +60,7 @@ export const TypeId: TypeId = "~effect/Machine"
 // interface carries the string key as a brand only.
 declare const MachineOutputStatesTypeId: "~effect/Machine/OutputStates"
 declare const MachineTypeId: "~effect/Machine/TypeCarrier"
+declare const MachineEffectResultsTypeId: "~effect/Machine/EffectResults"
 declare const EventConstructionTypeId: "~effect/Machine/EventConstruction"
 declare const EmittedEventConstructionTypeId: "~effect/Machine/EmittedEventConstruction"
 declare const EventProtocolTypeId: "~effect/Machine/EventProtocol"
@@ -1983,6 +1984,61 @@ export declare namespace Machine {
 
   /** Extracts the public input protocol required from an owning machine. */
   export type ParentEvents<M extends Any> = M[typeof MachineTypeId]["parentEvents"]
+
+  /**
+   * The value an Effect source succeeds with and the typed error it fails with.
+   *
+   * @category utility types
+   * @since 0.48.0
+   */
+  export interface EffectResult<Done, Failure> {
+    readonly done: Done
+    readonly failure: Failure
+  }
+
+  /**
+   * Extracts the result types of every Effect source a machine registers,
+   * keyed by source name.
+   *
+   * **Details**
+   *
+   * The machine returned by `handle` carries these types, and only as types:
+   * nothing is added to the machine value. A source that takes input
+   * contributes the Effect its function returns.
+   *
+   * **Gotchas**
+   *
+   * A machine whose type was widened, for example by annotating it as a
+   * `Machine.Machine<...>` or as `Machine.Machine.Any`, no longer carries them,
+   * and this type is `never`.
+   *
+   * @category utility types
+   * @since 0.48.0
+   */
+  export type EffectResults<M extends Any> = M extends {
+    readonly [MachineEffectResultsTypeId]?: infer Results extends Readonly<Record<string, EffectResult<any, any>>>
+  } ? Results
+    : never
+
+  /**
+   * Type-only evidence of the result types of a machine's Effect sources, read
+   * through {@link EffectResults}.
+   *
+   * @category models
+   * @since 0.48.0
+   */
+  export interface EffectResultsEvidence<Results> {
+    /**
+     * @internal Optional, so a machine type rebuilt from its parameters stays
+     * assignable to and from the type that `handle` returned.
+     */
+    readonly [MachineEffectResultsTypeId]?: Results
+  }
+
+  /** The result types of one registered Effect source. */
+  export type EffectResultOf<Source> = InvokeResolvedSource<Source> extends
+    Effect.Effect<infer Done, infer Failure, infer _R> ? EffectResult<Done, Failure>
+    : never
 
   /** Extracts whether a machine requires or optionally accepts an owner. */
   export type ParentAvailability<M extends Any> = ParentModeOf<M[typeof MachineTypeId]["parentEvents"]>
@@ -6192,20 +6248,26 @@ export declare namespace Machine {
             StateIdentifier<S>
           >
         >
-    ): Machine<
-      S,
-      Ev,
-      I,
-      Exclude<StateIdentifier<S>, HandleEvidence<S, C, R>["stateId"]>,
-      HandleEvidence<S, C, R>["error"],
-      HandleEvidence<S, C, R>["services"],
-      Final,
-      Out,
-      Em,
-      Extract<HandleEvidence<S, C, R>["outputState"], StateIdentifier<S>>,
-      In,
-      Pa
-    >
+    ):
+      & Machine<
+        S,
+        Ev,
+        I,
+        Exclude<StateIdentifier<S>, HandleEvidence<S, C, R>["stateId"]>,
+        HandleEvidence<S, C, R>["error"],
+        HandleEvidence<S, C, R>["services"],
+        Final,
+        Out,
+        Em,
+        Extract<HandleEvidence<S, C, R>["outputState"], StateIdentifier<S>>,
+        In,
+        Pa
+      >
+      // Type-only: what `MachineTest.check` reads to type supplied results.
+      // Mapped in place, so a declaration prints the results and not the sources.
+      & EffectResultsEvidence<
+        { readonly [K in keyof Registered<R, "effects"> & string]: EffectResultOf<Registered<R, "effects">[K]> }
+      >
   }
 
   // An explicit export makes this ambient namespace export only the members marked `export`; the rest stay private.

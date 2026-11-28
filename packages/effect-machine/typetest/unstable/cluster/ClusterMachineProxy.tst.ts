@@ -5,6 +5,7 @@ import type { RpcClient, RpcClientError, RpcGroup, RpcServer } from "effect/rpc"
 import { describe, expect, it } from "tstyche"
 import { Machine } from "../../../src/index.js"
 import { ClusterMachine, ClusterMachineProxy } from "../../../src/unstable/cluster/index.js"
+import type { Rebuilt } from "../../support/rebuilt.js"
 
 const Events = Machine.events({
   Add: { by: Schema.Number },
@@ -63,7 +64,7 @@ describe("ClusterMachineProxy", () => {
     const makeClient = ClusterMachineProxy.client(Counter)
     expect(makeClient).type.toBe<
       Effect.Effect<
-        (entityId: string) => ClusterMachineProxy.Client<typeof counter>,
+        (entityId: string) => ClusterMachineProxy.Client<Rebuilt<typeof counter>>,
         never,
         RpcClient.Protocol | Scope.Scope
       >

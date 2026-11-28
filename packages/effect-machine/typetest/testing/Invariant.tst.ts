@@ -35,11 +35,13 @@ describe("MachineTest invariants", () => {
       expect(context.machine).type.toBe<typeof machine>()
       expect(context.snapshot.state.value).type.toBe<Idle>()
       expect(context.configuration[0]).type.toBe<"" | "idle" | undefined>()
-      expect(context.event).type.toBe<Tick | Internal | Machine.InitialEvent | undefined>()
+      expect(context.event).type.toBe<
+        Tick | Internal | Machine.InitialEvent | Machine.InvocationEvent | MachineTest.WorkOutcome | undefined
+      >()
       return true
     })
     const step = define.step("step", (context) => {
-      expect(context.event).type.toBe<Tick>()
+      expect(context.event).type.toBe<Tick | MachineTest.WorkOutcome>()
       expect(context.before.state.value).type.toBe<Idle>()
       expect(context.after.state.value).type.toBe<Idle>()
       return true
@@ -71,7 +73,10 @@ describe("MachineTest invariants", () => {
     expect<Effect.Error<typeof asserted>>().type.toBe<MachineTest.InvariantError<typeof machine>>()
   })
   it("supports direct constructors with an explicit machine type", () => {
-    const direct = MachineTest.Invariant.step<typeof machine>("direct", ({ event }) => event.amount >= 0)
+    const direct = MachineTest.Invariant.step<typeof machine>(
+      "direct",
+      ({ event }) => MachineTest.isWorkOutcome(event) || event.amount >= 0
+    )
     expect(direct).type.toBe<MachineTest.StepInvariant<typeof machine>>()
   })
 })
